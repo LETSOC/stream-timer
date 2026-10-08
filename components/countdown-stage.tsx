@@ -179,16 +179,21 @@ function UnitRow({
 
 function QrSlot() {
   return (
-    <div
-      className="relative size-[5.6cqi] shrink-0 overflow-hidden rounded-[0.35cqi] bg-white"
-      aria-label="RSVP QR code"
-    >
-      <img
-        src="/brand/rsvp-qr.png"
-        alt=""
-        className="size-full object-cover"
-        draggable={false}
-      />
+    <div className="flex flex-col items-center gap-[0.35cqi]">
+      <div
+        className="relative size-[5.6cqi] shrink-0 overflow-hidden rounded-[0.35cqi] bg-white"
+        aria-label="RSVP QR code"
+      >
+        <img
+          src="/brand/rsvp-qr.png"
+          alt=""
+          className="size-full object-cover"
+          draggable={false}
+        />
+      </div>
+      <span className="font-[Arial,Helvetica,sans-serif] text-[0.72cqi] font-bold tracking-[0.12em] text-white uppercase">
+        Scan to join
+      </span>
     </div>
   )
 }
