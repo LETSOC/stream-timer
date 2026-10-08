@@ -48,18 +48,27 @@ function StreamView() {
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
+  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false })
 
   useEffect(() => {
     let cancelled = false
     const load = () => {
       void fetch("/api/event", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown }) => {
+        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: unknown; showMeta?: unknown; showLink?: unknown; transparent?: unknown } }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (!hasOverrides && next) setServerEvent(next)
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
+          if (body.stage && typeof body.stage === "object") {
+            setStage({
+              checker: Number(body.stage.checker) || 6,
+              showMeta: body.stage.showMeta !== false,
+              showLink: body.stage.showLink !== false,
+              transparent: body.stage.transparent === true,
+            })
+          }
         })
         .catch(() => undefined)
     }
@@ -80,10 +89,10 @@ function StreamView() {
       ? new Date(now.getTime() + targetMs - testUntil)
       : undefined
 
-  const checker = Number(params.get("grid") ?? "6")
-  const showMeta = params.get("meta") !== "0"
-  const showLink = params.get("showlink") !== "0"
-  const transparent = params.get("bg") === "clear"
+  const checker = params.get("grid") ? Number(params.get("grid")) : stage.checker
+  const showMeta = params.get("meta") ? params.get("meta") !== "0" : stage.showMeta
+  const showLink = params.get("showlink") ? params.get("showlink") !== "0" : stage.showLink
+  const transparent = params.get("bg") ? params.get("bg") === "clear" : stage.transparent
 
   useEffect(() => {
     if (!transparent) return

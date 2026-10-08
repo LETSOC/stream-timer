@@ -109,7 +109,12 @@ export function OperatorConsole() {
       void fetch("/api/event", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "x-encoder-token": token },
-        body: JSON.stringify({ event, testUntil, pausedAt: pausedMs || null }),
+        body: JSON.stringify({
+          event,
+          testUntil,
+          pausedAt: pausedMs || null,
+          stage: { checker, showMeta, showLink, transparent },
+        }),
       })
         .then(async (response) => {
           if (response.ok) {
@@ -123,7 +128,7 @@ export function OperatorConsole() {
         .catch(() => setSyncState("local"))
     }, 400)
     return () => window.clearTimeout(id)
-  }, [event, token, testUntil, pausedMs])
+  }, [event, token, testUntil, pausedMs, checker, showMeta, showLink, transparent])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
