@@ -64,7 +64,7 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
 
           <div className="mt-[1.9cqi] flex items-center gap-[1.4cqi]">
             <a
-              className="stage-rsvp inline-flex items-center justify-center bg-[#7a3e38]/90 text-white no-underline"
+              className="stage-rsvp inline-flex items-center justify-center bg-[#ff3c00] text-white no-underline"
               href={rsvpUrl}
               target="_blank"
               rel="noreferrer"
@@ -229,10 +229,10 @@ function RollingQr() {
 
 function SocialRow() {
   const links = [
-    { label: "X", href: "https://x.com/hyphenonline", icon: <XIcon /> },
-    { label: "Facebook", href: "https://www.facebook.com/hyphenonline", icon: <FacebookIcon /> },
-    { label: "LinkedIn", href: "https://www.linkedin.com/company/hyphen", icon: <LinkedInIcon /> },
-    { label: "Instagram", href: "https://www.instagram.com/hyphenonline", icon: <InstagramIcon /> },
+    { label: "X", href: "https://x.com/onlinehyphen", icon: <XIcon /> },
+    { label: "Facebook", href: "https://facebook.com/onlinehyphen", icon: <FacebookIcon /> },
+    { label: "LinkedIn", href: "https://linkedin.com/company/hyphenonline", icon: <LinkedInIcon /> },
+    { label: "Instagram", href: "https://instagram.com/onlinehyphen?hl=en", icon: <InstagramIcon /> },
     { label: "YouTube", href: "https://www.youtube.com/@hyphenonline", icon: <YouTubeIcon /> },
   ]
   return (
