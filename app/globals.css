@@ -145,6 +145,8 @@
   0%, 100% { background-color: #ff3c00; }
   50% { background-color: #8f2200; }
 }
+
+.countdown-stage .stage-h1 {
   font-family: var(--bold-font), Arial, Helvetica, sans-serif;
   font-size: 56px;
   font-size: var(--font-size-h1);
