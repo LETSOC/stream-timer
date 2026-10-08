@@ -22,7 +22,7 @@ import {
   wallTimeInZone,
 } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
-import { TIME_ZONES } from "@/lib/event"
+import { TIME_ZONES, DEFAULT_EVENT } from "@/lib/event"
 import { useStoredEvent } from "@/lib/event-storage"
 import { useEncoderToken } from "@/lib/use-encoder-token"
 import {
@@ -41,7 +41,8 @@ export function OperatorConsole() {
   const [transparent, setTransparent] = useState(false)
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
-  const [previewFlash, setPreviewFlash] = useState(false)
+  const [pausedAt, setPausedAt] = useState<Date | null>(null)
+  const [skewMs, setSkewMs] = useState(0)
   const previewReady = useRef(false)
   const now = useNow()
 
@@ -132,6 +133,35 @@ export function OperatorConsole() {
     return () => window.clearTimeout(id)
   }, [streamHref])
 
+  const previewNow = pausedAt ?? (now ? new Date(now.getTime() + skewMs) : null)
+  const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
+
+  function jumpPreview(seconds: number) {
+    if (!valid) return
+    setPausedAt(null)
+    setSkewMs(target.getTime() - Date.now() - seconds * 1000)
+  }
+
+  function goLiveNow() {
+    const past = new Date(Date.now() - 60_000)
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(past)
+    const read = (type: string) => parts.find((part) => part.type === type)?.value ?? ""
+    setPausedAt(null)
+    setSkewMs(0)
+    updateEvent({
+      date: `${read("year")}-${read("month")}-${read("day")}`,
+      time: `${read("hour")}:${read("minute")}`,
+    })
+  }
+
   async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
     await navigator.clipboard.writeText(value)
     setCopied(kind)
@@ -152,8 +182,8 @@ export function OperatorConsole() {
             <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[11px] md:inline-flex">
               <span className="text-black/50">Target</span>
               <span>{valid ? formatClock(target, timeZone) : "—"}</span>
-              <span className={`rounded px-1.5 py-0.5 text-[10px] ${remaining?.done ? "bg-[#ff3c00] text-white" : "bg-[#D9FF43]"}`}>
-                {remaining?.done ? "LIVE" : "Armed"}
+              <span className={`rounded px-1.5 py-0.5 text-[10px] ${previewRemaining?.done ? "bg-[#ff3c00] text-white" : "bg-[#D9FF43]"}`}>
+                {previewRemaining?.done ? "LIVE" : "Armed"}
               </span>
             </span>
             <span className="font-mono text-[10px] text-black/50 uppercase">
@@ -172,7 +202,7 @@ export function OperatorConsole() {
       <main className="mx-auto grid max-w-[1600px] items-start gap-6 px-4 py-6 lg:grid-cols-[380px_1fr] sm:px-6">
         <section className="space-y-4 lg:sticky lg:top-24">
           <div className="rounded-[20px] bg-black p-5 text-white">
-            {remaining?.done ? (
+            {previewRemaining?.done ? (
               <div>
                 <p className="font-mono text-[11px] tracking-[0.14em] text-[#ff3c00] uppercase">Live</p>
                 <p className="mt-2 text-2xl font-black">Doors are open</p>
@@ -190,10 +220,10 @@ export function OperatorConsole() {
             </div>
             <div className="grid grid-cols-4 gap-2">
               {[
-                { value: remaining ? String(remaining.days) : "--", label: "Days" },
-                { value: remaining ? pad2(remaining.hours) : "--", label: "Hours" },
-                { value: remaining ? pad2(remaining.minutes) : "--", label: "Mins" },
-                { value: remaining ? pad2(remaining.seconds) : "--", label: "Secs" },
+                { value: previewRemaining ? String(previewRemaining.days) : "--", label: "Days" },
+                { value: previewRemaining ? pad2(previewRemaining.hours) : "--", label: "Hours" },
+                { value: previewRemaining ? pad2(previewRemaining.minutes) : "--", label: "Mins" },
+                { value: previewRemaining ? pad2(previewRemaining.seconds) : "--", label: "Secs" },
               ].map((unit) => (
                 <div key={unit.label} className="rounded-[14px] border border-white/10 bg-white/10 px-2 py-3 text-center">
                   <div className="font-mono text-[28px] leading-none font-black tabular-nums">{unit.value}</div>
@@ -204,6 +234,38 @@ export function OperatorConsole() {
               </>
             )}
           </div>
+
+          <Panel title="Transport" pill="Preview test">
+            <div className="flex flex-wrap gap-2">
+              {[
+                [15, "15s"],
+                [600, "10min"],
+                [1800, "30min"],
+                [3600, "1 hour"],
+              ].map(([seconds, label]) => (
+                <button key={label} type="button" className="rounded-full border border-black/15 bg-[#F6F6F3] px-3 py-1.5 font-mono text-[11px]" onClick={() => jumpPreview(Number(seconds))}>
+                  {label} left
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button type="button" className="rounded-full bg-black text-white" onClick={() => setPausedAt(pausedAt ? null : previewNow)}>
+                {pausedAt ? "Play" : "Pause"}
+              </Button>
+              <Button type="button" variant="outline" className="rounded-full" onClick={() => { setPausedAt(null); setSkewMs(0) }}>
+                Reset clock
+              </Button>
+              <Button type="button" className="rounded-full bg-[#ff3c00] text-white" onClick={goLiveNow}>
+                Go live now
+              </Button>
+              <Button type="button" variant="outline" className="rounded-full" onClick={() => updateEvent({ date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone })}>
+                Restore 4 Nov
+              </Button>
+            </div>
+            <p className="font-mono text-[10px] leading-5 text-black/55">
+              15s, 10min, 30min, and 1 hour only move this preview. Go live now writes a start in the past so /stream flips too. Restore 4 Nov puts the official gate back.
+            </p>
+          </Panel>
 
           <Panel title="Event core" pill="Editable">
             <Field label="Session title" htmlFor="name">
@@ -329,7 +391,7 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} />
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} clock={previewNow} />
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">

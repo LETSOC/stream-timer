@@ -21,13 +21,15 @@ type CountdownStageProps = {
   showMeta?: boolean
   showLink?: boolean
   transparent?: boolean
+  clock?: Date | null
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, clock }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
-  const now = useNow()
+  const wall = useNow()
+  const now = clock === undefined ? wall : clock
   const remaining = now && valid ? remainingUntil(target, now) : null
   const { lead, year } = splitEventTitle(name)
   const dateLabel = valid ? formatBannerDate(target, timeZone) : date
