@@ -1,6 +1,6 @@
 "use client"
 
-import type { ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import {
   formatBannerDate,
   formatTimeRange,
@@ -38,6 +38,7 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
         className="pointer-events-none absolute inset-0 bg-[#070a16] bg-cover bg-center"
         style={{ backgroundImage: "url('/brand/hero-bg.png')" }}
       />
+      <RollingQr />
 
       <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
         <div className="flex min-w-0 flex-col justify-center pr-[3%]">
@@ -185,6 +186,38 @@ function QrSlot() {
         className="size-full object-cover"
         draggable={false}
       />
+    </div>
+  )
+}
+
+function RollingQr() {
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 320)
+    return () => window.clearInterval(id)
+  }, [])
+
+  return (
+    <div
+      className="pointer-events-none absolute top-[4.6%] right-[4.4%] z-20"
+      aria-hidden
+    >
+      <div className="size-[8.4cqi] rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]">
+        <div className="grid h-full w-full grid-cols-6 gap-[0.16cqi] rounded-[0.62cqi] bg-black p-[0.62cqi]">
+          {Array.from({ length: 36 }, (_, index) => {
+            const finder = index * 7 % 3 === 0
+            const lit = ((index * 17 + tick * 5) % 11) > 3
+            return (
+              <span
+                key={index}
+                className="rounded-[0.08cqi] bg-white transition-opacity duration-300"
+                style={{ opacity: finder ? 1 : lit ? 0.92 : 0.22 }}
+              />
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
