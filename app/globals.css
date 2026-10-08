@@ -138,12 +138,13 @@
 }
 
 .countdown-stage .live-wash {
+  background: linear-gradient(115deg, rgba(143, 34, 0, 0.55), rgba(42, 9, 2, 0.42));
   animation: live-wash 4.5s ease-in-out infinite;
 }
 
 @keyframes live-wash {
-  0%, 100% { background-color: #ff3c00; }
-  50% { background-color: #8f2200; }
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 0.38; }
 }
 
 .countdown-stage .stage-h1 {
