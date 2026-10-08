@@ -283,15 +283,15 @@ export function OperatorConsole() {
               }}>
                 {pausedAt ? "Play" : "Pause"}
               </Button>
-              <Button type="button" variant="outline" className="rounded-full" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>
+              <button type="button" className="h-9 rounded-full border border-black bg-white font-medium text-black" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>
                 Reset clock
-              </Button>
+              </button>
               <Button type="button" className="rounded-full bg-[#ff3c00] text-white" onClick={goLiveNow}>
                 Go live now
               </Button>
-              <Button type="button" variant="outline" className="rounded-full" onClick={restoreFestival}>
+              <button type="button" className="h-9 rounded-full border border-black bg-white font-medium text-black" onClick={restoreFestival}>
                 Restore 4 Nov
-              </Button>
+              </button>
             </div>
             <p className="font-mono text-[10px] leading-5 text-black/55">
               Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
