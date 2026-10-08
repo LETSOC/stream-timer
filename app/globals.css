@@ -138,13 +138,12 @@
 }
 
 .countdown-stage .live-wash {
-  background: linear-gradient(115deg, rgba(255, 60, 0, 0.78), rgba(72, 16, 6, 0.62));
-  animation: live-wash 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: live-wash 4.5s ease-in-out infinite;
 }
 
 @keyframes live-wash {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  0%, 100% { background-color: #ff3c00; }
+  50% { background-color: #8f2200; }
 }
   font-family: var(--bold-font), Arial, Helvetica, sans-serif;
   font-size: 56px;

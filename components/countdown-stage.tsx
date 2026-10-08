@@ -49,7 +49,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       style={{ aspectRatio: "16 / 9" }}
     >
       <div
-        className="pointer-events-none absolute inset-0 bg-cover bg-center"
+        className={cn("pointer-events-none absolute inset-0 bg-cover bg-center", live && !transparent && "live-wash")}
         style={
           transparent
             ? { background: "transparent" }
@@ -58,12 +58,9 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
               : { backgroundColor: "#070a16", backgroundImage: "url('/brand/hero-bg.png')" }
         }
       />
-      {live && !transparent ? (
-        <div className="pointer-events-none absolute inset-0 z-[1] animate-pulse bg-[#2a0902]" />
-      ) : null}
       <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
 
-      <div className="relative h-full px-[5.4%] pt-[4.6%] pb-[3.2%]">
+      <div className="relative z-10 h-full px-[5.4%] pt-[4.6%] pb-[3.2%]">
         <div className="flex min-w-0 max-w-[58%] flex-col justify-start">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
             <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
@@ -113,7 +110,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           />
         </div>
       </div>
-      <div className="pointer-events-none absolute top-1/2 right-[6%] flex w-[34%] -translate-y-1/2 flex-col items-center">
+      <div className="pointer-events-none absolute top-1/2 right-[6%] z-10 flex w-[34%] -translate-y-1/2 flex-col items-center">
         <img
           src={logoUrl.trim() || "/brand/hyphen-emerald.png"}
           alt="hyphen. Cultures, communities, connections. Presented with Emerald."
