@@ -14,6 +14,8 @@ export type StageOptions = {
   showMeta: boolean
   showLink: boolean
   transparent: boolean
+  lineSpacing: number
+  logoUrl: string
 }
 
 const DEFAULT_STAGE: StageOptions = {
@@ -21,6 +23,8 @@ const DEFAULT_STAGE: StageOptions = {
   showMeta: true,
   showLink: true,
   transparent: false,
+  lineSpacing: 1.14,
+  logoUrl: "",
 }
 
 function readStage(value: unknown): StageOptions {
@@ -32,6 +36,8 @@ function readStage(value: unknown): StageOptions {
     showMeta: record.showMeta !== false,
     showLink: record.showLink !== false,
     transparent: record.transparent === true,
+    lineSpacing: Number.isFinite(Number(record.lineSpacing)) ? Math.min(2.4, Math.max(0.8, Number(record.lineSpacing))) : 1.14,
+    logoUrl: typeof record.logoUrl === "string" ? record.logoUrl : "",
   }
 }
 

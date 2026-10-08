@@ -21,10 +21,12 @@ type CountdownStageProps = {
   showMeta?: boolean
   showLink?: boolean
   transparent?: boolean
+  lineSpacing?: number
+  logoUrl?: string
   clock?: Date | null
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, clock }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, logoUrl = "", clock }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -65,7 +67,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
               </div>
             ) : null}
           </div>
-          <h1 className="stage-h1 m-0 max-w-full text-white">
+          <h1 className="stage-h1 m-0 max-w-full text-white" style={{ lineHeight: lineSpacing }}>
             {name.trim() || "Untitled event"}
           </h1>
 
@@ -104,7 +106,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       </div>
       <div className="pointer-events-none absolute top-1/2 right-[6%] flex w-[34%] -translate-y-1/2 flex-col items-center">
         <img
-          src="/brand/hyphen-emerald.png"
+          src={logoUrl.trim() || "/brand/hyphen-emerald.png"}
           alt="hyphen. Cultures, communities, connections. Presented with Emerald."
           className="h-auto w-full select-none"
           draggable={false}
