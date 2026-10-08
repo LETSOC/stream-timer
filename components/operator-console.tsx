@@ -120,11 +120,25 @@ export function OperatorConsole() {
     }
     const savedRtmp = window.localStorage.getItem("hyphen-countdown-rtmp")
     if (savedRtmp) setRtmpUrl(savedRtmp)
+    const clockRaw = window.localStorage.getItem("hyphen-countdown-clock")
+    if (clockRaw) {
+      try {
+        const clock = JSON.parse(clockRaw) as { testUntil?: number | null; pausedAt?: number | null }
+        if (typeof clock.testUntil === "number") setTestUntil(clock.testUntil)
+        if (typeof clock.pausedAt === "number") setPausedAt(new Date(clock.pausedAt))
+      } catch {
+        /* ignore a bad clock draft */
+      }
+    }
     void fetch("/api/event", { cache: "no-store" })
       .then((response) => response.json())
-      .then((body: { event?: unknown; stage?: { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean } }) => {
+      .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean } }) => {
         const saved = asEventConfig(body.event)
         if (saved && !window.localStorage.getItem("hyphen-countdown-event")) updateEvent(saved)
+        if (!clockRaw) {
+          if (typeof body.testUntil === "number") setTestUntil(body.testUntil)
+          if (typeof body.pausedAt === "number") setPausedAt(new Date(body.pausedAt))
+        }
         if (!stageRaw && body.stage) {
           if (body.stage.checker) setChecker(body.stage.checker)
           if (typeof body.stage.showMeta === "boolean") setShowMeta(body.stage.showMeta)
@@ -139,6 +153,12 @@ export function OperatorConsole() {
     if (!hydrated) return
     window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent }))
   }, [hydrated, checker, showMeta, showLink, transparent])
+
+  useEffect(() => {
+    if (!hydrated || !valid) return
+    if (testUntil) setSkewMs(target.getTime() - testUntil)
+    window.localStorage.setItem("hyphen-countdown-clock", JSON.stringify({ testUntil, pausedAt: pausedMs || null }))
+  }, [hydrated, valid, target, testUntil, pausedMs])
 
   useEffect(() => {
     if (!hydrated) return
