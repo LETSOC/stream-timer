@@ -244,12 +244,12 @@ function RollingQr({ divisions, second, label }: { divisions: number; second: nu
           style={{ gridTemplateColumns: `repeat(${divisions}, minmax(0, 1fr))` }}
         >
           {Array.from({ length: cells }, (_, index) => {
-            const lit = ((index * 17 + second * 13) % 11) > 4
+            const lit = seeded(second, index) > 0.42
             return (
               <span
                 key={index}
                 className="rounded-[0.06cqi] bg-white transition-opacity duration-500"
-                style={{ opacity: lit ? 0.95 : 0.18 }}
+                style={{ opacity: lit ? 0.96 : 0.16 }}
               />
             )
           })}
@@ -260,6 +260,12 @@ function RollingQr({ divisions, second, label }: { divisions: number; second: nu
       </span>
     </div>
   )
+}
+
+function seeded(second: number, index: number) {
+  let n = Math.imul(second + 1, 374761393) ^ Math.imul(index + 1, 668265263)
+  n = Math.imul(n ^ (n >>> 13), 1274126177)
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296
 }
 
 function SocialRow({
