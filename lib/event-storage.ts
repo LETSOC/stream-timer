@@ -31,6 +31,16 @@ function asConfig(value: unknown): EventConfig | null {
     endTime: readString(record, "endTime") || DEFAULT_EVENT.endTime,
     venue: readString(record, "venue") || DEFAULT_EVENT.venue,
     rsvpUrl: readString(record, "rsvpUrl") || DEFAULT_EVENT.rsvpUrl,
+    badge: readString(record, "badge") || DEFAULT_EVENT.badge,
+    rsvpLabel: readString(record, "rsvpLabel") || DEFAULT_EVENT.rsvpLabel,
+    scanLabel: readString(record, "scanLabel") || DEFAULT_EVENT.scanLabel,
+    joinLabel: readString(record, "joinLabel") || DEFAULT_EVENT.joinLabel,
+    eventLink: readString(record, "eventLink") || DEFAULT_EVENT.eventLink,
+    xUrl: readString(record, "xUrl") || DEFAULT_EVENT.xUrl,
+    facebookUrl: readString(record, "facebookUrl") || DEFAULT_EVENT.facebookUrl,
+    linkedinUrl: readString(record, "linkedinUrl") || DEFAULT_EVENT.linkedinUrl,
+    instagramUrl: readString(record, "instagramUrl") || DEFAULT_EVENT.instagramUrl,
+    youtubeUrl: readString(record, "youtubeUrl") || DEFAULT_EVENT.youtubeUrl,
   }
 }
 
@@ -104,5 +114,15 @@ export function resolveEvent(
     endTime: overrides.endTime || stored?.endTime || DEFAULT_EVENT.endTime,
     venue: overrides.venue?.trim() || stored?.venue || DEFAULT_EVENT.venue,
     rsvpUrl: overrides.rsvpUrl?.trim() || stored?.rsvpUrl || DEFAULT_EVENT.rsvpUrl,
+    badge: overrides.badge?.trim() || stored?.badge || DEFAULT_EVENT.badge,
+    rsvpLabel: overrides.rsvpLabel?.trim() || stored?.rsvpLabel || DEFAULT_EVENT.rsvpLabel,
+    scanLabel: overrides.scanLabel?.trim() || stored?.scanLabel || DEFAULT_EVENT.scanLabel,
+    joinLabel: overrides.joinLabel?.trim() || stored?.joinLabel || DEFAULT_EVENT.joinLabel,
+    eventLink: overrides.eventLink?.trim() || stored?.eventLink || DEFAULT_EVENT.eventLink,
+    xUrl: overrides.xUrl?.trim() || stored?.xUrl || DEFAULT_EVENT.xUrl,
+    facebookUrl: overrides.facebookUrl?.trim() || stored?.facebookUrl || DEFAULT_EVENT.facebookUrl,
+    linkedinUrl: overrides.linkedinUrl?.trim() || stored?.linkedinUrl || DEFAULT_EVENT.linkedinUrl,
+    instagramUrl: overrides.instagramUrl?.trim() || stored?.instagramUrl || DEFAULT_EVENT.instagramUrl,
+    youtubeUrl: overrides.youtubeUrl?.trim() || stored?.youtubeUrl || DEFAULT_EVENT.youtubeUrl,
   }
 }

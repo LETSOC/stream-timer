@@ -30,7 +30,7 @@ import {
 
 export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
-  const { name, date, time, endTime, timeZone, venue, rsvpUrl } = event
+  const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | null>(null)
   const [checker, setChecker] = useState(6)
@@ -58,10 +58,20 @@ export function OperatorConsole() {
       tz: timeZone,
       venue,
       rsvp: rsvpUrl,
+      badge,
+      rsvpLabel,
+      scan: scanLabel,
+      join: joinLabel,
+      link: eventLink,
+      x: xUrl,
+      fb: facebookUrl,
+      li: linkedinUrl,
+      ig: instagramUrl,
+      yt: youtubeUrl,
       grid: String(checker),
     })
     return `/stream?${params.toString()}`
-  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, checker])
+  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl, checker])
 
   const streamCommand = buildStreamShellCommand({
     eventName: name,
@@ -203,6 +213,57 @@ export function OperatorConsole() {
                   value={rsvpUrl}
                   onChange={(event) => updateEvent({ rsvpUrl: event.target.value })}
                 />
+              </Field>
+              <Field label="RSVP button text" htmlFor="rsvpLabel">
+                <Input
+                  id="rsvpLabel"
+                  value={rsvpLabel}
+                  onChange={(event) => updateEvent({ rsvpLabel: event.target.value })}
+                />
+              </Field>
+              <Field label="Badge" htmlFor="badge">
+                <Input
+                  id="badge"
+                  value={badge}
+                  onChange={(event) => updateEvent({ badge: event.target.value })}
+                />
+              </Field>
+              <Field label="Scan label" htmlFor="scan">
+                <Input
+                  id="scan"
+                  value={scanLabel}
+                  onChange={(event) => updateEvent({ scanLabel: event.target.value })}
+                />
+              </Field>
+              <Field label="Join Live label" htmlFor="join">
+                <Input
+                  id="join"
+                  value={joinLabel}
+                  onChange={(event) => updateEvent({ joinLabel: event.target.value })}
+                />
+              </Field>
+              <Field label="Event link" htmlFor="link">
+                <Input
+                  id="link"
+                  type="url"
+                  value={eventLink}
+                  onChange={(event) => updateEvent({ eventLink: event.target.value })}
+                />
+              </Field>
+              <Field label="X URL" htmlFor="x">
+                <Input id="x" type="url" value={xUrl} onChange={(event) => updateEvent({ xUrl: event.target.value })} />
+              </Field>
+              <Field label="Facebook URL" htmlFor="fb">
+                <Input id="fb" type="url" value={facebookUrl} onChange={(event) => updateEvent({ facebookUrl: event.target.value })} />
+              </Field>
+              <Field label="LinkedIn URL" htmlFor="li">
+                <Input id="li" type="url" value={linkedinUrl} onChange={(event) => updateEvent({ linkedinUrl: event.target.value })} />
+              </Field>
+              <Field label="Instagram URL" htmlFor="ig">
+                <Input id="ig" type="url" value={instagramUrl} onChange={(event) => updateEvent({ instagramUrl: event.target.value })} />
+              </Field>
+              <Field label="YouTube URL" htmlFor="yt">
+                <Input id="yt" type="url" value={youtubeUrl} onChange={(event) => updateEvent({ youtubeUrl: event.target.value })} />
               </Field>
               <Field label="Checker division" htmlFor="checker">
                 <div className="flex items-center gap-2">

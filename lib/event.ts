@@ -6,6 +6,16 @@ export const DEFAULT_EVENT = {
   timeZone: "Europe/London",
   venue: "One Great George Street, London, United Kingdom",
   rsvpUrl: "https://events.hyphenonline.com/HyphenFestival2026#/buyTickets",
+  badge: "Live Countdown",
+  rsvpLabel: "RSVP - Open",
+  scanLabel: "Scan to join",
+  joinLabel: "Join Live",
+  eventLink: "https://events.hyphenonline.com/HyphenFestival2026",
+  xUrl: "https://x.com/onlinehyphen",
+  facebookUrl: "https://facebook.com/onlinehyphen",
+  linkedinUrl: "https://linkedin.com/company/hyphenonline",
+  instagramUrl: "https://instagram.com/onlinehyphen?hl=en",
+  youtubeUrl: "https://www.youtube.com/@hyphenonline",
 } as const
 
 export const TIME_ZONES = [
@@ -25,4 +35,14 @@ export type EventConfig = {
   timeZone: string
   venue: string
   rsvpUrl: string
+  badge: string
+  rsvpLabel: string
+  scanLabel: string
+  joinLabel: string
+  eventLink: string
+  xUrl: string
+  facebookUrl: string
+  linkedinUrl: string
+  instagramUrl: string
+  youtubeUrl: string
 }

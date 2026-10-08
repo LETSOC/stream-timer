@@ -20,10 +20,8 @@ type CountdownStageProps = {
   checker?: number
 }
 
-const EVENT_LINK = "https://events.hyphenonline.com/HyphenFestival2026"
-
 export function CountdownStage({ event, className, checker = 6 }: CountdownStageProps) {
-  const { name, date, time, endTime, timeZone, venue, rsvpUrl } = event
+  const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
   const now = useNow()
@@ -43,13 +41,13 @@ export function CountdownStage({ event, className, checker = 6 }: CountdownStage
         className="pointer-events-none absolute inset-0 bg-[#070a16] bg-cover bg-center"
         style={{ backgroundImage: "url('/brand/hero-bg.png')" }}
       />
-      <RollingQr divisions={divisions} second={second} />
+      <RollingQr divisions={divisions} second={second} label={joinLabel} />
 
       <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
         <div className="flex min-w-0 flex-col justify-center pr-[3%]">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
             <span className="rounded-full bg-white px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase">
-              Live Countdown
+              {badge}
             </span>
             <div className="flex gap-[1.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.12em] text-white/40 uppercase">
               <span>{date}</span>
@@ -75,22 +73,30 @@ export function CountdownStage({ event, className, checker = 6 }: CountdownStage
               target="_blank"
               rel="noreferrer"
             >
-              RSVP - Open
+              {rsvpLabel}
             </a>
-            <QrSlot />
+            <QrSlot label={scanLabel} />
           </div>
 
           <div className="mt-[2.1cqi]">
             <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} />
           </div>
-          <SocialRow />
+          <SocialRow
+            links={[
+              { label: "X", href: xUrl, icon: <XIcon /> },
+              { label: "Facebook", href: facebookUrl, icon: <FacebookIcon /> },
+              { label: "LinkedIn", href: linkedinUrl, icon: <LinkedInIcon /> },
+              { label: "Instagram", href: instagramUrl, icon: <InstagramIcon /> },
+              { label: "YouTube", href: youtubeUrl, icon: <YouTubeIcon /> },
+            ]}
+          />
           <a
-            href={EVENT_LINK}
+            href={eventLink}
             target="_blank"
             rel="noreferrer"
             className="mt-[0.7cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] tracking-[0.04em] text-white/80 no-underline"
           >
-            events.hyphenonline.com/HyphenFestival2026
+            {eventLink.replace(/^https?:\/\//, "")}
           </a>
         </div>
 
@@ -190,7 +196,7 @@ function UnitRow({
   )
 }
 
-function QrSlot() {
+function QrSlot({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center gap-[0.35cqi]">
       <div
@@ -205,7 +211,7 @@ function QrSlot() {
         />
       </div>
       <span className="font-[Arial,Helvetica,sans-serif] text-[0.72cqi] font-bold tracking-[0.12em] text-white uppercase">
-        Scan to join
+        {label}
       </span>
     </div>
   )
@@ -216,7 +222,7 @@ function clampChecker(value: number) {
   return Math.min(12, Math.max(4, Math.round(value)))
 }
 
-function RollingQr({ divisions, second }: { divisions: number; second: number }) {
+function RollingQr({ divisions, second, label }: { divisions: number; second: number; label: string }) {
   const cells = divisions * divisions
 
   return (
@@ -242,20 +248,17 @@ function RollingQr({ divisions, second }: { divisions: number; second: number })
         </div>
       </div>
       <span className="mt-[0.55cqi] font-[Arial,Helvetica,sans-serif] text-[0.85cqi] font-bold tracking-[0.14em] text-white uppercase">
-        Join Live
+        {label}
       </span>
     </div>
   )
 }
 
-function SocialRow() {
-  const links = [
-    { label: "X", href: "https://x.com/onlinehyphen", icon: <XIcon /> },
-    { label: "Facebook", href: "https://facebook.com/onlinehyphen", icon: <FacebookIcon /> },
-    { label: "LinkedIn", href: "https://linkedin.com/company/hyphenonline", icon: <LinkedInIcon /> },
-    { label: "Instagram", href: "https://instagram.com/onlinehyphen?hl=en", icon: <InstagramIcon /> },
-    { label: "YouTube", href: "https://www.youtube.com/@hyphenonline", icon: <YouTubeIcon /> },
-  ]
+function SocialRow({
+  links,
+}: {
+  links: { label: string; href: string; icon: ReactNode }[]
+}) {
   return (
     <div className="mt-[1.5cqi] flex items-center gap-[0.7cqi]">
       {links.map((link) => (
