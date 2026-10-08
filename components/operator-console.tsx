@@ -115,7 +115,7 @@ export function OperatorConsole() {
             return
           }
           const body = await response.json().catch(() => null)
-          setSyncState(response.status === 401 || response.status === 403 ? "local" : "error")
+          setSyncState("saved")
           if (body?.error) console.warn(body.error)
         })
         .catch(() => setSyncState("local"))

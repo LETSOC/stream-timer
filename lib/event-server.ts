@@ -1,8 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { DATA_DIR } from "@/lib/encoder"
-import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
-import { asEventConfig } from "@/lib/event-storage"
+import { asEventConfig, DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 
 const EVENT_FILE = path.join(DATA_DIR, "event.json")
 

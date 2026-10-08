@@ -1,49 +1,14 @@
 "use client"
 
 import { useCallback, useSyncExternalStore } from "react"
-import { DEFAULT_EVENT, TIME_ZONES, type EventConfig } from "@/lib/event"
+import { asEventConfig, DEFAULT_EVENT, TIME_ZONES, type EventConfig } from "@/lib/event"
 
 const STORAGE_KEY = "hyphen-countdown-event"
 
-const ZONE_IDS = new Set<string>(TIME_ZONES.map((zone) => zone.id))
 const listeners = new Set<() => void>()
 let memory: EventConfig | null = null
 
-function readString(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key]
-  return typeof value === "string" ? value : undefined
-}
-
-export function asEventConfig(value: unknown): EventConfig | null {
-  if (!value || typeof value !== "object") return null
-  const record = value as Record<string, unknown>
-  const name = readString(record, "name")
-  const date = readString(record, "date")
-  const time = readString(record, "time")
-  const timeZone = readString(record, "timeZone")
-  if (!name || !date || !time || !timeZone || !ZONE_IDS.has(timeZone)) return null
-
-  return {
-    name,
-    date,
-    time,
-    timeZone,
-    endTime: readString(record, "endTime") || DEFAULT_EVENT.endTime,
-    venue: readString(record, "venue") || DEFAULT_EVENT.venue,
-    rsvpUrl: readString(record, "rsvpUrl") || DEFAULT_EVENT.rsvpUrl,
-    badge: readString(record, "badge") || DEFAULT_EVENT.badge,
-    rsvpLabel: readString(record, "rsvpLabel") || DEFAULT_EVENT.rsvpLabel,
-    scanLabel: readString(record, "scanLabel") || DEFAULT_EVENT.scanLabel,
-    joinLabel: readString(record, "joinLabel") || DEFAULT_EVENT.joinLabel,
-    eventLink: readString(record, "eventLink") || DEFAULT_EVENT.eventLink,
-    eventLinkLabel: readString(record, "eventLinkLabel") || DEFAULT_EVENT.eventLinkLabel,
-    xUrl: readString(record, "xUrl") || DEFAULT_EVENT.xUrl,
-    facebookUrl: readString(record, "facebookUrl") || DEFAULT_EVENT.facebookUrl,
-    linkedinUrl: readString(record, "linkedinUrl") || DEFAULT_EVENT.linkedinUrl,
-    instagramUrl: readString(record, "instagramUrl") || DEFAULT_EVENT.instagramUrl,
-    youtubeUrl: readString(record, "youtubeUrl") || DEFAULT_EVENT.youtubeUrl,
-  }
-}
+export { asEventConfig }
 
 function migrateEvent(event: EventConfig): EventConfig {
   const stillStockBerlinDefault =
