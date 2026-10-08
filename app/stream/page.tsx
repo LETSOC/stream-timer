@@ -48,14 +48,14 @@ function StreamView() {
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
-  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, logoUrl: "" })
+  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, clockText: 1, logoUrl: "" })
 
   useEffect(() => {
     let cancelled = false
     const load = () => {
       void fetch("/api/event", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: unknown; showMeta?: unknown; showLink?: unknown; transparent?: unknown; lineSpacing?: unknown; blockGap?: unknown; clockScale?: unknown; logoUrl?: unknown } }) => {
+        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: unknown; showMeta?: unknown; showLink?: unknown; transparent?: unknown; lineSpacing?: unknown; blockGap?: unknown; clockScale?: unknown; clockText?: unknown; logoUrl?: unknown } }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (!hasOverrides && next) setServerEvent(next)
@@ -70,6 +70,7 @@ function StreamView() {
               lineSpacing: Number(body.stage.lineSpacing) || 1.14,
               blockGap: Number(body.stage.blockGap) || 1.2,
               clockScale: Number(body.stage.clockScale) || 1,
+              clockText: Number(body.stage.clockText) || 1,
               logoUrl: typeof body.stage.logoUrl === "string" ? body.stage.logoUrl : "",
             })
           }
@@ -122,6 +123,7 @@ function StreamView() {
         lineSpacing={stage.lineSpacing}
         blockGap={stage.blockGap}
         clockScale={stage.clockScale}
+        clockText={stage.clockText}
         logoUrl={stage.logoUrl}
         clock={testClock}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"

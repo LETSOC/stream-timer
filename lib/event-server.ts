@@ -28,6 +28,7 @@ const DEFAULT_STAGE: StageOptions = {
   lineSpacing: 1.14,
   blockGap: 1.2,
   clockScale: 1,
+  clockText: 1,
   logoUrl: "",
 }
 

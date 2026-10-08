@@ -24,11 +24,12 @@ type CountdownStageProps = {
   lineSpacing?: number
   blockGap?: number
   clockScale?: number
+  clockText?: number
   logoUrl?: string
   clock?: Date | null
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, logoUrl = "", clock }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", clock }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -93,7 +94,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           </div>
 
           <div className="mt-[1.6cqi]">
-            <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} scale={clockScale} />
+            <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} scale={clockScale} textScale={clockText} />
           </div>
           <SocialRow
             links={[
@@ -150,14 +151,16 @@ function ClockDisplay({
   valid,
   ready,
   scale = 1,
+  textScale = 1,
 }: {
   remaining: Remaining | null
   valid: boolean
   ready: boolean
   scale?: number
+  textScale?: number
 }) {
   if (!ready) {
-    return <UnitRow days="--" hours="--" minutes="--" seconds="--" muted scale={scale} />
+    return <UnitRow days="--" hours="--" minutes="--" seconds="--" muted scale={scale} textScale={textScale} />
   }
   if (!valid || !remaining) {
     return <p className="stage-h4 m-0 text-red-300">The start time could not be parsed.</p>
@@ -182,6 +185,7 @@ function ClockDisplay({
       minutes={pad2(remaining.minutes)}
       seconds={pad2(remaining.seconds)}
       scale={scale}
+      textScale={textScale}
     />
   )
 }
@@ -193,6 +197,7 @@ function UnitRow({
   seconds,
   muted = false,
   scale = 1,
+  textScale = 1,
 }: {
   days: string
   hours: string
@@ -200,6 +205,7 @@ function UnitRow({
   seconds: string
   muted?: boolean
   scale?: number
+  textScale?: number
 }) {
   const units = [
     { value: days, label: "Days" },
@@ -215,10 +221,10 @@ function UnitRow({
           className="rounded-[0.5cqi] border border-white text-center"
           style={{ minWidth: `${7.4 * scale}cqi`, padding: `${0.9 * scale}cqi ${1.2 * scale}cqi` }}
         >
-          <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${2.7 * scale}cqi` }}>
+          <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${2.7 * scale * textScale}cqi` }}>
             {unit.value}
           </div>
-          <div className="font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-white/80 uppercase" style={{ marginTop: `${0.4 * scale}cqi`, fontSize: `${0.72 * scale}cqi` }}>
+          <div className="font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-white/80 uppercase" style={{ marginTop: `${0.4 * scale}cqi`, fontSize: `${0.72 * scale * textScale}cqi` }}>
             {unit.label}
           </div>
         </div>

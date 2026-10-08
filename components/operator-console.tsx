@@ -42,6 +42,7 @@ export function OperatorConsole() {
   const [lineSpacing, setLineSpacing] = useState(1.14)
   const [blockGap, setBlockGap] = useState(1.2)
   const [clockScale, setClockScale] = useState(1)
+  const [clockText, setClockText] = useState(1)
   const [logoUrl, setLogoUrl] = useState("")
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
@@ -107,13 +108,13 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
-  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${logoUrl}`
+  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}`
 
   useEffect(() => {
     const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
     if (stageRaw) {
       try {
-        const stage = JSON.parse(stageRaw) as { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean; lineSpacing?: number; blockGap?: number; clockScale?: number; logoUrl?: string }
+        const stage = JSON.parse(stageRaw) as { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean; lineSpacing?: number; blockGap?: number; clockScale?: number; clockText?: number; logoUrl?: string }
         if (stage.checker) setChecker(stage.checker)
         if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
         if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
@@ -121,6 +122,7 @@ export function OperatorConsole() {
         if (typeof stage.lineSpacing === "number") setLineSpacing(stage.lineSpacing)
         if (typeof stage.blockGap === "number") setBlockGap(stage.blockGap)
         if (typeof stage.clockScale === "number") setClockScale(stage.clockScale)
+        if (typeof stage.clockText === "number") setClockText(stage.clockText)
         if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
       } catch {
         /* ignore a bad local draft */
@@ -159,8 +161,8 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, logoUrl }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, logoUrl])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl }))
+  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -183,7 +185,7 @@ export function OperatorConsole() {
           event,
           testUntil,
           pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, logoUrl },
+          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl },
         }),
       })
         .then(async (response) => {
@@ -451,7 +453,10 @@ export function OperatorConsole() {
               <input id="clockScale" type="range" min="0.7" max="1.8" step="0.05" value={clockScale} onChange={(event) => setClockScale(Number(event.target.value))} className="w-full accent-black" />
               <span className="font-mono text-[11px] text-black/50">{clockScale.toFixed(2)}×</span>
             </Field>
-            <Field label="Logo source" htmlFor="logo">
+            <Field label="Countdown text size" htmlFor="clockText">
+              <input id="clockText" type="range" min="0.7" max="2.2" step="0.05" value={clockText} onChange={(event) => setClockText(Number(event.target.value))} className="w-full accent-black" />
+              <span className="font-mono text-[11px] text-black/50">{clockText.toFixed(2)}×</span>
+            </Field>
               <GrowingText id="logo" value={logoUrl} onChange={setLogoUrl} />
               <p className="font-mono text-[10px] text-black/45">Leave blank for the Hyphen PNG. Paste an image URL to replace it.</p>
             </Field>
@@ -513,7 +518,7 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} logoUrl={logoUrl} clock={previewNow} />
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} clock={previewNow} />
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">
