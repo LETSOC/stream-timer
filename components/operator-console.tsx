@@ -21,6 +21,7 @@ import {
   remainingUntil,
   wallTimeInZone,
 } from "@/lib/countdown"
+import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import { useNow } from "@/lib/use-now"
 import { TIME_ZONES, DEFAULT_EVENT } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
@@ -121,8 +122,8 @@ export function OperatorConsole() {
         if (typeof stage.transparent === "boolean") setTransparent(stage.transparent)
         if (typeof stage.lineSpacing === "number") setLineSpacing(stage.lineSpacing)
         if (typeof stage.blockGap === "number") setBlockGap(stage.blockGap)
-        if (typeof stage.clockScale === "number") setClockScale(stage.clockScale)
-        if (typeof stage.clockText === "number") setClockText(stage.clockText)
+        if (typeof stage.clockScale === "number") setClockScale(clampSize(stage.clockScale, CLOCK_SCALE_RANGE))
+        if (typeof stage.clockText === "number") setClockText(clampSize(stage.clockText, CLOCK_TEXT_RANGE))
         if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
       } catch {
         /* ignore a bad local draft */
@@ -208,11 +209,9 @@ export function OperatorConsole() {
     if (!showMeta) params.set("meta", "0")
     if (!showLink) params.set("showlink", "0")
     if (transparent) params.set("bg", "clear")
-    if (clockScale !== 1) params.set("clock", clockScale.toFixed(2))
-    if (clockText !== 1) params.set("text", clockText.toFixed(2))
     const query = params.toString()
     return query ? `/stream?${query}` : "/stream"
-  }, [checker, showMeta, showLink, transparent, clockScale, clockText])
+  }, [checker, showMeta, showLink, transparent])
 
   useEffect(() => {
     if (!previewReady.current) {
@@ -451,13 +450,18 @@ export function OperatorConsole() {
               <input id="blockGap" type="range" min="0" max="8" step="0.1" value={blockGap} onChange={(event) => setBlockGap(Number(event.target.value))} className="w-full accent-black" />
               <span className="font-mono text-[11px] text-black/50">{blockGap.toFixed(1)}</span>
             </Field>
-            <Field label="Countdown size" htmlFor="clockScale">
-              <input id="clockScale" type="range" min="0.7" max="1.8" step="0.05" value={clockScale} onChange={(event) => setClockScale(Number(event.target.value))} className="w-full accent-black" />
-              <span className="font-mono text-[11px] text-black/50">{clockScale.toFixed(2)}×</span>
+            <Field label="Countdown size (boxes and text)" htmlFor="clockScale">
+              <input id="clockScale" type="range" min={CLOCK_SCALE_RANGE.min} max={CLOCK_SCALE_RANGE.max} step="0.05" value={clockScale} onChange={(event) => setClockScale(Number(event.target.value))} className="w-full accent-black" />
+              <span className="font-mono text-[11px] text-black/50">
+                {clockScale.toFixed(2)}×
+                {fitClockScale(clockScale, clockText) < clockScale - 0.005
+                  ? ` · shown at ${fitClockScale(clockScale, clockText).toFixed(2)}× so it fits beside the logo`
+                  : ""}
+              </span>
             </Field>
-            <Field label="Countdown text size" htmlFor="clockText">
-              <input id="clockText" type="range" min="0.7" max="2.2" step="0.05" value={clockText} onChange={(event) => setClockText(Number(event.target.value))} className="w-full accent-black" />
-              <span className="font-mono text-[11px] text-black/50">{clockText.toFixed(2)}×</span>
+            <Field label="Text size inside boxes" htmlFor="clockText">
+              <input id="clockText" type="range" min={CLOCK_TEXT_RANGE.min} max={CLOCK_TEXT_RANGE.max} step="0.05" value={clockText} onChange={(event) => setClockText(Number(event.target.value))} className="w-full accent-black" />
+              <span className="font-mono text-[11px] text-black/50">{clockText.toFixed(2)}× of the countdown size</span>
             </Field>
             <Field label="Logo source" htmlFor="logo">
               <GrowingText id="logo" value={logoUrl} onChange={setLogoUrl} />

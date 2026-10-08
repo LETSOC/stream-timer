@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
+import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
@@ -69,8 +70,8 @@ function StreamView() {
               transparent: body.stage.transparent === true,
               lineSpacing: Number(body.stage.lineSpacing) || 1.14,
               blockGap: Number(body.stage.blockGap) || 1.2,
-              clockScale: Number(body.stage.clockScale) || 1,
-              clockText: Number(body.stage.clockText) || 1,
+              clockScale: clampSize(body.stage.clockScale, CLOCK_SCALE_RANGE),
+              clockText: clampSize(body.stage.clockText, CLOCK_TEXT_RANGE),
               logoUrl: typeof body.stage.logoUrl === "string" ? body.stage.logoUrl : "",
             })
           }
@@ -98,8 +99,8 @@ function StreamView() {
   const showMeta = params.get("meta") ? params.get("meta") !== "0" : stage.showMeta
   const showLink = params.get("showlink") ? params.get("showlink") !== "0" : stage.showLink
   const transparent = params.get("bg") ? params.get("bg") === "clear" : stage.transparent
-  const clockScale = params.get("clock") ? Number(params.get("clock")) : stage.clockScale
-  const clockText = params.get("text") ? Number(params.get("text")) : stage.clockText
+  const clockScale = clampSize(params.get("clock"), CLOCK_SCALE_RANGE, stage.clockScale)
+  const clockText = clampSize(params.get("text"), CLOCK_TEXT_RANGE, stage.clockText)
 
   useEffect(() => {
     if (!transparent) return

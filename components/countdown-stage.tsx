@@ -10,6 +10,7 @@ import {
   wallTimeInZone,
   type Remaining,
 } from "@/lib/countdown"
+import { CLOCK_GEOMETRY, CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import type { EventConfig } from "@/lib/event"
 import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
@@ -213,19 +214,31 @@ function UnitRow({
     { value: minutes, label: "Minutes" },
     { value: seconds, label: "Seconds" },
   ]
-  const box = 8.6 * scale * Math.max(1, textScale)
+  const g = CLOCK_GEOMETRY
+  const text = clampSize(textScale, CLOCK_TEXT_RANGE)
+  const size = fitClockScale(clampSize(scale, CLOCK_SCALE_RANGE), text)
   return (
-    <div className={cn("inline-flex", muted && "opacity-40")} style={{ gap: `${0.55 * scale}cqi` }}>
+    <div
+      className={cn("inline-grid", muted && "opacity-40")}
+      style={{
+        gridTemplateColumns: `repeat(4, minmax(${g.boxMinWidth * size}cqi, 1fr))`,
+        columnGap: `${g.gap * size}cqi`,
+        width: "max-content",
+      }}
+    >
       {units.map((unit) => (
         <div
           key={unit.label}
-          className="rounded-[0.5cqi] border border-white text-center"
-          style={{ width: `${box}cqi`, padding: `${0.9 * scale}cqi ${0.45 * scale}cqi` }}
+          className="flex flex-col items-center justify-center rounded-[0.5cqi] border border-white text-center"
+          style={{ minHeight: `${g.boxMinHeight * size}cqi`, padding: `${g.padY * size}cqi ${g.padX * size}cqi` }}
         >
-          <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${2.7 * scale * textScale}cqi` }}>
+          <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${g.digit * size * text}cqi` }}>
             {unit.value}
           </div>
-          <div className="font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-white/80 uppercase" style={{ marginTop: `${0.4 * scale}cqi`, fontSize: `${0.72 * scale * textScale}cqi` }}>
+          <div
+            className="font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-white/80 uppercase"
+            style={{ marginTop: `${g.labelGap * size}cqi`, fontSize: `${g.label * size * text}cqi`, paddingLeft: "0.14em" }}
+          >
             {unit.label}
           </div>
         </div>

@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
+import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { DATA_DIR } from "@/lib/encoder"
 import { asEventConfig, DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 
@@ -44,8 +45,8 @@ function readStage(value: unknown): StageOptions {
     transparent: record.transparent === true,
     lineSpacing: Number.isFinite(Number(record.lineSpacing)) ? Math.min(2.4, Math.max(0.8, Number(record.lineSpacing))) : 1.14,
     blockGap: Number.isFinite(Number(record.blockGap)) ? Math.min(8, Math.max(0, Number(record.blockGap))) : 1.2,
-    clockScale: Number.isFinite(Number(record.clockScale)) ? Math.min(1.8, Math.max(0.7, Number(record.clockScale))) : 1,
-    clockText: Number.isFinite(Number(record.clockText)) ? Math.min(2.2, Math.max(0.7, Number(record.clockText))) : 1,
+    clockScale: clampSize(record.clockScale, CLOCK_SCALE_RANGE),
+    clockText: clampSize(record.clockText, CLOCK_TEXT_RANGE),
     logoUrl: typeof record.logoUrl === "string" ? record.logoUrl : "",
   }
 }
