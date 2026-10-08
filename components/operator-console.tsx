@@ -109,8 +109,16 @@ export function OperatorConsole() {
         headers: { "Content-Type": "application/json", "x-encoder-token": token },
         body: JSON.stringify({ event, testUntil }),
       })
-        .then((response) => setSyncState(response.ok ? "saved" : "error"))
-        .catch(() => setSyncState("error"))
+        .then(async (response) => {
+          if (response.ok) {
+            setSyncState("saved")
+            return
+          }
+          const body = await response.json().catch(() => null)
+          setSyncState(response.status === 401 || response.status === 403 ? "local" : "error")
+          if (body?.error) console.warn(body.error)
+        })
+        .catch(() => setSyncState("local"))
     }, 400)
     return () => window.clearTimeout(id)
   }, [event, token, testUntil])
@@ -202,7 +210,7 @@ export function OperatorConsole() {
               </span>
             </span>
             <span className="font-mono text-[10px] text-black/50 uppercase">
-              Desk {syncState}
+              Desk {syncState === "saved" ? "saved" : syncState === "local" ? "local" : syncState}
             </span>
             <Button type="button" className="rounded-full bg-black text-white" onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
