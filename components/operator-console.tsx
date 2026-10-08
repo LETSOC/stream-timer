@@ -17,6 +17,7 @@ import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
 import {
   formatClock,
+  pad2,
   remainingUntil,
   wallTimeInZone,
 } from "@/lib/countdown"
@@ -92,279 +93,151 @@ export function OperatorConsole() {
   }
 
   return (
-    <div className="min-h-full bg-[#0b0b0b] text-zinc-100">
-      <header className="border-b border-white/10 px-4 py-4 sm:px-6">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="min-h-full bg-[#F6F6F3] text-black [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]">
+      <header className="sticky top-0 z-20 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs tracking-[0.28em] text-[#d4af77] uppercase">
-              Live countdown
+            <p className="font-mono text-[10px] tracking-[0.16em] text-black/50 uppercase">
+              Hyphen Festival 2026
             </p>
-            <h1 className="font-serif text-2xl tracking-tight sm:text-3xl">
-              Hyphen stream player
-            </h1>
+            <h1 className="text-xl font-black tracking-tight uppercase">Countdown desk</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="border-[#d4af77]/40 text-[#d4af77]">
-              1280×720 output
-            </Badge>
-            <Button
-              variant="outline"
-              nativeButton={false}
-              render={<Link href={streamHref} />}
-            >
-              Open stream view
+            <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[11px] md:inline-flex">
+              <span className="text-black/50">Target</span>
+              <span>{valid ? formatClock(target, timeZone) : "—"}</span>
+              <span className="rounded bg-[#D9FF43] px-1.5 py-0.5 text-[10px]">Armed</span>
+            </span>
+            <Button nativeButton={false} render={<Link href={streamHref} />} className="rounded-full bg-black text-white">
+              Open /stream
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)] sm:px-6">
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm tracking-[0.2em] text-zinc-400 uppercase">
-              Program preview
-            </h2>
-            <p className="text-xs text-zinc-500">
-              Use this frame as an OBS browser source.
-            </p>
-          </div>
-          <div className="overflow-hidden rounded-xl ring-1 ring-white/10">
-            <CountdownStage event={event} checker={checker} />
-          </div>
-          {!valid ? (
-            <p className="text-sm text-red-300">Enter a valid date, time, and zone.</p>
-          ) : !remaining ? (
-            <p className="text-sm text-zinc-500">Reading the clock…</p>
-          ) : remaining.done ? (
-            <p className="text-sm text-zinc-400">
-              Start time is in the past — the output shows the live end card.
-            </p>
-          ) : (
-            <p className="text-sm text-zinc-400">
-              Starts {target.toISOString().replace(".000Z", "Z")} UTC
-              {targetUnix === 1_762_245_000
-                ? " — that unix stamp is 4 November 2025, not 2026."
-                : null}
-            </p>
-          )}
-          <EncodedPreview
-            eventName={name}
-            dateLine={dateLine}
-            targetUnix={targetUnix}
-            valid={valid}
-          />
-        </section>
-
-        <section className="space-y-4">
-          <Card className="bg-[#161616] text-zinc-100 ring-white/10">
-            <CardHeader>
-              <CardTitle>Event</CardTitle>
-              <CardDescription className="text-zinc-400">
-                Official start is 4 November 2026 at 09:30 London (GMT). The
-                countdown uses this computer&apos;s clock — there is no
-                separate current-time setting.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Field label="Title" htmlFor="name">
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(event) => updateEvent({ name: event.target.value })}
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Date" htmlFor="date">
-                  <Input
-                    id="date"
-                    type="date"
-                    value={date}
-                    onChange={(event) => updateEvent({ date: event.target.value })}
-                  />
-                </Field>
-                <Field label="Starts" htmlFor="time">
-                  <Input
-                    id="time"
-                    type="time"
-                    value={time}
-                    onChange={(event) => updateEvent({ time: event.target.value })}
-                  />
-                </Field>
-              </div>
-              <Field label="Ends" htmlFor="endTime">
-                <Input
-                  id="endTime"
-                  type="time"
-                  value={endTime}
-                  onChange={(event) => updateEvent({ endTime: event.target.value })}
-                />
-              </Field>
-              <Field label="Venue" htmlFor="venue">
-                <Input
-                  id="venue"
-                  value={venue}
-                  onChange={(event) => updateEvent({ venue: event.target.value })}
-                />
-              </Field>
-              <Field label="RSVP URL" htmlFor="rsvp">
-                <Input
-                  id="rsvp"
-                  type="url"
-                  value={rsvpUrl}
-                  onChange={(event) => updateEvent({ rsvpUrl: event.target.value })}
-                />
-              </Field>
-              <Field label="RSVP button text" htmlFor="rsvpLabel">
-                <Input
-                  id="rsvpLabel"
-                  value={rsvpLabel}
-                  onChange={(event) => updateEvent({ rsvpLabel: event.target.value })}
-                />
-              </Field>
-              <Field label="Badge" htmlFor="badge">
-                <Input
-                  id="badge"
-                  value={badge}
-                  onChange={(event) => updateEvent({ badge: event.target.value })}
-                />
-              </Field>
-              <Field label="Scan label" htmlFor="scan">
-                <Input
-                  id="scan"
-                  value={scanLabel}
-                  onChange={(event) => updateEvent({ scanLabel: event.target.value })}
-                />
-              </Field>
-              <Field label="Join Live label" htmlFor="join">
-                <Input
-                  id="join"
-                  value={joinLabel}
-                  onChange={(event) => updateEvent({ joinLabel: event.target.value })}
-                />
-              </Field>
-              <Field label="Event link" htmlFor="link">
-                <Input
-                  id="link"
-                  type="url"
-                  value={eventLink}
-                  onChange={(event) => updateEvent({ eventLink: event.target.value })}
-                />
-              </Field>
-              <Field label="X URL" htmlFor="x">
-                <Input id="x" type="url" value={xUrl} onChange={(event) => updateEvent({ xUrl: event.target.value })} />
-              </Field>
-              <Field label="Facebook URL" htmlFor="fb">
-                <Input id="fb" type="url" value={facebookUrl} onChange={(event) => updateEvent({ facebookUrl: event.target.value })} />
-              </Field>
-              <Field label="LinkedIn URL" htmlFor="li">
-                <Input id="li" type="url" value={linkedinUrl} onChange={(event) => updateEvent({ linkedinUrl: event.target.value })} />
-              </Field>
-              <Field label="Instagram URL" htmlFor="ig">
-                <Input id="ig" type="url" value={instagramUrl} onChange={(event) => updateEvent({ instagramUrl: event.target.value })} />
-              </Field>
-              <Field label="YouTube URL" htmlFor="yt">
-                <Input id="yt" type="url" value={youtubeUrl} onChange={(event) => updateEvent({ youtubeUrl: event.target.value })} />
-              </Field>
-              <Field label="Checker division" htmlFor="checker">
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setChecker((value) => Math.max(4, value - 1))}
-                  >
-                    −
-                  </Button>
-                  <span id="checker" className="min-w-16 text-center text-sm tabular-nums">
-                    {checker}×{checker}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setChecker((value) => Math.min(12, value + 1))}
-                  >
-                    +
-                  </Button>
+      <main className="mx-auto grid max-w-[1600px] items-start gap-6 px-4 py-6 lg:grid-cols-[380px_1fr] sm:px-6">
+        <section className="space-y-4 lg:sticky lg:top-24">
+          <div className="rounded-[20px] bg-black p-5 text-white">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="font-mono text-[11px] tracking-[0.14em] text-white/60 uppercase">
+                Live countdown · {timeZone}
+              </h2>
+              <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase">
+                <span className="size-2 rounded-full bg-[#D9FF43]" />
+                Ticking
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { value: remaining ? String(remaining.days) : "--", label: "Days" },
+                { value: remaining ? pad2(remaining.hours) : "--", label: "Hours" },
+                { value: remaining ? pad2(remaining.minutes) : "--", label: "Mins" },
+                { value: remaining ? pad2(remaining.seconds) : "--", label: "Secs" },
+              ].map((unit) => (
+                <div key={unit.label} className="rounded-[14px] border border-white/10 bg-white/10 px-2 py-3 text-center">
+                  <div className="font-mono text-[28px] leading-none font-black tabular-nums">{unit.value}</div>
+                  <div className="mt-1 font-mono text-[10px] tracking-[0.12em] text-white/50 uppercase">{unit.label}</div>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          <Panel title="Event details" pill="Editable">
+            <Field label="Session title" htmlFor="name">
+              <Input id="name" value={name} onChange={(event) => updateEvent({ name: event.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Date" htmlFor="date">
+                <Input id="date" type="date" value={date} onChange={(event) => updateEvent({ date: event.target.value })} />
               </Field>
-              <Field label="Time zone" htmlFor="tz">
-                <select
-                  id="tz"
-                  className="h-8 w-full rounded-lg border border-input bg-[#161616] px-2.5 text-sm text-zinc-100"
-                  value={timeZone}
-                  onChange={(event) => updateEvent({ timeZone: event.target.value })}
-                >
+              <Field label="Timezone" htmlFor="tz">
+                <select id="tz" className="h-9 w-full px-3 text-sm" value={timeZone} onChange={(event) => updateEvent({ timeZone: event.target.value })}>
                   {TIME_ZONES.map((zoneOption) => (
-                    <option key={zoneOption.id} value={zoneOption.id}>
-                      {zoneOption.label}
-                    </option>
+                    <option key={zoneOption.id} value={zoneOption.id}>{zoneOption.label}</option>
                   ))}
                 </select>
               </Field>
-              <p className="text-xs text-zinc-500">
-                This computer now:{" "}
-                {now ? formatClock(now, timeZone) : "reading clock…"}
-              </p>
-              <p className="text-xs text-zinc-500">
-                Hits zero at: {valid ? formatClock(target, timeZone) : "—"}
-              </p>
-              <p className="text-xs text-zinc-500">
-                Unix timestamp: {valid ? targetUnix : "—"}
-              </p>
-              <p className="text-xs text-zinc-500">
-                Title, date, times, venue, and zone are saved in this browser.
-                The QR on the frame encodes the official Hyphen RSVP page.
-                After a change, open stream view again and point OBS at that
-                URL.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-[#161616] text-zinc-100 ring-white/10">
-            <CardHeader>
-              <CardTitle>FFmpeg to Castr</CardTitle>
-              <CardDescription className="text-zinc-400">
-                Paste the ingest URL locally. It is not stored on a server.
-                Rotate the Castr password if it was shared in a log or chat.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Field label="RTMP URL" htmlFor="rtmp">
-                <Input
-                  id="rtmp"
-                  type="password"
-                  autoComplete="off"
-                  placeholder="rtmp://uk.castr.io/static/…?password=…"
-                  value={rtmpUrl}
-                  onChange={(event) => setRtmpUrl(event.target.value)}
-                />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Start time" htmlFor="time">
+                <Input id="time" type="time" value={time} onChange={(event) => updateEvent({ time: event.target.value })} />
               </Field>
-              <CommandBlock
-                value={streamCommand}
-                copied={copied === "stream"}
-                onCopy={() => copy("stream", streamCommand)}
-              />
-            </CardContent>
-          </Card>
+              <Field label="End time" htmlFor="endTime">
+                <Input id="endTime" type="time" value={endTime} onChange={(event) => updateEvent({ endTime: event.target.value })} />
+              </Field>
+            </div>
+            <Field label="Venue" htmlFor="venue">
+              <Input id="venue" value={venue} onChange={(event) => updateEvent({ venue: event.target.value })} />
+            </Field>
+            <Field label="QR URL" htmlFor="rsvp">
+              <Input id="rsvp" type="url" value={rsvpUrl} onChange={(event) => updateEvent({ rsvpUrl: event.target.value })} />
+            </Field>
+            <Field label="RSVP button text" htmlFor="rsvpLabel">
+              <Input id="rsvpLabel" value={rsvpLabel} onChange={(event) => updateEvent({ rsvpLabel: event.target.value })} />
+            </Field>
+          </Panel>
 
-          <Card className="bg-[#161616] text-zinc-100 ring-white/10">
-            <CardHeader>
-              <CardTitle>Local FFmpeg test</CardTitle>
-              <CardDescription className="text-zinc-400">
-                Writes a 6-second MP4 so you can confirm drawtext parses
-                before going live.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <CommandBlock
-                value={fileCommand}
-                copied={copied === "file"}
-                onCopy={() => copy("file", fileCommand)}
-              />
-            </CardContent>
-          </Card>
+          <Panel title="On-stage labels">
+            <Field label="Badge" htmlFor="badge">
+              <Input id="badge" value={badge} onChange={(event) => updateEvent({ badge: event.target.value })} />
+            </Field>
+            <Field label="Scan label" htmlFor="scan">
+              <Input id="scan" value={scanLabel} onChange={(event) => updateEvent({ scanLabel: event.target.value })} />
+            </Field>
+            <Field label="Join Live label" htmlFor="join">
+              <Input id="join" value={joinLabel} onChange={(event) => updateEvent({ joinLabel: event.target.value })} />
+            </Field>
+            <Field label="Event link" htmlFor="link">
+              <Input id="link" type="url" value={eventLink} onChange={(event) => updateEvent({ eventLink: event.target.value })} />
+            </Field>
+            <Field label="Checker division" htmlFor="checker">
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" className="rounded-full" onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Button>
+                <span id="checker" className="min-w-16 text-center font-mono text-sm tabular-nums">{checker}×{checker}</span>
+                <Button type="button" variant="outline" className="rounded-full" onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Button>
+              </div>
+            </Field>
+            <Field label="X URL" htmlFor="x"><Input id="x" type="url" value={xUrl} onChange={(event) => updateEvent({ xUrl: event.target.value })} /></Field>
+            <Field label="Facebook URL" htmlFor="fb"><Input id="fb" type="url" value={facebookUrl} onChange={(event) => updateEvent({ facebookUrl: event.target.value })} /></Field>
+            <Field label="LinkedIn URL" htmlFor="li"><Input id="li" type="url" value={linkedinUrl} onChange={(event) => updateEvent({ linkedinUrl: event.target.value })} /></Field>
+            <Field label="Instagram URL" htmlFor="ig"><Input id="ig" type="url" value={instagramUrl} onChange={(event) => updateEvent({ instagramUrl: event.target.value })} /></Field>
+            <Field label="YouTube URL" htmlFor="yt"><Input id="yt" type="url" value={youtubeUrl} onChange={(event) => updateEvent({ youtubeUrl: event.target.value })} /></Field>
+          </Panel>
+
+          <Panel title="FFmpeg">
+            <Field label="RTMP URL" htmlFor="rtmp">
+              <Input id="rtmp" type="password" autoComplete="off" placeholder="rtmp://uk.castr.io/static/…?password=…" value={rtmpUrl} onChange={(event) => setRtmpUrl(event.target.value)} />
+            </Field>
+            <CommandBlock value={streamCommand} copied={copied === "stream"} onCopy={() => copy("stream", streamCommand)} />
+            <CommandBlock value={fileCommand} copied={copied === "file"} onCopy={() => copy("file", fileCommand)} />
+          </Panel>
+        </section>
+
+        <section className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">Preview · 16:9</h2>
+            <span className="font-mono text-[10px] text-black/50">1920×1080 · local clock</span>
+          </div>
+          <div className="overflow-hidden rounded-[24px] border border-black/10 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
+            <CountdownStage event={event} checker={checker} />
+          </div>
+          <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
         </section>
       </main>
     </div>
+  )
+}
+
+
+function Panel({ title, pill, children }: { title: string; pill?: string; children: ReactNode }) {
+  return (
+    <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+      <div className="flex items-center justify-between border-b border-black/10 px-5 py-4">
+        <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
+        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[10px] text-white">{pill}</span> : null}
+      </div>
+      <div className="space-y-4 p-5">{children}</div>
+    </section>
   )
 }
 
@@ -379,7 +252,7 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={htmlFor}>{label}</Label>
+      <Label htmlFor={htmlFor} className="font-mono text-[10px] tracking-[0.14em] text-black/60 uppercase">{label}</Label>
       {children}
     </div>
   )
@@ -396,7 +269,7 @@ function CommandBlock({
 }) {
   return (
     <div className="space-y-2">
-      <pre className="overflow-x-auto rounded-lg bg-black/50 p-3 text-xs leading-6 text-zinc-300 whitespace-pre-wrap">
+      <pre className="overflow-x-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[11px] leading-5 text-black/80 whitespace-pre-wrap">
         {value}
       </pre>
       <Button variant="secondary" onClick={onCopy} className="w-full">
