@@ -33,6 +33,7 @@ export function EncodedPreview({
   valid: boolean;
 }) {
   const token = useEncoderToken();
+  const [status, setStatus] = useState<EncoderStatus>(emptyStatus);
   const [refreshSlate, setRefreshSlate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
