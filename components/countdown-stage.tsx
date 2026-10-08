@@ -206,14 +206,13 @@ function RollingQr() {
       <div className="size-[8.4cqi] rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]">
         <div className="grid h-full w-full grid-cols-6 gap-[0.16cqi] rounded-[0.62cqi] bg-black p-[0.62cqi]">
           {Array.from({ length: 36 }, (_, index) => {
-            const shifted = (index + tick) % 36
-            const finder = shifted % 6 === 0 || shifted < 6
-            const lit = shifted % 3 !== 1
+            const anchor = index * 7 % 3 === 0
+            const lit = ((index * 17 + tick * 13) % 11) > 4
             return (
               <span
                 key={index}
                 className="rounded-[0.08cqi] bg-white transition-opacity duration-700"
-                style={{ opacity: finder ? 1 : lit ? 0.92 : 0.22 }}
+                style={{ opacity: anchor ? 1 : lit ? 0.92 : 0.22 }}
               />
             )
           })}
