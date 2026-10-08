@@ -283,13 +283,13 @@ export function OperatorConsole() {
               }}>
                 {pausedAt ? "Play" : "Pause"}
               </Button>
-              <button type="button" className="h-9 rounded-full border border-black bg-white font-medium text-black" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>
+              <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition-colors hover:bg-black hover:text-white active:translate-y-px" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>
                 Reset clock
               </button>
-              <Button type="button" className="rounded-full bg-[#ff3c00] text-white" onClick={goLiveNow}>
+              <Button type="button" className="rounded-full bg-[#ff3c00] text-white hover:bg-[#e03600]" onClick={goLiveNow}>
                 Go live now
               </Button>
-              <button type="button" className="h-9 rounded-full border border-black bg-white font-medium text-black" onClick={restoreFestival}>
+              <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition-colors hover:bg-black hover:text-white active:translate-y-px" onClick={restoreFestival}>
                 Restore 4 Nov
               </button>
             </div>
