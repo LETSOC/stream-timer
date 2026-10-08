@@ -51,7 +51,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             : { backgroundColor: "#070a16", backgroundImage: "url('/brand/hero-bg.png')" }
         }
       />
-      <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
+      <RollingQr divisions={divisions} second={second} label={joinLabel} />
 
       <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
         <div className="flex min-w-0 flex-col justify-center pr-[3%]">
@@ -87,7 +87,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             >
               {rsvpLabel}
             </a>
-            <QrSlot label={live ? "Watch live" : scanLabel} />
+            <QrSlot label={scanLabel} />
           </div>
 
           <div className="mt-[2.8cqi]">

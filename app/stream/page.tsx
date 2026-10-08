@@ -4,6 +4,8 @@ import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
+import { wallTimeInZone } from "@/lib/countdown"
+import { useNow } from "@/lib/use-now"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
@@ -44,6 +46,7 @@ function StreamView() {
     [params],
   )
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
+  const [testUntil, setTestUntil] = useState<number | null>(null)
 
   useEffect(() => {
     if (hasOverrides) return
@@ -51,9 +54,10 @@ function StreamView() {
     const load = () => {
       void fetch("/api/event", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { event?: unknown }) => {
+        .then((body: { event?: unknown; testUntil?: unknown }) => {
           const next = asEventConfig(body.event)
           if (!cancelled && next) setServerEvent(next)
+          if (!cancelled) setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
         })
         .catch(() => undefined)
     }
@@ -65,7 +69,11 @@ function StreamView() {
     }
   }, [hasOverrides])
 
+  const now = useNow()
   const event = hasOverrides ? queryEvent : serverEvent
+  const testClock = testUntil && now
+    ? new Date(now.getTime() + wallTimeInZone(event.date, event.time, event.timeZone).getTime() - testUntil)
+    : undefined
 
   const checker = Number(params.get("grid") ?? "6")
   const showMeta = params.get("meta") !== "0"
@@ -93,6 +101,7 @@ function StreamView() {
         showMeta={showMeta}
         showLink={showLink}
         transparent={transparent}
+        clock={testClock}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
     </main>

@@ -138,9 +138,15 @@ export function OperatorConsole() {
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
 
   function jumpPreview(seconds: number) {
-    if (!valid) return
+    if (!valid || !token) return
     setPausedAt(null)
-    setSkewMs(target.getTime() - Date.now() - seconds * 1000)
+    const testUntil = Date.now() + seconds * 1000
+    setSkewMs(target.getTime() - testUntil)
+    void fetch("/api/event", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "x-encoder-token": token },
+      body: JSON.stringify({ event, testUntil }),
+    })
   }
 
   function goLiveNow() {
@@ -253,7 +259,7 @@ export function OperatorConsole() {
               <Button type="button" className="rounded-full bg-black text-white" onClick={() => setPausedAt(pausedAt ? null : previewNow)}>
                 {pausedAt ? "Play" : "Pause"}
               </Button>
-              <Button type="button" variant="outline" className="rounded-full" onClick={() => { setPausedAt(null); setSkewMs(0) }}>
+              <Button type="button" variant="outline" className="rounded-full" onClick={() => { setPausedAt(null); setSkewMs(0); void fetch("/api/event", { method: "PUT", headers: { "Content-Type": "application/json", "x-encoder-token": token }, body: JSON.stringify({ event, testUntil: null }) }) }}>
                 Reset clock
               </Button>
               <Button type="button" className="rounded-full bg-[#ff3c00] text-white" onClick={goLiveNow}>
@@ -264,7 +270,7 @@ export function OperatorConsole() {
               </Button>
             </div>
             <p className="font-mono text-[10px] leading-5 text-black/55">
-              15s, 10min, 30min, and 1 hour only move this preview. Go live now writes a start in the past so /stream flips too. Restore 4 Nov puts the official gate back.
+              15s, 10min, 30min, and 1 hour also move /stream. The booking QR stays Scan to join. Reset clock clears the test.
             </p>
           </Panel>
 
