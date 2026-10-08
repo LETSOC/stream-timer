@@ -31,7 +31,6 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
   const wall = useNow()
   const now = clock === undefined ? wall : clock
   const remaining = now && valid ? remainingUntil(target, now) : null
-  const { lead, year } = splitEventTitle(name)
   const dateLabel = valid ? formatBannerDate(target, timeZone) : date
   const timeLabel = formatTimeRange(time, endTime)
   const divisions = clampChecker(checker)
