@@ -43,6 +43,7 @@ export function OperatorConsole() {
   const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
   const [skewMs, setSkewMs] = useState(0)
+  const [previewFlash, setPreviewFlash] = useState(false)
   const previewReady = useRef(false)
   const now = useNow()
 
