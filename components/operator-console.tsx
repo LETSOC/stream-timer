@@ -451,6 +451,7 @@ export function OperatorConsole() {
               <input id="clockScale" type="range" min="0.7" max="1.8" step="0.05" value={clockScale} onChange={(event) => setClockScale(Number(event.target.value))} className="w-full accent-black" />
               <span className="font-mono text-[11px] text-black/50">{clockScale.toFixed(2)}×</span>
             </Field>
+            <Field label="Logo source" htmlFor="logo">
               <GrowingText id="logo" value={logoUrl} onChange={setLogoUrl} />
               <p className="font-mono text-[10px] text-black/45">Leave blank for the Hyphen PNG. Paste an image URL to replace it.</p>
             </Field>
