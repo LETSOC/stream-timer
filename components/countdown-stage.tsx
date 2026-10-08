@@ -230,13 +230,12 @@ function RollingQr({ divisions, second }: { divisions: number; second: number })
           style={{ gridTemplateColumns: `repeat(${divisions}, minmax(0, 1fr))` }}
         >
           {Array.from({ length: cells }, (_, index) => {
-            const anchor = index % divisions === 0 || index < divisions
             const lit = ((index * 17 + second * 13) % 11) > 4
             return (
               <span
                 key={index}
                 className="rounded-[0.06cqi] bg-white transition-opacity duration-500"
-                style={{ opacity: anchor ? 1 : lit ? 0.92 : 0.22 }}
+                style={{ opacity: lit ? 0.95 : 0.18 }}
               />
             )
           })}
