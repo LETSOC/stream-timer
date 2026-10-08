@@ -66,9 +66,8 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
               </div>
             ) : null}
           </div>
-          <h1 className="stage-h1 m-0 max-w-[92%] text-white">
-            <span className="block">{lead || "Untitled event"}</span>
-            {year ? <span className="block">{year}</span> : null}
+          <h1 className="stage-h1 m-0 max-w-full text-white whitespace-nowrap">
+            {name.trim() || "Untitled event"}
           </h1>
 
           <ul className="mt-[1.4cqi] m-0 flex list-none flex-col gap-[0.45cqi] p-0">
