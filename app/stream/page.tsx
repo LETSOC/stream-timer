@@ -49,20 +49,20 @@ function StreamView() {
   const [testUntil, setTestUntil] = useState<number | null>(null)
 
   useEffect(() => {
-    if (hasOverrides) return
     let cancelled = false
     const load = () => {
       void fetch("/api/event", { cache: "no-store" })
         .then((response) => response.json())
         .then((body: { event?: unknown; testUntil?: unknown }) => {
           const next = asEventConfig(body.event)
-          if (!cancelled && next) setServerEvent(next)
-          if (!cancelled) setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
+          if (cancelled) return
+          if (!hasOverrides && next) setServerEvent(next)
+          setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
         })
         .catch(() => undefined)
     }
     load()
-    const id = window.setInterval(load, 2000)
+    const id = window.setInterval(load, 1000)
     return () => {
       cancelled = true
       window.clearInterval(id)

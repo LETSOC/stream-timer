@@ -43,6 +43,7 @@ export function OperatorConsole() {
   const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
   const [skewMs, setSkewMs] = useState(0)
+  const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
   const previewReady = useRef(false)
   const now = useNow()
@@ -106,13 +107,13 @@ export function OperatorConsole() {
       void fetch("/api/event", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "x-encoder-token": token },
-        body: JSON.stringify({ event }),
+        body: JSON.stringify({ event, testUntil }),
       })
         .then((response) => setSyncState(response.ok ? "saved" : "error"))
         .catch(() => setSyncState("error"))
     }, 400)
     return () => window.clearTimeout(id)
-  }, [event, token])
+  }, [event, token, testUntil])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
@@ -141,6 +142,7 @@ export function OperatorConsole() {
     if (!valid) return
     setPausedAt(null)
     const testUntil = Date.now() + seconds * 1000
+    setTestUntil(testUntil)
     setSkewMs(target.getTime() - testUntil)
     let auth = token
     if (!auth) {
@@ -265,7 +267,7 @@ export function OperatorConsole() {
               <Button type="button" className="rounded-full bg-black text-white" onClick={() => setPausedAt(pausedAt ? null : previewNow)}>
                 {pausedAt ? "Play" : "Pause"}
               </Button>
-              <Button type="button" variant="outline" className="rounded-full" onClick={() => { setPausedAt(null); setSkewMs(0); void fetch("/api/event", { method: "PUT", headers: { "Content-Type": "application/json", "x-encoder-token": token }, body: JSON.stringify({ event, testUntil: null }) }) }}>
+              <Button type="button" variant="outline" className="rounded-full" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>
                 Reset clock
               </Button>
               <Button type="button" className="rounded-full bg-[#ff3c00] text-white" onClick={goLiveNow}>
