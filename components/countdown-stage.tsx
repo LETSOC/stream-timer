@@ -86,7 +86,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             <QrSlot label={scanLabel} />
           </div>
 
-          <div className="mt-[2.1cqi]">
+          <div className="mt-[2.8cqi]">
             <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} />
           </div>
           <SocialRow
@@ -190,9 +190,9 @@ function UnitRow({
       {units.map((unit) => (
         <div
           key={unit.label}
-          className="min-w-[6.6cqi] rounded-[0.45cqi] border border-white px-[1.15cqi] py-[0.7cqi] text-center"
+          className="min-w-[7.4cqi] rounded-[0.5cqi] border border-white px-[1.2cqi] py-[0.9cqi] text-center"
         >
-          <div className="font-[Arial,Helvetica,sans-serif] text-[1.85cqi] leading-none font-bold tabular-nums">
+          <div className="font-[Arial,Helvetica,sans-serif] text-[2.7cqi] leading-none font-bold tabular-nums">
             {unit.value}
           </div>
           <div className="mt-[0.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.72cqi] tracking-[0.14em] text-white/80 uppercase">

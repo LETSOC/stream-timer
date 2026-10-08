@@ -166,4 +166,17 @@
   opacity: 1;
   border-radius: 6px;
   padding: 0.95em 1.35em;
+  animation: rsvp-pulse 4.8s ease-in-out infinite;
+}
+
+.countdown-stage .stage-rsvp:hover,
+.countdown-stage .stage-rsvp:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+  filter: brightness(1.08);
+}
+
+@keyframes rsvp-pulse {
+  0%, 72%, 100% { transform: scale(1); }
+  82% { transform: scale(1.045); }
 }

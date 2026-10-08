@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -37,6 +37,8 @@ export function OperatorConsole() {
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
   const [transparent, setTransparent] = useState(false)
+  const [previewFlash, setPreviewFlash] = useState(false)
+  const previewReady = useRef(false)
   const now = useNow()
 
   const target = wallTimeInZone(date, time, timeZone)
@@ -89,6 +91,16 @@ export function OperatorConsole() {
     dateLine,
     targetUnix,
   })
+
+  useEffect(() => {
+    if (!previewReady.current) {
+      previewReady.current = true
+      return
+    }
+    setPreviewFlash(true)
+    const id = window.setTimeout(() => setPreviewFlash(false), 1400)
+    return () => window.clearTimeout(id)
+  }, [streamHref])
 
   async function copy(kind: "stream" | "file" | "link", value: string) {
     await navigator.clipboard.writeText(value)
@@ -146,7 +158,7 @@ export function OperatorConsole() {
             </div>
           </div>
 
-          <Panel title="Event details" pill="Editable">
+          <Panel title="Event core" pill="Editable">
             <Field label="Session title" htmlFor="name">
               <Input id="name" value={name} onChange={(event) => updateEvent({ name: event.target.value })} />
             </Field>
@@ -173,36 +185,18 @@ export function OperatorConsole() {
             <Field label="Venue" htmlFor="venue">
               <Input id="venue" value={venue} onChange={(event) => updateEvent({ venue: event.target.value })} />
             </Field>
-            <Field label="QR URL" htmlFor="rsvp">
+          </Panel>
+
+          <Panel title="Call to action">
+            <Field label="RSVP URL" htmlFor="rsvp">
               <Input id="rsvp" type="url" value={rsvpUrl} onChange={(event) => updateEvent({ rsvpUrl: event.target.value })} />
             </Field>
             <Field label="RSVP button text" htmlFor="rsvpLabel">
               <Input id="rsvpLabel" value={rsvpLabel} onChange={(event) => updateEvent({ rsvpLabel: event.target.value })} />
             </Field>
-          </Panel>
-
-          <Panel title="On-stage labels">
             <Field label="Badge" htmlFor="badge">
               <Input id="badge" value={badge} onChange={(event) => updateEvent({ badge: event.target.value })} />
             </Field>
-            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
-              <input
-                type="checkbox"
-                className="size-4 accent-black"
-                checked={showMeta}
-                onChange={(event) => setShowMeta(event.target.checked)}
-              />
-              Show date and timezone
-            </label>
-            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
-              <input
-                type="checkbox"
-                className="size-4 accent-black"
-                checked={transparent}
-                onChange={(event) => setTransparent(event.target.checked)}
-              />
-              Transparent background
-            </label>
             <Field label="Scan label" htmlFor="scan">
               <Input id="scan" value={scanLabel} onChange={(event) => updateEvent({ scanLabel: event.target.value })} />
             </Field>
@@ -212,6 +206,17 @@ export function OperatorConsole() {
             <Field label="Event link" htmlFor="link">
               <Input id="link" type="url" value={eventLink} onChange={(event) => updateEvent({ eventLink: event.target.value })} />
             </Field>
+          </Panel>
+
+          <Panel title="Stage options">
+            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+              <input type="checkbox" className="size-4 accent-black" checked={showMeta} onChange={(event) => setShowMeta(event.target.checked)} />
+              Show date and timezone
+            </label>
+            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+              <input type="checkbox" className="size-4 accent-black" checked={transparent} onChange={(event) => setTransparent(event.target.checked)} />
+              Transparent background
+            </label>
             <Field label="Checker division" htmlFor="checker">
               <div className="flex items-center gap-2">
                 <Button type="button" variant="outline" className="rounded-full" onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Button>
@@ -219,12 +224,20 @@ export function OperatorConsole() {
                 <Button type="button" variant="outline" className="rounded-full" onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Button>
               </div>
             </Field>
-            <Field label="X URL" htmlFor="x"><Input id="x" type="url" value={xUrl} onChange={(event) => updateEvent({ xUrl: event.target.value })} /></Field>
-            <Field label="Facebook URL" htmlFor="fb"><Input id="fb" type="url" value={facebookUrl} onChange={(event) => updateEvent({ facebookUrl: event.target.value })} /></Field>
-            <Field label="LinkedIn URL" htmlFor="li"><Input id="li" type="url" value={linkedinUrl} onChange={(event) => updateEvent({ linkedinUrl: event.target.value })} /></Field>
-            <Field label="Instagram URL" htmlFor="ig"><Input id="ig" type="url" value={instagramUrl} onChange={(event) => updateEvent({ instagramUrl: event.target.value })} /></Field>
-            <Field label="YouTube URL" htmlFor="yt"><Input id="yt" type="url" value={youtubeUrl} onChange={(event) => updateEvent({ youtubeUrl: event.target.value })} /></Field>
           </Panel>
+
+          <details className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+            <summary className="cursor-pointer list-none px-5 py-4 text-[13px] font-black tracking-[0.12em] uppercase">
+              Branding and socials
+            </summary>
+            <div className="space-y-4 border-t border-black/10 p-5">
+              <Field label="X URL" htmlFor="x"><Input id="x" type="url" value={xUrl} onChange={(event) => updateEvent({ xUrl: event.target.value })} /></Field>
+              <Field label="Facebook URL" htmlFor="fb"><Input id="fb" type="url" value={facebookUrl} onChange={(event) => updateEvent({ facebookUrl: event.target.value })} /></Field>
+              <Field label="LinkedIn URL" htmlFor="li"><Input id="li" type="url" value={linkedinUrl} onChange={(event) => updateEvent({ linkedinUrl: event.target.value })} /></Field>
+              <Field label="Instagram URL" htmlFor="ig"><Input id="ig" type="url" value={instagramUrl} onChange={(event) => updateEvent({ instagramUrl: event.target.value })} /></Field>
+              <Field label="YouTube URL" htmlFor="yt"><Input id="yt" type="url" value={youtubeUrl} onChange={(event) => updateEvent({ youtubeUrl: event.target.value })} /></Field>
+            </div>
+          </details>
 
           <Panel title="FFmpeg">
             <Field label="RTMP URL" htmlFor="rtmp">
@@ -250,13 +263,18 @@ export function OperatorConsole() {
             </span>
           </div>
           <div
-            className="overflow-hidden rounded-[24px] border border-black/10 shadow-[0_20px_60px_rgba(0,0,0,0.18)]"
+            className={`relative overflow-hidden rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}
             style={
               transparent
                 ? { backgroundImage: "linear-gradient(45deg,#d9d9d4 25%,transparent 25%),linear-gradient(-45deg,#d9d9d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d9d9d4 75%),linear-gradient(-45deg,transparent 75%,#d9d9d4 75%)", backgroundSize: "24px 24px", backgroundPosition: "0 0,0 12px,12px -12px,-12px 0" }
                 : { background: "#000" }
             }
           >
+            {previewFlash ? (
+              <span className="absolute top-3 left-3 z-30 rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.12em] text-white uppercase">
+                Preview updated
+              </span>
+            ) : null}
             <CountdownStage event={event} checker={checker} showMeta={showMeta} transparent={transparent} />
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
