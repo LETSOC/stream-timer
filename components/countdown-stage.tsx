@@ -265,7 +265,7 @@ function XIcon() {
 
 function FacebookIcon() {
   return (
-    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-[#3b5998]">
+    <span className="flex size-full items-center justify-center rounded-full bg-[#3b5998]">
       <svg viewBox="0 0 24 24" className="size-[1.35cqi]" fill="white" aria-hidden>
         <path d="M14.5 8.5V6.8c0-.7.5-1 1.2-1H17V3h-2.1C12.4 3 11 4.5 11 6.6v1.9H9v2.7h2V21h3.5v-9.8h2.3l.4-2.7h-2.7Z" />
       </svg>
@@ -286,7 +286,7 @@ function LinkedInIcon() {
 function InstagramIcon() {
   return (
     <span
-      className="flex size-[2.45cqi] items-center justify-center rounded-full"
+      className="flex size-full items-center justify-center rounded-full"
       style={{ background: "linear-gradient(135deg,#f7d046,#e13b6b 55%,#7b3ff2)" }}
     >
       <svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="none" stroke="white" strokeWidth="1.8" aria-hidden>
@@ -300,7 +300,7 @@ function InstagramIcon() {
 
 function YouTubeIcon() {
   return (
-    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-[#ff0033]">
+    <span className="flex size-full items-center justify-center rounded-full bg-[#ff0033]">
       <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>
         <path d="M9.2 7.6v8.8l7.4-4.4-7.4-4.4Z" />
       </svg>
