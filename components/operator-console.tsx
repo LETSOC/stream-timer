@@ -101,13 +101,15 @@ export function OperatorConsole() {
     targetUnix,
   })
 
+  const pausedMs = pausedAt ? pausedAt.getTime() : 0
+
   useEffect(() => {
     if (!token) return
     const id = window.setTimeout(() => {
       void fetch("/api/event", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "x-encoder-token": token },
-        body: JSON.stringify({ event, testUntil, pausedAt: pausedAt ? pausedAt.getTime() : null }),
+        body: JSON.stringify({ event, testUntil, pausedAt: pausedMs || null }),
       })
         .then(async (response) => {
           if (response.ok) {
@@ -121,7 +123,7 @@ export function OperatorConsole() {
         .catch(() => setSyncState("local"))
     }, 400)
     return () => window.clearTimeout(id)
-  }, [event, token, testUntil, pausedAt])
+  }, [event, token, testUntil, pausedMs])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
