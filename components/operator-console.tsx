@@ -23,7 +23,7 @@ import {
 } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
 import { TIME_ZONES, DEFAULT_EVENT } from "@/lib/event"
-import { useStoredEvent } from "@/lib/event-storage"
+import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { useEncoderToken } from "@/lib/use-encoder-token"
 import {
   buildLocalTestCommand,
@@ -45,6 +45,7 @@ export function OperatorConsole() {
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
+  const [hydrated, setHydrated] = useState(false)
   const previewReady = useRef(false)
   const now = useNow()
 
@@ -105,7 +106,7 @@ export function OperatorConsole() {
   const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}`
 
   useEffect(() => {
-    if (!token) return
+    if (!token || !hydrated) return
     const id = window.setTimeout(() => {
       void fetch("/api/event", {
         method: "PUT",
@@ -129,7 +130,7 @@ export function OperatorConsole() {
         .catch(() => setSyncState("local"))
     }, 400)
     return () => window.clearTimeout(id)
-  }, [event, token, testUntil, syncKey])
+  }, [event, token, testUntil, syncKey, hydrated])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
