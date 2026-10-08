@@ -367,7 +367,7 @@ export function OperatorConsole() {
 
           <Panel title="Event core" pill="Editable">
             <Field label="Session title" htmlFor="name">
-              <Input id="name" value={name} onChange={(event) => updateEvent({ name: event.target.value })} />
+              <GrowingText id="name" value={name} onChange={(value) => updateEvent({ name: value })} />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Date" htmlFor="date">
@@ -390,13 +390,13 @@ export function OperatorConsole() {
               </Field>
             </div>
             <Field label="Venue" htmlFor="venue">
-              <Input id="venue" value={venue} onChange={(event) => updateEvent({ venue: event.target.value })} />
+              <GrowingText id="venue" value={venue} onChange={(value) => updateEvent({ venue: value })} />
             </Field>
           </Panel>
 
           <Panel title="Call to action">
             <Field label="RSVP URL" htmlFor="rsvp">
-              <Input id="rsvp" type="url" value={rsvpUrl} onChange={(event) => updateEvent({ rsvpUrl: event.target.value })} />
+              <GrowingText id="rsvp" value={rsvpUrl} onChange={(value) => updateEvent({ rsvpUrl: value })} />
             </Field>
             <Field label="RSVP button text" htmlFor="rsvpLabel">
               <Input id="rsvpLabel" value={rsvpLabel} onChange={(event) => updateEvent({ rsvpLabel: event.target.value })} />
@@ -411,10 +411,10 @@ export function OperatorConsole() {
               <Input id="join" value={joinLabel} onChange={(event) => updateEvent({ joinLabel: event.target.value })} />
             </Field>
             <Field label="Event link" htmlFor="link">
-              <Input id="link" type="url" value={eventLink} onChange={(event) => updateEvent({ eventLink: event.target.value })} />
+              <GrowingText id="link" value={eventLink} onChange={(value) => updateEvent({ eventLink: value })} />
             </Field>
             <Field label="Event link text" htmlFor="linkText">
-              <Input id="linkText" value={eventLinkLabel} onChange={(event) => updateEvent({ eventLinkLabel: event.target.value })} />
+              <GrowingText id="linkText" value={eventLinkLabel} onChange={(value) => updateEvent({ eventLinkLabel: value })} />
             </Field>
           </Panel>
 
@@ -445,11 +445,11 @@ export function OperatorConsole() {
               Branding and socials
             </summary>
             <div className="space-y-4 border-t border-black/10 p-5">
-              <Field label="X URL" htmlFor="x"><Input id="x" type="url" value={xUrl} onChange={(event) => updateEvent({ xUrl: event.target.value })} /></Field>
-              <Field label="Facebook URL" htmlFor="fb"><Input id="fb" type="url" value={facebookUrl} onChange={(event) => updateEvent({ facebookUrl: event.target.value })} /></Field>
-              <Field label="LinkedIn URL" htmlFor="li"><Input id="li" type="url" value={linkedinUrl} onChange={(event) => updateEvent({ linkedinUrl: event.target.value })} /></Field>
-              <Field label="Instagram URL" htmlFor="ig"><Input id="ig" type="url" value={instagramUrl} onChange={(event) => updateEvent({ instagramUrl: event.target.value })} /></Field>
-              <Field label="YouTube URL" htmlFor="yt"><Input id="yt" type="url" value={youtubeUrl} onChange={(event) => updateEvent({ youtubeUrl: event.target.value })} /></Field>
+              <Field label="X URL" htmlFor="x"><GrowingText id="x" value={xUrl} onChange={(value) => updateEvent({ xUrl: value })} /></Field>
+              <Field label="Facebook URL" htmlFor="fb"><GrowingText id="fb" value={facebookUrl} onChange={(value) => updateEvent({ facebookUrl: value })} /></Field>
+              <Field label="LinkedIn URL" htmlFor="li"><GrowingText id="li" value={linkedinUrl} onChange={(value) => updateEvent({ linkedinUrl: value })} /></Field>
+              <Field label="Instagram URL" htmlFor="ig"><GrowingText id="ig" value={instagramUrl} onChange={(value) => updateEvent({ instagramUrl: value })} /></Field>
+              <Field label="YouTube URL" htmlFor="yt"><GrowingText id="yt" value={youtubeUrl} onChange={(value) => updateEvent({ youtubeUrl: value })} /></Field>
             </div>
           </details>
 
@@ -533,6 +533,27 @@ function Panel({ title, pill, children }: { title: string; pill?: string; childr
       </div>
       <div className="space-y-4 p-5">{children}</div>
     </section>
+  )
+}
+
+function GrowingText({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <textarea
+      id={id}
+      rows={1}
+      value={value}
+      onChange={(event) => {
+        event.target.style.height = "auto"
+        event.target.style.height = `${event.target.scrollHeight}px`
+        onChange(event.target.value)
+      }}
+      ref={(node) => {
+        if (!node) return
+        node.style.height = "auto"
+        node.style.height = `${node.scrollHeight}px`
+      }}
+      className="w-full resize-none overflow-hidden rounded-xl border border-black/10 bg-[#F6F6F3] px-3 py-2 text-sm leading-5 break-all"
+    />
   )
 }
 
