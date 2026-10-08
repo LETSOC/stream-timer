@@ -166,6 +166,7 @@ export function EncodedPreview({
           {status.refreshSeconds ? " Auto-refresh is on: the slate restarts at 10 minutes." : " Auto-refresh is off."}
         </p>
       ) : null}
+      {!status.ffmpeg ? (
         <p className="text-sm text-red-300">
           ffmpeg is not on PATH. The browser preview still runs.
         </p>
