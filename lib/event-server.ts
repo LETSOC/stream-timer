@@ -17,6 +17,7 @@ export type StageOptions = {
   lineSpacing: number
   blockGap: number
   clockScale: number
+  clockText: number
   logoUrl: string
 }
 
@@ -44,6 +45,7 @@ function readStage(value: unknown): StageOptions {
     lineSpacing: Number.isFinite(Number(record.lineSpacing)) ? Math.min(2.4, Math.max(0.8, Number(record.lineSpacing))) : 1.14,
     blockGap: Number.isFinite(Number(record.blockGap)) ? Math.min(8, Math.max(0, Number(record.blockGap))) : 1.2,
     clockScale: Number.isFinite(Number(record.clockScale)) ? Math.min(1.8, Math.max(0.7, Number(record.clockScale))) : 1,
+    clockText: Number.isFinite(Number(record.clockText)) ? Math.min(2.2, Math.max(0.7, Number(record.clockText))) : 1,
     logoUrl: typeof record.logoUrl === "string" ? record.logoUrl : "",
   }
 }
