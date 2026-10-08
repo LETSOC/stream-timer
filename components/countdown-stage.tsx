@@ -77,6 +77,7 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
           <div className="mt-[2.1cqi]">
             <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} />
           </div>
+          <SocialRow />
         </div>
 
         <div className="flex h-full items-center justify-center">
@@ -200,11 +201,11 @@ function RollingQr() {
   }, [])
 
   return (
-    <div
-      className="pointer-events-none absolute top-[4.6%] right-[4.4%] z-20"
-      aria-hidden
-    >
-      <div className="size-[8.4cqi] rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]">
+    <div className="pointer-events-none absolute top-[4.6%] right-[4.4%] z-20 flex flex-col items-center">
+      <div
+        className="size-[8.4cqi] rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]"
+        aria-hidden
+      >
         <div className="grid h-full w-full grid-cols-6 gap-[0.16cqi] rounded-[0.62cqi] bg-black p-[0.62cqi]">
           {Array.from({ length: 36 }, (_, index) => {
             const anchor = index * 7 % 3 === 0
@@ -219,7 +220,91 @@ function RollingQr() {
           })}
         </div>
       </div>
+      <span className="mt-[0.55cqi] font-[Arial,Helvetica,sans-serif] text-[0.85cqi] font-bold tracking-[0.14em] text-white uppercase">
+        Join Live
+      </span>
     </div>
+  )
+}
+
+function SocialRow() {
+  const links = [
+    { label: "X", href: "https://x.com/hyphenonline", icon: <XIcon /> },
+    { label: "Facebook", href: "https://www.facebook.com/hyphenonline", icon: <FacebookIcon /> },
+    { label: "LinkedIn", href: "https://www.linkedin.com/company/hyphen", icon: <LinkedInIcon /> },
+    { label: "Instagram", href: "https://www.instagram.com/hyphenonline", icon: <InstagramIcon /> },
+    { label: "YouTube", href: "https://www.youtube.com/@hyphenonline", icon: <YouTubeIcon /> },
+  ]
+  return (
+    <div className="mt-[1.5cqi] flex items-center gap-[0.7cqi]">
+      {links.map((link) => (
+        <a
+          key={link.label}
+          href={link.href}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={link.label}
+          className="inline-flex size-[3.5cqi] items-center justify-center rounded-full border border-white text-white no-underline"
+        >
+          {link.icon}
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function XIcon() {
+  return (
+    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-black">
+      <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>
+        <path d="M14.7 10.3 21.4 3h-1.6l-5.8 6.4L9.2 3H3.4l7 10-7 7.6h1.6l6.1-6.8 4.9 6.8h5.8l-7.1-9.3Zm-2.2 2.4-.7-1L5.6 4.2h2.4l4.5 6.2.7 1 5.9 8.1h-2.4l-4.8-6.8Z" />
+      </svg>
+    </span>
+  )
+}
+
+function FacebookIcon() {
+  return (
+    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-[#3b5998]">
+      <svg viewBox="0 0 24 24" className="size-[1.35cqi]" fill="white" aria-hidden>
+        <path d="M14.5 8.5V6.8c0-.7.5-1 1.2-1H17V3h-2.1C12.4 3 11 4.5 11 6.6v1.9H9v2.7h2V21h3.5v-9.8h2.3l.4-2.7h-2.7Z" />
+      </svg>
+    </span>
+  )
+}
+
+function LinkedInIcon() {
+  return (
+    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-[#0a66c2]">
+      <svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="white" aria-hidden>
+        <path d="M6.7 9.2H4V20h2.7V9.2ZM5.3 4C4.4 4 3.7 4.7 3.7 5.6s.7 1.6 1.6 1.6 1.6-.7 1.6-1.6S6.2 4 5.3 4ZM20 20h-2.7v-5.6c0-1.6-.6-2.6-1.9-2.6-1 0-1.5.7-1.8 1.3-.1.2-.1.6-.1.9V20H11V9.2h2.6v1.5c.4-.7 1.3-1.8 3.2-1.8 2.3 0 4.2 1.5 4.2 4.8V20Z" />
+      </svg>
+    </span>
+  )
+}
+
+function InstagramIcon() {
+  return (
+    <span
+      className="flex size-[2.45cqi] items-center justify-center rounded-full"
+      style={{ background: "linear-gradient(135deg,#f7d046,#e13b6b 55%,#7b3ff2)" }}
+    >
+      <svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="none" stroke="white" strokeWidth="1.8" aria-hidden>
+        <rect x="5" y="5" width="14" height="14" rx="4" />
+        <circle cx="12" cy="12" r="3.2" />
+        <circle cx="16.4" cy="7.6" r="0.7" fill="white" stroke="none" />
+      </svg>
+    </span>
+  )
+}
+
+function YouTubeIcon() {
+  return (
+    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-[#ff0033]">
+      <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>
+        <path d="M9.2 7.6v8.8l7.4-4.4-7.4-4.4Z" />
+      </svg>
+    </span>
   )
 }
 
