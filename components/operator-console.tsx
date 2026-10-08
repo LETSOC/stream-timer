@@ -41,6 +41,7 @@ export function OperatorConsole() {
   const [transparent, setTransparent] = useState(false)
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
+  const [previewFlash, setPreviewFlash] = useState(false)
   const previewReady = useRef(false)
   const now = useNow()
 
