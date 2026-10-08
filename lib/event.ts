@@ -11,6 +11,7 @@ export const DEFAULT_EVENT = {
   scanLabel: "Scan to join",
   joinLabel: "Join Live",
   eventLink: "https://events.hyphenonline.com/HyphenFestival2026",
+  eventLinkLabel: "events.hyphenonline.com/HyphenFestival2026",
   xUrl: "https://x.com/onlinehyphen",
   facebookUrl: "https://facebook.com/onlinehyphen",
   linkedinUrl: "https://linkedin.com/company/hyphenonline",
@@ -40,6 +41,7 @@ export type EventConfig = {
   scanLabel: string
   joinLabel: string
   eventLink: string
+  eventLinkLabel: string
   xUrl: string
   facebookUrl: string
   linkedinUrl: string

@@ -19,11 +19,12 @@ type CountdownStageProps = {
   className?: string
   checker?: number
   showMeta?: boolean
+  showLink?: boolean
   transparent?: boolean
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, transparent = false }: CountdownStageProps) {
-  const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false }: CountdownStageProps) {
+  const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
   const now = useNow()
@@ -98,23 +99,25 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
               { label: "YouTube", href: youtubeUrl, icon: <YouTubeIcon /> },
             ]}
           />
-          <a
-            href={eventLink}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-[0.7cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] tracking-[0.04em] text-white/80 no-underline"
-          >
-            {eventLink.replace(/^https?:\/\//, "")}
-          </a>
         </div>
 
-        <div className="flex h-full items-center justify-center">
+        <div className="flex h-full flex-col items-center justify-center">
           <img
             src="/brand/hyphen-emerald.png"
             alt="hyphen. Cultures, communities, connections. Presented with Emerald."
             className="h-auto w-[86%] max-w-[42cqi] select-none"
             draggable={false}
           />
+          {showLink ? (
+            <a
+              href={eventLink}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-[1.2cqi] max-w-[34cqi] text-center font-[Arial,Helvetica,sans-serif] text-[0.85cqi] leading-tight tracking-[0.02em] break-all text-white/80 no-underline"
+            >
+              {eventLinkLabel}
+            </a>
+          ) : null}
         </div>
       </div>
     </div>

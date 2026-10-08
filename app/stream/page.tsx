@@ -31,6 +31,7 @@ function StreamView() {
         scanLabel: params.get("scan") ?? undefined,
         joinLabel: params.get("join") ?? undefined,
         eventLink: params.get("link") ?? undefined,
+        eventLinkLabel: params.get("linkText") ?? undefined,
         xUrl: params.get("x") ?? undefined,
         facebookUrl: params.get("fb") ?? undefined,
         linkedinUrl: params.get("li") ?? undefined,
@@ -42,6 +43,7 @@ function StreamView() {
 
   const checker = Number(params.get("grid") ?? "6")
   const showMeta = params.get("meta") !== "0"
+  const showLink = params.get("showlink") !== "0"
   const transparent = params.get("bg") === "clear"
 
   useEffect(() => {
@@ -63,6 +65,7 @@ function StreamView() {
         event={event}
         checker={checker}
         showMeta={showMeta}
+        showLink={showLink}
         transparent={transparent}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />

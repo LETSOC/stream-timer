@@ -31,11 +31,12 @@ import {
 
 export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
-  const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
+  const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | "link" | null>(null)
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
+  const [showLink, setShowLink] = useState(true)
   const [transparent, setTransparent] = useState(false)
   const [previewFlash, setPreviewFlash] = useState(false)
   const previewReady = useRef(false)
@@ -68,6 +69,8 @@ export function OperatorConsole() {
       scan: scanLabel,
       join: joinLabel,
       link: eventLink,
+      linkText: eventLinkLabel,
+      showlink: showLink ? "1" : "0",
       x: xUrl,
       fb: facebookUrl,
       li: linkedinUrl,
@@ -78,7 +81,7 @@ export function OperatorConsole() {
       bg: transparent ? "clear" : "black",
     })
     return `/stream?${params.toString()}`
-  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl, checker, showMeta, transparent])
+  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl, checker, showMeta, showLink, transparent])
 
   const streamCommand = buildStreamShellCommand({
     eventName: name,
@@ -206,12 +209,19 @@ export function OperatorConsole() {
             <Field label="Event link" htmlFor="link">
               <Input id="link" type="url" value={eventLink} onChange={(event) => updateEvent({ eventLink: event.target.value })} />
             </Field>
+            <Field label="Event link text" htmlFor="linkText">
+              <Input id="linkText" value={eventLinkLabel} onChange={(event) => updateEvent({ eventLinkLabel: event.target.value })} />
+            </Field>
           </Panel>
 
           <Panel title="Stage options">
             <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={showMeta} onChange={(event) => setShowMeta(event.target.checked)} />
               Show date and timezone
+            </label>
+            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+              <input type="checkbox" className="size-4 accent-black" checked={showLink} onChange={(event) => setShowLink(event.target.checked)} />
+              Show event link
             </label>
             <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={transparent} onChange={(event) => setTransparent(event.target.checked)} />
@@ -275,7 +285,7 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} transparent={transparent} />
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} />
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">
