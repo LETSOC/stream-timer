@@ -137,7 +137,15 @@
   --font-size-h4: 1.875cqi;
 }
 
-.countdown-stage .stage-h1 {
+.countdown-stage .live-wash {
+  background: linear-gradient(115deg, rgba(255, 60, 0, 0.78), rgba(72, 16, 6, 0.62));
+  animation: live-wash 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes live-wash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
   font-family: var(--bold-font), Arial, Helvetica, sans-serif;
   font-size: 56px;
   font-size: var(--font-size-h1);

@@ -53,15 +53,12 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
         style={
           transparent
             ? { background: "transparent" }
-            : live
-              ? {
-                  backgroundColor: "#3a1208",
-                  backgroundImage:
-                    "linear-gradient(115deg, rgba(255,60,0,0.78), rgba(72,16,6,0.62)), url('/brand/hero-bg.png')",
-                }
-              : { backgroundColor: "#070a16", backgroundImage: "url('/brand/hero-bg.png')" }
+            : { backgroundColor: live ? "#3a1208" : "#070a16", backgroundImage: "url('/brand/hero-bg.png')" }
         }
       />
+      {live && !transparent ? (
+        <div className="live-wash pointer-events-none absolute inset-0" />
+      ) : null}
       <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
 
       <div className="relative h-full px-[5.4%] pt-[4.6%] pb-[3.2%]">
