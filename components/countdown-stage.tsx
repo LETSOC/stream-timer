@@ -42,6 +42,15 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
 
       <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
         <div className="flex min-w-0 flex-col justify-center pr-[3%]">
+          <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
+            <span className="rounded-full bg-white px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase">
+              Live Countdown
+            </span>
+            <div className="flex gap-[1.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.12em] text-white/40 uppercase">
+              <span>{date}</span>
+              <span>{timeZone}</span>
+            </div>
+          </div>
           <h1 className="stage-h1 m-0 max-w-[92%] text-white">
             <span className="block">{lead || "Untitled event"}</span>
             {year ? <span className="block">{year}</span> : null}
