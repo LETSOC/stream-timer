@@ -137,14 +137,20 @@ export function OperatorConsole() {
   const previewNow = pausedAt ?? (now ? new Date(now.getTime() + skewMs) : null)
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
 
-  function jumpPreview(seconds: number) {
-    if (!valid || !token) return
+  async function jumpPreview(seconds: number) {
+    if (!valid) return
     setPausedAt(null)
     const testUntil = Date.now() + seconds * 1000
     setSkewMs(target.getTime() - testUntil)
-    void fetch("/api/event", {
+    let auth = token
+    if (!auth) {
+      const boot = await fetch("/api/event", { cache: "no-store" }).then((response) => response.json()).catch(() => null)
+      auth = boot?.token ?? ""
+    }
+    if (!auth) return
+    await fetch("/api/event", {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "x-encoder-token": token },
+      headers: { "Content-Type": "application/json", "x-encoder-token": auth },
       body: JSON.stringify({ event, testUntil }),
     })
   }
@@ -250,7 +256,7 @@ export function OperatorConsole() {
                 [1800, "30min"],
                 [3600, "1 hour"],
               ].map(([seconds, label]) => (
-                <button key={label} type="button" className="rounded-full border border-black/15 bg-[#F6F6F3] px-3 py-1.5 font-mono text-[11px]" onClick={() => jumpPreview(Number(seconds))}>
+                <button key={label} type="button" className="rounded-full bg-black px-3 py-1.5 font-mono text-[11px] text-white" onClick={() => void jumpPreview(Number(seconds))}>
                   {label} left
                 </button>
               ))}
