@@ -24,6 +24,7 @@ import {
 import { useNow } from "@/lib/use-now"
 import { TIME_ZONES } from "@/lib/event"
 import { useStoredEvent } from "@/lib/event-storage"
+import { useEncoderToken } from "@/lib/use-encoder-token"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
@@ -33,12 +34,13 @@ export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
-  const [copied, setCopied] = useState<"stream" | "file" | "link" | null>(null)
+  const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
   const [showLink, setShowLink] = useState(true)
   const [transparent, setTransparent] = useState(false)
-  const [previewFlash, setPreviewFlash] = useState(false)
+  const token = useEncoderToken()
+  const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
   const previewReady = useRef(false)
   const now = useNow()
 
@@ -96,6 +98,30 @@ export function OperatorConsole() {
   })
 
   useEffect(() => {
+    if (!token) return
+    const id = window.setTimeout(() => {
+      void fetch("/api/event", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "x-encoder-token": token },
+        body: JSON.stringify({ event }),
+      })
+        .then((response) => setSyncState(response.ok ? "saved" : "error"))
+        .catch(() => setSyncState("error"))
+    }, 400)
+    return () => window.clearTimeout(id)
+  }, [event, token])
+
+  const stableHref = useMemo(() => {
+    const params = new URLSearchParams()
+    if (checker !== 6) params.set("grid", String(checker))
+    if (!showMeta) params.set("meta", "0")
+    if (!showLink) params.set("showlink", "0")
+    if (transparent) params.set("bg", "clear")
+    const query = params.toString()
+    return query ? `/stream?${query}` : "/stream"
+  }, [checker, showMeta, showLink, transparent])
+
+  useEffect(() => {
     if (!previewReady.current) {
       previewReady.current = true
       return
@@ -105,7 +131,7 @@ export function OperatorConsole() {
     return () => window.clearTimeout(id)
   }, [streamHref])
 
-  async function copy(kind: "stream" | "file" | "link", value: string) {
+  async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
     await navigator.clipboard.writeText(value)
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
@@ -125,9 +151,17 @@ export function OperatorConsole() {
             <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[11px] md:inline-flex">
               <span className="text-black/50">Target</span>
               <span>{valid ? formatClock(target, timeZone) : "—"}</span>
-              <span className="rounded bg-[#D9FF43] px-1.5 py-0.5 text-[10px]">Armed</span>
+              <span className={`rounded px-1.5 py-0.5 text-[10px] ${remaining?.done ? "bg-[#ff3c00] text-white" : "bg-[#D9FF43]"}`}>
+                {remaining?.done ? "LIVE" : "Armed"}
+              </span>
             </span>
-            <Button nativeButton={false} render={<Link href={streamHref} target="_blank" rel="noreferrer" />} className="rounded-full bg-black text-white">
+            <span className="font-mono text-[10px] text-black/50 uppercase">
+              Desk {syncState}
+            </span>
+            <Button type="button" className="rounded-full bg-black text-white" onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
+              {copied === "link" ? "Copied" : "Copy OBS URL"}
+            </Button>
+            <Button nativeButton={false} render={<Link href={stableHref} target="_blank" rel="noreferrer" />} className="rounded-full bg-black text-white">
               Open /stream in new window
             </Button>
           </div>
@@ -137,6 +171,13 @@ export function OperatorConsole() {
       <main className="mx-auto grid max-w-[1600px] items-start gap-6 px-4 py-6 lg:grid-cols-[380px_1fr] sm:px-6">
         <section className="space-y-4 lg:sticky lg:top-24">
           <div className="rounded-[20px] bg-black p-5 text-white">
+            {remaining?.done ? (
+              <div>
+                <p className="font-mono text-[11px] tracking-[0.14em] text-[#ff3c00] uppercase">Live</p>
+                <p className="mt-2 text-2xl font-black">Doors are open</p>
+              </div>
+            ) : (
+              <>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-mono text-[11px] tracking-[0.14em] text-white/60 uppercase">
                 Live countdown · {timeZone}
@@ -159,6 +200,8 @@ export function OperatorConsole() {
                 </div>
               ))}
             </div>
+              </>
+            )}
           </div>
 
           <Panel title="Event core" pill="Editable">
@@ -295,9 +338,17 @@ export function OperatorConsole() {
             <Button
               type="button"
               className="rounded-full bg-black text-white"
-              onClick={() => copy("link", `${window.location.origin}${streamHref}`)}
+              onClick={() => copy("link", `${window.location.origin}${stableHref}`)}
             >
-              {copied === "link" ? "Copied" : "Copy link"}
+              {copied === "link" ? "Copied" : "Copy OBS URL"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-full"
+              onClick={() => copy("params", `${window.location.origin}${streamHref}`)}
+            >
+              {copied === "params" ? "Copied" : "Copy full param URL"}
             </Button>
           </div>
           <p className="font-mono text-[11px] leading-5 text-black/55">

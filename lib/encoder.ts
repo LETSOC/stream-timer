@@ -16,12 +16,15 @@ type Meta = {
   eventName: string;
   dateLine: string;
   targetUnix: number;
+  burnedRemainingAtStart: number;
+  refreshSeconds: number;
 };
 
 export type StartInput = {
   eventName: string;
   dateLine: string;
   targetUnix: number;
+  refreshSeconds: number;
 };
 
 function delay(ms: number): Promise<void> {
@@ -91,6 +94,10 @@ export function readStatus(): EncoderStatus {
     eventName: running && meta ? meta.eventName : null,
     dateLine: running && meta ? meta.dateLine : null,
     targetUnix: running && meta ? meta.targetUnix : null,
+    startedAt: running && meta ? meta.startedAt : null,
+    slateAgeSeconds: running && meta ? Math.floor((Date.now() - meta.startedAt) / 1000) : null,
+    burnedRemainingAtStart: running && meta ? meta.burnedRemainingAtStart : null,
+    refreshSeconds: running && meta ? meta.refreshSeconds : null,
   };
 }
 
@@ -114,19 +121,27 @@ export function parseStartInput(body: unknown): StartInput | null {
   ) {
     return null;
   }
-  return { eventName, dateLine, targetUnix };
+  const rawRefresh = record.refreshSeconds;
+  const refreshSeconds = rawRefresh === undefined ? 600 : typeof rawRefresh === "number" ? rawRefresh : Number.NaN;
+  if (!Number.isInteger(refreshSeconds) || refreshSeconds < 0 || refreshSeconds > 86_400) return null;
+  return { eventName, dateLine, targetUnix, refreshSeconds };
 }
 
 export async function startEncoder(
   input: StartInput,
+  options: { replace?: boolean } = {},
 ): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const current = readMeta();
   if (current && alive(current.pid)) {
-    return {
-      ok: false,
-      error: "An encoder is already running. Stop it before starting another.",
-      status: 409,
-    };
+    if (!options.replace) {
+      return {
+        ok: false,
+        error: "An encoder is already running. Stop it before starting another.",
+        status: 409,
+      };
+    }
+    stopEncoder();
+    await delay(400);
   }
   if (!ffmpegAvailable()) {
     return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 };
@@ -166,6 +181,8 @@ export async function startEncoder(
     eventName: input.eventName,
     dateLine: input.dateLine,
     targetUnix: input.targetUnix,
+    burnedRemainingAtStart: Math.max(0, input.targetUnix - Math.floor(Date.now() / 1000)),
+    refreshSeconds: input.refreshSeconds,
   };
   fs.writeFileSync(META_FILE, JSON.stringify(meta));
   await delay(1500);
@@ -184,6 +201,22 @@ export async function startEncoder(
   }
 
   return { ok: true };
+}
+
+export function restartEncoder(input: StartInput) {
+  return startEncoder(input, { replace: true })
+}
+
+export async function maybeRefreshStaleSlate(): Promise<void> {
+  const meta = readMeta()
+  if (!meta || !alive(meta.pid) || meta.refreshSeconds <= 0) return
+  if (Date.now() - meta.startedAt < meta.refreshSeconds * 1000) return
+  await restartEncoder({
+    eventName: meta.eventName,
+    dateLine: meta.dateLine,
+    targetUnix: meta.targetUnix,
+    refreshSeconds: meta.refreshSeconds,
+  })
 }
 
 export function stopEncoder(): void {

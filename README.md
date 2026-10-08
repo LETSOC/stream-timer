@@ -35,12 +35,16 @@ npm install
 npm run dev
 ```
 
-Open [http://127.0.0.1:43210](http://127.0.0.1:43210).
+Open [http://127.0.0.1:43211](http://127.0.0.1:43211). Port 43210 is left for the other local project.
 
 | Route | Use |
 | --- | --- |
-| `/` | Operator desk: edit title/time, preview the frame, play the encoded slate, copy FFmpeg commands |
-| `/stream` | Clean 16:9 output for an OBS browser source |
+| `/` | Operator desk. Edits save in this browser and sync to `/api/event` |
+| `/stream` | Clean 16:9 OBS output. With no query string it follows the desk |
+| `/api/event` | Saved event. `PUT` needs the encoder token |
+| `/api/encoder` | Play, restart, or stop the FFmpeg slate. Mutations need the token |
+
+OBS can use `http://127.0.0.1:43211/stream`. Copy OBS URL on the desk. A long param URL is still available when you need a fixed snapshot. Encoder mutations are loopback-only unless `ENCODER_ALLOW_REMOTE=1`. The burned-in slate can restart every 10 minutes. A past start shows LIVE instead of zero boxes.
 
 **Play encoded slate** on the desk runs `scripts/stream-countdown.sh --hls` and plays the H.264 picture in the page. That is the same filtergraph as the Castr command. The burned-in clock is the time left when ffmpeg starts. The browser preview keeps using the wall clock.
 

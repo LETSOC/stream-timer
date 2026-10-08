@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { EncoderStatus } from "@/lib/encoder-status";
 import { StreamPlayer } from "@/components/stream-player";
+import { useEncoderToken } from "@/lib/use-encoder-token";
 
 const emptyStatus: EncoderStatus = {
   running: false,
@@ -14,6 +15,10 @@ const emptyStatus: EncoderStatus = {
   eventName: null,
   dateLine: null,
   targetUnix: null,
+  startedAt: null,
+  slateAgeSeconds: null,
+  burnedRemainingAtStart: null,
+  refreshSeconds: null,
 };
 
 export function EncodedPreview({
@@ -27,7 +32,8 @@ export function EncodedPreview({
   targetUnix: number;
   valid: boolean;
 }) {
-  const [status, setStatus] = useState<EncoderStatus>(emptyStatus);
+  const token = useEncoderToken();
+  const [refreshSlate, setRefreshSlate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,14 +63,23 @@ export function EncodedPreview({
       status.dateLine !== dateLine ||
       status.targetUnix !== targetUnix);
 
-  async function start() {
+  async function start(replace = false) {
     setBusy(true);
     setError(null);
     try {
       const response = await fetch("/api/encoder", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventName, dateLine, targetUnix }),
+        headers: {
+          "Content-Type": "application/json",
+          "x-encoder-token": token,
+        },
+        body: JSON.stringify({
+          eventName,
+          dateLine,
+          targetUnix,
+          refreshSeconds: refreshSlate ? 600 : 0,
+          replace,
+        }),
       });
       const body = (await response.json()) as EncoderStatus & { error?: string };
       if (!response.ok) {
@@ -83,7 +98,10 @@ export function EncodedPreview({
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/encoder", { method: "DELETE" });
+      const response = await fetch("/api/encoder", {
+        method: "DELETE",
+        headers: { "x-encoder-token": token },
+      });
       if (response.ok) setStatus((await response.json()) as EncoderStatus);
     } catch {
       setError("The player could not stop ffmpeg.");
@@ -100,14 +118,21 @@ export function EncodedPreview({
         </h2>
         <div className="flex gap-2">
           <Button
-            disabled={busy || status.running || !valid || !status.ffmpeg}
-            onClick={() => void start()}
+            disabled={busy || status.running || !valid || !status.ffmpeg || !token}
+            onClick={() => void start(false)}
           >
             Play encoded slate
           </Button>
           <Button
+            variant="outline"
+            disabled={busy || !status.running || !token}
+            onClick={() => void start(true)}
+          >
+            Restart slate
+          </Button>
+          <Button
             variant="destructive"
-            disabled={busy || !status.running}
+            disabled={busy || !status.running || !token}
             onClick={() => void stop()}
           >
             Stop
@@ -131,7 +156,16 @@ export function EncodedPreview({
           </div>
         )}
       </div>
-      {!status.ffmpeg ? (
+      <label className="flex items-center gap-2 text-xs text-zinc-400">
+        <input type="checkbox" checked={refreshSlate} onChange={(event) => setRefreshSlate(event.target.checked)} />
+        Auto-refresh the burned-in clock every 10 minutes
+      </label>
+      {status.running && status.slateAgeSeconds !== null ? (
+        <p className="text-xs text-zinc-400">
+          Slate age {status.slateAgeSeconds}s.
+          {status.refreshSeconds ? " Auto-refresh is on: the slate restarts at 10 minutes." : " Auto-refresh is off."}
+        </p>
+      ) : null}
         <p className="text-sm text-red-300">
           ffmpeg is not on PATH. The browser preview still runs.
         </p>

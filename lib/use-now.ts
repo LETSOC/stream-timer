@@ -1,19 +1,38 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
+
+const listeners = new Set<() => void>()
+let timer: number | null = null
+
+function emit() {
+  listeners.forEach((listener) => listener())
+}
+
+function subscribe(onStoreChange: () => void) {
+  listeners.add(onStoreChange)
+  if (listeners.size === 1 && typeof window !== "undefined") {
+    timer = window.setInterval(emit, 250)
+  }
+  return () => {
+    listeners.delete(onStoreChange)
+    if (listeners.size === 0 && timer !== null) {
+      window.clearInterval(timer)
+      timer = null
+    }
+  }
+}
+
+function getClientSnapshot(): number {
+  return Math.floor(Date.now() / 250)
+}
+
+function getServerSnapshot(): number {
+  return 0
+}
 
 export function useNow(): Date | null {
-  const [now, setNow] = useState<Date | null>(null)
-
-  useEffect(() => {
-    const tick = () => setNow(new Date())
-    const timeout = window.setTimeout(tick, 0)
-    const id = window.setInterval(tick, 250)
-    return () => {
-      window.clearTimeout(timeout)
-      window.clearInterval(id)
-    }
-  }, [])
-
-  return now
+  const bucket = useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot)
+  if (bucket === 0) return null
+  return new Date(bucket * 250)
 }

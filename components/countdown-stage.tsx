@@ -34,6 +34,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
   const timeLabel = formatTimeRange(time, endTime)
   const divisions = clampChecker(checker)
   const second = now ? Math.floor(now.getTime() / 1000) : 0
+  const live = Boolean(remaining?.done)
 
   return (
     <div
@@ -53,8 +54,8 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
         <div className="flex min-w-0 flex-col justify-center pr-[3%]">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
-            <span className="rounded-full bg-white px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase">
-              {badge}
+            <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
+              {live ? "LIVE" : badge}
             </span>
             {showMeta ? (
               <div className="flex gap-[1.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.12em] text-white/40 uppercase">
@@ -84,7 +85,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             >
               {rsvpLabel}
             </a>
-            <QrSlot label={scanLabel} />
+            <QrSlot label={live ? "Watch live" : scanLabel} />
           </div>
 
           <div className="mt-[2.8cqi]">
@@ -157,7 +158,13 @@ function ClockDisplay({
     return <p className="stage-h4 m-0 text-red-300">The start time could not be parsed.</p>
   }
   if (remaining.done) {
-    return <p className="stage-h1 m-0 text-[#ff4a1a]">The festival has started</p>
+    return (
+      <div className="max-w-[42cqi]">
+        <p className="m-0 font-[Arial,Helvetica,sans-serif] text-[2.2cqi] leading-tight font-bold text-[#ff3c00]">
+          Doors are open — the festival has started
+        </p>
+      </div>
+    )
   }
   return (
     <UnitRow

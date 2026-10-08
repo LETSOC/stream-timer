@@ -14,7 +14,7 @@ function readString(record: Record<string, unknown>, key: string): string | unde
   return typeof value === "string" ? value : undefined
 }
 
-function asConfig(value: unknown): EventConfig | null {
+export function asEventConfig(value: unknown): EventConfig | null {
   if (!value || typeof value !== "object") return null
   const record = value as Record<string, unknown>
   const name = readString(record, "name")
@@ -62,7 +62,7 @@ export function readStoredEvent(): EventConfig | null {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
-    const config = asConfig(parsed)
+    const config = asEventConfig(parsed)
     return config ? migrateEvent(config) : null
   } catch {
     return null

@@ -1,10 +1,12 @@
 "use client"
 
-import { Suspense, useEffect, useMemo } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
-import { DEFAULT_EVENT } from "@/lib/event"
-import { resolveEvent } from "@/lib/event-storage"
+import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
+import { asEventConfig, resolveEvent } from "@/lib/event-storage"
+
+const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
 export default function StreamPage() {
   return (
@@ -16,7 +18,8 @@ export default function StreamPage() {
 
 function StreamView() {
   const params = useSearchParams()
-  const event = useMemo(
+  const hasOverrides = OVERRIDE_KEYS.some((key) => params.get(key))
+  const queryEvent = useMemo(
     () =>
       resolveEvent({
         name: params.get("name") ?? undefined,
@@ -40,6 +43,29 @@ function StreamView() {
       }),
     [params],
   )
+  const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
+
+  useEffect(() => {
+    if (hasOverrides) return
+    let cancelled = false
+    const load = () => {
+      void fetch("/api/event", { cache: "no-store" })
+        .then((response) => response.json())
+        .then((body: { event?: unknown }) => {
+          const next = asEventConfig(body.event)
+          if (!cancelled && next) setServerEvent(next)
+        })
+        .catch(() => undefined)
+    }
+    load()
+    const id = window.setInterval(load, 2000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [hasOverrides])
+
+  const event = hasOverrides ? queryEvent : serverEvent
 
   const checker = Number(params.get("grid") ?? "6")
   const showMeta = params.get("meta") !== "0"
