@@ -106,6 +106,46 @@ export function OperatorConsole() {
   const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}`
 
   useEffect(() => {
+    const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
+    if (stageRaw) {
+      try {
+        const stage = JSON.parse(stageRaw) as { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean }
+        if (stage.checker) setChecker(stage.checker)
+        if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
+        if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
+        if (typeof stage.transparent === "boolean") setTransparent(stage.transparent)
+      } catch {
+        /* ignore a bad local draft */
+      }
+    }
+    const savedRtmp = window.localStorage.getItem("hyphen-countdown-rtmp")
+    if (savedRtmp) setRtmpUrl(savedRtmp)
+    void fetch("/api/event", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((body: { event?: unknown; stage?: { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean } }) => {
+        const saved = asEventConfig(body.event)
+        if (saved && !window.localStorage.getItem("hyphen-countdown-event")) updateEvent(saved)
+        if (!stageRaw && body.stage) {
+          if (body.stage.checker) setChecker(body.stage.checker)
+          if (typeof body.stage.showMeta === "boolean") setShowMeta(body.stage.showMeta)
+          if (typeof body.stage.showLink === "boolean") setShowLink(body.stage.showLink)
+          if (typeof body.stage.transparent === "boolean") setTransparent(body.stage.transparent)
+        }
+      })
+      .finally(() => setHydrated(true))
+  }, [updateEvent])
+
+  useEffect(() => {
+    if (!hydrated) return
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent }))
+  }, [hydrated, checker, showMeta, showLink, transparent])
+
+  useEffect(() => {
+    if (!hydrated) return
+    window.localStorage.setItem("hyphen-countdown-rtmp", rtmpUrl)
+  }, [hydrated, rtmpUrl])
+
+  useEffect(() => {
     if (!token || !hydrated) return
     const id = window.setTimeout(() => {
       void fetch("/api/event", {
