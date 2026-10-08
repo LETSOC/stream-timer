@@ -103,25 +103,24 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             ]}
           />
         </div>
-
-        <div className="flex h-full flex-col items-center justify-center pt-[6%]">
-          <img
-            src="/brand/hyphen-emerald.png"
-            alt="hyphen. Cultures, communities, connections. Presented with Emerald."
-            className="h-auto w-[86%] max-w-[42cqi] select-none"
-            draggable={false}
-          />
-          {showLink ? (
-            <a
-              href={eventLink}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-[1.2cqi] max-w-[34cqi] text-center font-[Arial,Helvetica,sans-serif] text-[0.85cqi] leading-tight tracking-[0.02em] break-all text-white/80 no-underline"
-            >
-              {eventLinkLabel}
-            </a>
-          ) : null}
-        </div>
+      </div>
+      <div className="pointer-events-none absolute top-[18%] right-[6%] flex w-[34%] flex-col items-center">
+        <img
+          src="/brand/hyphen-emerald.png"
+          alt="hyphen. Cultures, communities, connections. Presented with Emerald."
+          className="h-auto w-full select-none"
+          draggable={false}
+        />
+        {showLink ? (
+          <a
+            href={eventLink}
+            target="_blank"
+            rel="noreferrer"
+            className="pointer-events-auto mt-[1.2cqi] max-w-full text-center font-[Arial,Helvetica,sans-serif] text-[0.85cqi] leading-tight tracking-[0.02em] break-all text-white/80 no-underline"
+          >
+            {eventLinkLabel}
+          </a>
+        ) : null}
       </div>
     </div>
   )
