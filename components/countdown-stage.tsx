@@ -53,8 +53,8 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       />
       <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
 
-      <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-start px-[5.4%] pt-[4.6%] pb-[3.2%]">
-        <div className="flex min-w-0 flex-col justify-start pr-[3%]">
+      <div className="relative h-full px-[5.4%] pt-[4.6%] pb-[3.2%]">
+        <div className="flex min-w-0 max-w-[58%] flex-col justify-start">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
             <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
               {live ? "LIVE" : badge}
