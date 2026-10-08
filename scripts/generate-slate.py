@@ -161,7 +161,7 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
 
     btn = (pad_x, 430, pad_x + 148, 430 + 44)
     rounded_rect(draw, btn, 7, fill=(122, 62, 56, 210))
-    draw.text((pad_x + 74, 452), "RSVP NOW", font=rsvp_font, fill=(255, 255, 255, 255), anchor="mm")
+    draw.text((pad_x + 74, 452), "RSVP - Open", font=rsvp_font, fill=(255, 255, 255, 255), anchor="mm")
 
     qr_size = 64
     qr_x, qr_y = pad_x + 164, 420

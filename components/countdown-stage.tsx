@@ -60,7 +60,7 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
               target="_blank"
               rel="noreferrer"
             >
-              RSVP NOW
+              RSVP - Open
             </a>
             <QrSlot />
           </div>
