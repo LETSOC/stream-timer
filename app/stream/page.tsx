@@ -55,7 +55,7 @@ function StreamView() {
     const load = () => {
       void fetch("/api/event", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: unknown; showMeta?: unknown; showLink?: unknown; transparent?: unknown } }) => {
+        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: unknown; showMeta?: unknown; showLink?: unknown; transparent?: unknown; lineSpacing?: unknown; blockGap?: unknown; clockScale?: unknown; logoUrl?: unknown } }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (!hasOverrides && next) setServerEvent(next)
