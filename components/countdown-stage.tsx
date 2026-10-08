@@ -64,7 +64,8 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
 
           <div className="mt-[1.9cqi] flex items-center gap-[1.4cqi]">
             <a
-              className="stage-rsvp inline-flex items-center justify-center bg-[#ff3c00] text-white no-underline"
+              className="stage-rsvp inline-flex items-center justify-center text-white no-underline"
+              style={{ backgroundColor: "#ff3c00", opacity: 1 }}
               href={rsvpUrl}
               target="_blank"
               rel="noreferrer"

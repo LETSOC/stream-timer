@@ -162,7 +162,8 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   color: #fff;
-  background: #ff3c00;
+  background: #ff3c00 !important;
+  opacity: 1;
   border-radius: 6px;
   padding: 0.95em 1.35em;
 }
