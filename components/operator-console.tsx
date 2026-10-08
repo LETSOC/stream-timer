@@ -112,8 +112,8 @@ export function OperatorConsole() {
               <span>{valid ? formatClock(target, timeZone) : "—"}</span>
               <span className="rounded bg-[#D9FF43] px-1.5 py-0.5 text-[10px]">Armed</span>
             </span>
-            <Button nativeButton={false} render={<Link href={streamHref} />} className="rounded-full bg-black text-white">
-              Open /stream
+            <Button nativeButton={false} render={<Link href={streamHref} target="_blank" rel="noreferrer" />} className="rounded-full bg-black text-white">
+              Open /stream in new window
             </Button>
           </div>
         </div>
