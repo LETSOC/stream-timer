@@ -98,6 +98,8 @@ function StreamView() {
   const showMeta = params.get("meta") ? params.get("meta") !== "0" : stage.showMeta
   const showLink = params.get("showlink") ? params.get("showlink") !== "0" : stage.showLink
   const transparent = params.get("bg") ? params.get("bg") === "clear" : stage.transparent
+  const clockScale = params.get("clock") ? Number(params.get("clock")) : stage.clockScale
+  const clockText = params.get("text") ? Number(params.get("text")) : stage.clockText
 
   useEffect(() => {
     if (!transparent) return
@@ -122,8 +124,8 @@ function StreamView() {
         transparent={transparent}
         lineSpacing={stage.lineSpacing}
         blockGap={stage.blockGap}
-        clockScale={stage.clockScale}
-        clockText={stage.clockText}
+        clockScale={clockScale}
+        clockText={clockText}
         logoUrl={stage.logoUrl}
         clock={testClock}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"

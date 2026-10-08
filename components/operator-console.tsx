@@ -208,9 +208,11 @@ export function OperatorConsole() {
     if (!showMeta) params.set("meta", "0")
     if (!showLink) params.set("showlink", "0")
     if (transparent) params.set("bg", "clear")
+    if (clockScale !== 1) params.set("clock", clockScale.toFixed(2))
+    if (clockText !== 1) params.set("text", clockText.toFixed(2))
     const query = params.toString()
     return query ? `/stream?${query}` : "/stream"
-  }, [checker, showMeta, showLink, transparent])
+  }, [checker, showMeta, showLink, transparent, clockScale, clockText])
 
   useEffect(() => {
     if (!previewReady.current) {
