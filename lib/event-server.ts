@@ -15,6 +15,8 @@ export type StageOptions = {
   showLink: boolean
   transparent: boolean
   lineSpacing: number
+  blockGap: number
+  clockScale: number
   logoUrl: string
 }
 
