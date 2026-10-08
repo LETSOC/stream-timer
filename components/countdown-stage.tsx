@@ -213,13 +213,14 @@ function UnitRow({
     { value: minutes, label: "Minutes" },
     { value: seconds, label: "Seconds" },
   ]
+  const box = 8.6 * scale * Math.max(1, textScale)
   return (
     <div className={cn("inline-flex", muted && "opacity-40")} style={{ gap: `${0.55 * scale}cqi` }}>
       {units.map((unit) => (
         <div
           key={unit.label}
           className="rounded-[0.5cqi] border border-white text-center"
-          style={{ minWidth: `${7.4 * scale}cqi`, padding: `${0.9 * scale}cqi ${1.2 * scale}cqi` }}
+          style={{ width: `${box}cqi`, padding: `${0.9 * scale}cqi ${0.45 * scale}cqi` }}
         >
           <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${2.7 * scale * textScale}cqi` }}>
             {unit.value}
