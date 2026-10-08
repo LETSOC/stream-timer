@@ -107,7 +107,7 @@ export function OperatorConsole() {
       void fetch("/api/event", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "x-encoder-token": token },
-        body: JSON.stringify({ event, testUntil }),
+        body: JSON.stringify({ event, testUntil, pausedAt: pausedAt ? pausedAt.getTime() : null }),
       })
         .then(async (response) => {
           if (response.ok) {
@@ -121,7 +121,7 @@ export function OperatorConsole() {
         .catch(() => setSyncState("local"))
     }, 400)
     return () => window.clearTimeout(id)
-  }, [event, token, testUntil])
+  }, [event, token, testUntil, pausedAt])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
@@ -149,39 +149,39 @@ export function OperatorConsole() {
   async function jumpPreview(seconds: number) {
     if (!valid) return
     setPausedAt(null)
-    const testUntil = Date.now() + seconds * 1000
-    setTestUntil(testUntil)
-    setSkewMs(target.getTime() - testUntil)
-    let auth = token
-    if (!auth) {
-      const boot = await fetch("/api/event", { cache: "no-store" }).then((response) => response.json()).catch(() => null)
-      auth = boot?.token ?? ""
-    }
-    if (!auth) return
-    await fetch("/api/event", {
+    const nextUntil = Date.now() + seconds * 1000
+    setTestUntil(nextUntil)
+    setSkewMs(target.getTime() - nextUntil)
+    void fetch("/api/event", {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "x-encoder-token": auth },
-      body: JSON.stringify({ event, testUntil }),
+      headers: { "Content-Type": "application/json", "x-encoder-token": token },
+      body: JSON.stringify({ event, testUntil: nextUntil, pausedAt: null }),
     })
   }
 
   function goLiveNow() {
-    const past = new Date(Date.now() - 60_000)
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(past)
-    const read = (type: string) => parts.find((part) => part.type === type)?.value ?? ""
+    if (!valid) return
+    const nextUntil = Date.now() - 1000
     setPausedAt(null)
+    setTestUntil(nextUntil)
+    setSkewMs(target.getTime() - nextUntil)
+    void fetch("/api/event", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "x-encoder-token": token },
+      body: JSON.stringify({ event, testUntil: nextUntil, pausedAt: null }),
+    })
+  }
+
+  function restoreFestival() {
+    const restored = { date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }
+    setPausedAt(null)
+    setTestUntil(null)
     setSkewMs(0)
-    updateEvent({
-      date: `${read("year")}-${read("month")}-${read("day")}`,
-      time: `${read("hour")}:${read("minute")}`,
+    updateEvent(restored)
+    void fetch("/api/event", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "x-encoder-token": token },
+      body: JSON.stringify({ event: { ...event, ...restored }, testUntil: null, pausedAt: null }),
     })
   }
 
@@ -272,7 +272,13 @@ export function OperatorConsole() {
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" className="rounded-full bg-black text-white" onClick={() => setPausedAt(pausedAt ? null : previewNow)}>
+              <Button type="button" className="rounded-full bg-black text-white" onClick={() => {
+                if (pausedAt) {
+                  setPausedAt(null)
+                  return
+                }
+                if (previewNow) setPausedAt(previewNow)
+              }}>
                 {pausedAt ? "Play" : "Pause"}
               </Button>
               <Button type="button" variant="outline" className="rounded-full" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>
@@ -281,12 +287,12 @@ export function OperatorConsole() {
               <Button type="button" className="rounded-full bg-[#ff3c00] text-white" onClick={goLiveNow}>
                 Go live now
               </Button>
-              <Button type="button" variant="outline" className="rounded-full" onClick={() => updateEvent({ date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone })}>
+              <Button type="button" variant="outline" className="rounded-full" onClick={restoreFestival}>
                 Restore 4 Nov
               </Button>
             </div>
             <p className="font-mono text-[10px] leading-5 text-black/55">
-              15s, 10min, 30min, and 1 hour also move /stream. The booking QR stays Scan to join. Reset clock clears the test.
+              Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
             </p>
           </Panel>
 

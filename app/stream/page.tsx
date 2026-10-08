@@ -47,17 +47,19 @@ function StreamView() {
   )
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
   const [testUntil, setTestUntil] = useState<number | null>(null)
+  const [pausedAt, setPausedAt] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
     const load = () => {
       void fetch("/api/event", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { event?: unknown; testUntil?: unknown }) => {
+        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (!hasOverrides && next) setServerEvent(next)
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
+          setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
         })
         .catch(() => undefined)
     }
@@ -71,9 +73,12 @@ function StreamView() {
 
   const now = useNow()
   const event = hasOverrides ? queryEvent : serverEvent
-  const testClock = testUntil && now
-    ? new Date(now.getTime() + wallTimeInZone(event.date, event.time, event.timeZone).getTime() - testUntil)
-    : undefined
+  const targetMs = wallTimeInZone(event.date, event.time, event.timeZone).getTime()
+  const testClock = pausedAt
+    ? new Date(pausedAt)
+    : testUntil && now
+      ? new Date(now.getTime() + targetMs - testUntil)
+      : undefined
 
   const checker = Number(params.get("grid") ?? "6")
   const showMeta = params.get("meta") !== "0"
