@@ -64,15 +64,26 @@ export function EncodedPreview({
       status.dateLine !== dateLine ||
       status.targetUnix !== targetUnix);
 
+  async function authToken() {
+    if (token) return token
+    const boot = await fetch("/api/event", { cache: "no-store" }).then((response) => response.json()).catch(() => null)
+    return typeof boot?.token === "string" ? boot.token : ""
+  }
+
   async function start(replace = false) {
     setBusy(true);
     setError(null);
     try {
+      const auth = await authToken()
+      if (!auth) {
+        setError("The encoder token was not issued. Open the desk at http://localhost:43211.")
+        return
+      }
       const response = await fetch("/api/encoder", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-encoder-token": token,
+          "x-encoder-token": auth,
         },
         body: JSON.stringify({
           eventName,
@@ -99,9 +110,10 @@ export function EncodedPreview({
     setBusy(true);
     setError(null);
     try {
+      const auth = await authToken()
       const response = await fetch("/api/encoder", {
         method: "DELETE",
-        headers: { "x-encoder-token": token },
+        headers: { "x-encoder-token": auth },
       });
       if (response.ok) setStatus((await response.json()) as EncoderStatus);
     } catch {
@@ -119,21 +131,21 @@ export function EncodedPreview({
         </h2>
         <div className="flex gap-2">
           <Button
-            disabled={busy || status.running || !valid || !status.ffmpeg || !token}
+            disabled={busy || status.running || !valid || !status.ffmpeg}
             onClick={() => void start(false)}
           >
             Play encoded slate
           </Button>
           <Button
             variant="outline"
-            disabled={busy || !status.running || !token}
+            disabled={busy || !status.running}
             onClick={() => void start(true)}
           >
             Restart slate
           </Button>
           <Button
             variant="destructive"
-            disabled={busy || !status.running || !token}
+            disabled={busy || !status.running}
             onClick={() => void stop()}
           >
             Stop

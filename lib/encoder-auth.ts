@@ -32,6 +32,8 @@ export function isLoopbackRequest(request: Request): boolean {
   const realIp = request.headers.get("x-real-ip")
   if (forwarded && !loopbackHost(forwarded)) return false
   if (realIp && !loopbackHost(realIp)) return false
+  const host = request.headers.get("host")?.split(":")[0] ?? ""
+  if (loopbackHost(host)) return true
   try {
     return loopbackHost(new URL(request.url).hostname)
   } catch {
