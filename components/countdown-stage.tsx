@@ -104,7 +104,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           />
         </div>
       </div>
-      <div className="pointer-events-none absolute top-[18%] right-[6%] flex w-[34%] flex-col items-center">
+      <div className="pointer-events-none absolute top-1/2 right-[6%] flex w-[34%] -translate-y-1/2 flex-col items-center">
         <img
           src="/brand/hyphen-emerald.png"
           alt="hyphen. Cultures, communities, connections. Presented with Emerald."
