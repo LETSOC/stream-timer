@@ -244,7 +244,7 @@ function SocialRow() {
           target="_blank"
           rel="noreferrer"
           aria-label={link.label}
-          className="inline-flex size-[3.5cqi] items-center justify-center rounded-full border border-white text-white no-underline"
+          className="inline-flex size-[3.15cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline"
         >
           {link.icon}
         </a>
@@ -255,7 +255,7 @@ function SocialRow() {
 
 function XIcon() {
   return (
-    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-black">
+    <span className="flex size-full items-center justify-center rounded-full bg-black">
       <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>
         <path d="M14.7 10.3 21.4 3h-1.6l-5.8 6.4L9.2 3H3.4l7 10-7 7.6h1.6l6.1-6.8 4.9 6.8h5.8l-7.1-9.3Zm-2.2 2.4-.7-1L5.6 4.2h2.4l4.5 6.2.7 1 5.9 8.1h-2.4l-4.8-6.8Z" />
       </svg>
@@ -275,7 +275,7 @@ function FacebookIcon() {
 
 function LinkedInIcon() {
   return (
-    <span className="flex size-[2.45cqi] items-center justify-center rounded-full bg-[#0a66c2]">
+    <span className="flex size-full items-center justify-center rounded-full bg-[#0a66c2]">
       <svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="white" aria-hidden>
         <path d="M6.7 9.2H4V20h2.7V9.2ZM5.3 4C4.4 4 3.7 4.7 3.7 5.6s.7 1.6 1.6 1.6 1.6-.7 1.6-1.6S6.2 4 5.3 4ZM20 20h-2.7v-5.6c0-1.6-.6-2.6-1.9-2.6-1 0-1.5.7-1.8 1.3-.1.2-.1.6-.1.9V20H11V9.2h2.6v1.5c.4-.7 1.3-1.8 3.2-1.8 2.3 0 4.2 1.5 4.2 4.8V20Z" />
       </svg>
