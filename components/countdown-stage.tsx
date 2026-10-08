@@ -53,8 +53,8 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       />
       <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
 
-      <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
-        <div className="flex min-w-0 flex-col justify-center pr-[3%]">
+      <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-start px-[5.4%] pt-[4.6%] pb-[3.2%]">
+        <div className="flex min-w-0 flex-col justify-start pr-[3%]">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
             <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
               {live ? "LIVE" : badge}
@@ -71,13 +71,13 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             {year ? <span className="block">{year}</span> : null}
           </h1>
 
-          <ul className="mt-[2.1cqi] m-0 flex list-none flex-col gap-[0.7cqi] p-0">
+          <ul className="mt-[1.4cqi] m-0 flex list-none flex-col gap-[0.45cqi] p-0">
             <MetaRow icon={<CalendarIcon />}>{now ? dateLabel : date}</MetaRow>
             <MetaRow icon={<ClockIcon />}>{timeLabel}</MetaRow>
             <MetaRow icon={<PinIcon />}>{venue}</MetaRow>
           </ul>
 
-          <div className="mt-[1.9cqi] flex items-center gap-[1.4cqi]">
+          <div className="mt-[1.2cqi] flex items-center gap-[1.4cqi]">
             <a
               className="stage-rsvp inline-flex items-center justify-center text-white no-underline"
               style={{ backgroundColor: "#ff3c00", opacity: 1 }}
@@ -90,7 +90,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             <QrSlot label={scanLabel} />
           </div>
 
-          <div className="mt-[2.8cqi]">
+          <div className="mt-[1.6cqi]">
             <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} />
           </div>
           <SocialRow
@@ -104,7 +104,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           />
         </div>
 
-        <div className="flex h-full flex-col items-center justify-center">
+        <div className="flex h-full flex-col items-center justify-center pt-[6%]">
           <img
             src="/brand/hyphen-emerald.png"
             alt="hyphen. Cultures, communities, connections. Presented with Emerald."
