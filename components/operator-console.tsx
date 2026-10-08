@@ -33,8 +33,10 @@ export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
-  const [copied, setCopied] = useState<"stream" | "file" | null>(null)
+  const [copied, setCopied] = useState<"stream" | "file" | "link" | null>(null)
   const [checker, setChecker] = useState(6)
+  const [showMeta, setShowMeta] = useState(true)
+  const [transparent, setTransparent] = useState(false)
   const now = useNow()
 
   const target = wallTimeInZone(date, time, timeZone)
@@ -70,9 +72,11 @@ export function OperatorConsole() {
       ig: instagramUrl,
       yt: youtubeUrl,
       grid: String(checker),
+      meta: showMeta ? "1" : "0",
+      bg: transparent ? "clear" : "black",
     })
     return `/stream?${params.toString()}`
-  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl, checker])
+  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl, checker, showMeta, transparent])
 
   const streamCommand = buildStreamShellCommand({
     eventName: name,
@@ -86,7 +90,7 @@ export function OperatorConsole() {
     targetUnix,
   })
 
-  async function copy(kind: "stream" | "file", value: string) {
+  async function copy(kind: "stream" | "file" | "link", value: string) {
     await navigator.clipboard.writeText(value)
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
@@ -181,6 +185,24 @@ export function OperatorConsole() {
             <Field label="Badge" htmlFor="badge">
               <Input id="badge" value={badge} onChange={(event) => updateEvent({ badge: event.target.value })} />
             </Field>
+            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+              <input
+                type="checkbox"
+                className="size-4 accent-black"
+                checked={showMeta}
+                onChange={(event) => setShowMeta(event.target.checked)}
+              />
+              Show date and timezone
+            </label>
+            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+              <input
+                type="checkbox"
+                className="size-4 accent-black"
+                checked={transparent}
+                onChange={(event) => setTransparent(event.target.checked)}
+              />
+              Transparent background
+            </label>
             <Field label="Scan label" htmlFor="scan">
               <Input id="scan" value={scanLabel} onChange={(event) => updateEvent({ scanLabel: event.target.value })} />
             </Field>
@@ -214,13 +236,46 @@ export function OperatorConsole() {
         </section>
 
         <section className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">Preview · 16:9</h2>
-            <span className="font-mono text-[10px] text-black/50">1920×1080 · local clock</span>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">
+                Preview · 16:9 hero · {transparent ? "clear edition" : "black edition"}
+              </h2>
+              <span className="rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.12em] text-white uppercase">
+                Live update
+              </span>
+            </div>
+            <span className="rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[10px] text-black/50">
+              1920×1080 · official logo · {transparent ? "transparent bg" : "black bg"} · {transparent ? "no chrome" : "hero"}
+            </span>
           </div>
-          <div className="overflow-hidden rounded-[24px] border border-black/10 bg-black shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
-            <CountdownStage event={event} checker={checker} />
+          <div
+            className="overflow-hidden rounded-[24px] border border-black/10 shadow-[0_20px_60px_rgba(0,0,0,0.18)]"
+            style={
+              transparent
+                ? { backgroundImage: "linear-gradient(45deg,#d9d9d4 25%,transparent 25%),linear-gradient(-45deg,#d9d9d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d9d9d4 75%),linear-gradient(-45deg,transparent 75%,#d9d9d4 75%)", backgroundSize: "24px 24px", backgroundPosition: "0 0,0 12px,12px -12px,-12px 0" }
+                : { background: "#000" }
+            }
+          >
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} transparent={transparent} />
           </div>
+          <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
+            <p className="font-mono text-[11px] leading-5 break-all">
+              <span className="text-black/50">Stream params preview: </span>
+              {streamHref}
+            </p>
+            <Button
+              type="button"
+              className="rounded-full bg-black text-white"
+              onClick={() => copy("link", `${window.location.origin}${streamHref}`)}
+            >
+              {copied === "link" ? "Copied" : "Copy link"}
+            </Button>
+          </div>
+          <p className="font-mono text-[11px] leading-5 text-black/55">
+            — This is a local draft preview. No data leaves the browser. For OBS, add a Browser Source at 1920×1080 and paste the copied link. Countdown runs off this computer’s clock.
+            {transparent ? " Transparent background is on: in OBS leave the browser source CSS empty so the page can show through." : ""}
+          </p>
           <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
         </section>
       </main>

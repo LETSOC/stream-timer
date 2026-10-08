@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useMemo } from "react"
+import { Suspense, useEffect, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { DEFAULT_EVENT } from "@/lib/event"
@@ -41,12 +41,29 @@ function StreamView() {
   )
 
   const checker = Number(params.get("grid") ?? "6")
+  const showMeta = params.get("meta") !== "0"
+  const transparent = params.get("bg") === "clear"
+
+  useEffect(() => {
+    if (!transparent) return
+    const html = document.documentElement
+    const body = document.body
+    const previous = [html.style.background, body.style.background]
+    html.style.background = "transparent"
+    body.style.background = "transparent"
+    return () => {
+      html.style.background = previous[0]
+      body.style.background = previous[1]
+    }
+  }, [transparent])
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-black">
+    <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
       <CountdownStage
         event={event}
         checker={checker}
+        showMeta={showMeta}
+        transparent={transparent}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
     </main>

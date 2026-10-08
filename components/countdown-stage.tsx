@@ -18,9 +18,11 @@ type CountdownStageProps = {
   event: EventConfig
   className?: string
   checker?: number
+  showMeta?: boolean
+  transparent?: boolean
 }
 
-export function CountdownStage({ event, className, checker = 6 }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, transparent = false }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -38,8 +40,12 @@ export function CountdownStage({ event, className, checker = 6 }: CountdownStage
       style={{ aspectRatio: "16 / 9" }}
     >
       <div
-        className="pointer-events-none absolute inset-0 bg-[#070a16] bg-cover bg-center"
-        style={{ backgroundImage: "url('/brand/hero-bg.png')" }}
+        className="pointer-events-none absolute inset-0 bg-cover bg-center"
+        style={
+          transparent
+            ? { background: "transparent" }
+            : { backgroundColor: "#070a16", backgroundImage: "url('/brand/hero-bg.png')" }
+        }
       />
       <RollingQr divisions={divisions} second={second} label={joinLabel} />
 
@@ -49,10 +55,12 @@ export function CountdownStage({ event, className, checker = 6 }: CountdownStage
             <span className="rounded-full bg-white px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase">
               {badge}
             </span>
-            <div className="flex gap-[1.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.12em] text-white/40 uppercase">
-              <span>{date}</span>
-              <span>{timeZone}</span>
-            </div>
+            {showMeta ? (
+              <div className="flex gap-[1.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.12em] text-white/40 uppercase">
+                <span>{date}</span>
+                <span>{timeZone}</span>
+              </div>
+            ) : null}
           </div>
           <h1 className="stage-h1 m-0 max-w-[92%] text-white">
             <span className="block">{lead || "Untitled event"}</span>
