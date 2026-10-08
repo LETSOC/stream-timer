@@ -102,6 +102,8 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
+  const stageRef = useRef({ checker, showMeta, showLink, transparent })
+  stageRef.current = { checker, showMeta, showLink, transparent }
 
   useEffect(() => {
     if (!token) return
@@ -113,7 +115,7 @@ export function OperatorConsole() {
           event,
           testUntil,
           pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent },
+          stage: stageRef.current,
         }),
       })
         .then(async (response) => {
@@ -128,7 +130,7 @@ export function OperatorConsole() {
         .catch(() => setSyncState("local"))
     }, 400)
     return () => window.clearTimeout(id)
-  }, [event, token, testUntil, pausedMs, checker, showMeta, showLink, transparent])
+  }, [event, token, testUntil, pausedMs])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
