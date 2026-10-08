@@ -23,11 +23,12 @@ type CountdownStageProps = {
   transparent?: boolean
   lineSpacing?: number
   blockGap?: number
+  clockScale?: number
   logoUrl?: string
   clock?: Date | null
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, logoUrl = "", clock }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, logoUrl = "", clock }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -154,7 +155,7 @@ function ClockDisplay({
   ready: boolean
 }) {
   if (!ready) {
-    return <UnitRow days="--" hours="--" minutes="--" seconds="--" muted />
+    return <UnitRow days="--" hours="--" minutes="--" seconds="--" muted scale={clockScale} />
   }
   if (!valid || !remaining) {
     return <p className="stage-h4 m-0 text-red-300">The start time could not be parsed.</p>
@@ -178,6 +179,7 @@ function ClockDisplay({
       hours={pad2(remaining.hours)}
       minutes={pad2(remaining.minutes)}
       seconds={pad2(remaining.seconds)}
+      scale={clockScale}
     />
   )
 }
@@ -188,12 +190,14 @@ function UnitRow({
   minutes,
   seconds,
   muted = false,
+  scale = 1,
 }: {
   days: string
   hours: string
   minutes: string
   seconds: string
   muted?: boolean
+  scale?: number
 }) {
   const units = [
     { value: days, label: "Days" },
@@ -202,16 +206,17 @@ function UnitRow({
     { value: seconds, label: "Seconds" },
   ]
   return (
-    <div className={cn("inline-flex gap-[0.55cqi]", muted && "opacity-40")}>
+    <div className={cn("inline-flex", muted && "opacity-40")} style={{ gap: `${0.55 * scale}cqi` }}>
       {units.map((unit) => (
         <div
           key={unit.label}
-          className="min-w-[7.4cqi] rounded-[0.5cqi] border border-white px-[1.2cqi] py-[0.9cqi] text-center"
+          className="rounded-[0.5cqi] border border-white text-center"
+          style={{ minWidth: `${7.4 * scale}cqi`, padding: `${0.9 * scale}cqi ${1.2 * scale}cqi` }}
         >
-          <div className="font-[Arial,Helvetica,sans-serif] text-[2.7cqi] leading-none font-bold tabular-nums">
+          <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${2.7 * scale}cqi` }}>
             {unit.value}
           </div>
-          <div className="mt-[0.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.72cqi] tracking-[0.14em] text-white/80 uppercase">
+          <div className="font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-white/80 uppercase" style={{ marginTop: `${0.4 * scale}cqi`, fontSize: `${0.72 * scale}cqi` }}>
             {unit.label}
           </div>
         </div>
