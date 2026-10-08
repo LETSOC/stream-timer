@@ -40,6 +40,7 @@ export function OperatorConsole() {
   const [showLink, setShowLink] = useState(true)
   const [transparent, setTransparent] = useState(false)
   const [lineSpacing, setLineSpacing] = useState(1.14)
+  const [blockGap, setBlockGap] = useState(1.2)
   const [logoUrl, setLogoUrl] = useState("")
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
@@ -105,18 +106,19 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
-  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${logoUrl}`
+  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${logoUrl}`
 
   useEffect(() => {
     const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
     if (stageRaw) {
       try {
-        const stage = JSON.parse(stageRaw) as { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean; lineSpacing?: number; logoUrl?: string }
+        const stage = JSON.parse(stageRaw) as { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean; lineSpacing?: number; blockGap?: number; logoUrl?: string }
         if (stage.checker) setChecker(stage.checker)
         if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
         if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
         if (typeof stage.transparent === "boolean") setTransparent(stage.transparent)
         if (typeof stage.lineSpacing === "number") setLineSpacing(stage.lineSpacing)
+        if (typeof stage.blockGap === "number") setBlockGap(stage.blockGap)
         if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
       } catch {
         /* ignore a bad local draft */
@@ -155,8 +157,8 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, logoUrl }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, logoUrl])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, logoUrl }))
+  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, logoUrl])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -179,7 +181,7 @@ export function OperatorConsole() {
           event,
           testUntil,
           pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent, lineSpacing, logoUrl },
+          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, logoUrl },
         }),
       })
         .then(async (response) => {
@@ -439,6 +441,10 @@ export function OperatorConsole() {
               <input id="spacing" type="range" min="0.8" max="2.2" step="0.05" value={lineSpacing} onChange={(event) => setLineSpacing(Number(event.target.value))} className="w-full accent-black" />
               <span className="font-mono text-[11px] text-black/50">{lineSpacing.toFixed(2)}</span>
             </Field>
+            <Field label="Gap below address" htmlFor="blockGap">
+              <input id="blockGap" type="range" min="0" max="8" step="0.1" value={blockGap} onChange={(event) => setBlockGap(Number(event.target.value))} className="w-full accent-black" />
+              <span className="font-mono text-[11px] text-black/50">{blockGap.toFixed(1)}</span>
+            </Field>
             <Field label="Logo source" htmlFor="logo">
               <GrowingText id="logo" value={logoUrl} onChange={setLogoUrl} />
               <p className="font-mono text-[10px] text-black/45">Leave blank for the Hyphen PNG. Paste an image URL to replace it.</p>
@@ -501,7 +507,7 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} logoUrl={logoUrl} clock={previewNow} />
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} logoUrl={logoUrl} clock={previewNow} />
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">

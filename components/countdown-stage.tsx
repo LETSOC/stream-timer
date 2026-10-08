@@ -22,11 +22,12 @@ type CountdownStageProps = {
   showLink?: boolean
   transparent?: boolean
   lineSpacing?: number
+  blockGap?: number
   logoUrl?: string
   clock?: Date | null
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, logoUrl = "", clock }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, logoUrl = "", clock }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -77,7 +78,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             <MetaRow icon={<PinIcon />}>{venue}</MetaRow>
           </ul>
 
-          <div className="mt-[1.2cqi] flex items-center gap-[1.4cqi]">
+          <div className="flex items-center gap-[1.4cqi]" style={{ marginTop: `${blockGap}cqi` }}>
             <a
               className="stage-rsvp inline-flex items-center justify-center text-white no-underline"
               style={{ backgroundColor: "#ff3c00", opacity: 1 }}

@@ -48,7 +48,7 @@ function StreamView() {
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
-  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, logoUrl: "" })
+  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, logoUrl: "" })
 
   useEffect(() => {
     let cancelled = false
@@ -68,6 +68,7 @@ function StreamView() {
               showLink: body.stage.showLink !== false,
               transparent: body.stage.transparent === true,
               lineSpacing: Number(body.stage.lineSpacing) || 1.14,
+              blockGap: Number(body.stage.blockGap) || 1.2,
               logoUrl: typeof body.stage.logoUrl === "string" ? body.stage.logoUrl : "",
             })
           }
@@ -118,6 +119,7 @@ function StreamView() {
         showLink={showLink}
         transparent={transparent}
         lineSpacing={stage.lineSpacing}
+        blockGap={stage.blockGap}
         logoUrl={stage.logoUrl}
         clock={testClock}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"

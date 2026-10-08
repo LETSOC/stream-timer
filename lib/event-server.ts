@@ -24,6 +24,7 @@ const DEFAULT_STAGE: StageOptions = {
   showLink: true,
   transparent: false,
   lineSpacing: 1.14,
+  blockGap: 1.2,
   logoUrl: "",
 }
 
@@ -37,6 +38,7 @@ function readStage(value: unknown): StageOptions {
     showLink: record.showLink !== false,
     transparent: record.transparent === true,
     lineSpacing: Number.isFinite(Number(record.lineSpacing)) ? Math.min(2.4, Math.max(0.8, Number(record.lineSpacing))) : 1.14,
+    blockGap: Number.isFinite(Number(record.blockGap)) ? Math.min(8, Math.max(0, Number(record.blockGap))) : 1.2,
     logoUrl: typeof record.logoUrl === "string" ? record.logoUrl : "",
   }
 }
