@@ -30,10 +30,13 @@ function StreamView() {
     [params],
   )
 
+  const checker = Number(params.get("grid") ?? "6")
+
   return (
     <main className="flex min-h-dvh items-center justify-center bg-black">
       <CountdownStage
         event={event}
+        checker={checker}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
     </main>

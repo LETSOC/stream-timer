@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import type { ReactNode } from "react"
 import {
   formatBannerDate,
   formatTimeRange,
@@ -17,9 +17,12 @@ import { cn } from "@/lib/utils"
 type CountdownStageProps = {
   event: EventConfig
   className?: string
+  checker?: number
 }
 
-export function CountdownStage({ event, className }: CountdownStageProps) {
+const EVENT_LINK = "https://events.hyphenonline.com/HyphenFestival2026"
+
+export function CountdownStage({ event, className, checker = 6 }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -28,6 +31,8 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
   const { lead, year } = splitEventTitle(name)
   const dateLabel = valid ? formatBannerDate(target, timeZone) : date
   const timeLabel = formatTimeRange(time, endTime)
+  const divisions = clampChecker(checker)
+  const second = now ? Math.floor(now.getTime() / 1000) : 0
 
   return (
     <div
@@ -38,7 +43,7 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
         className="pointer-events-none absolute inset-0 bg-[#070a16] bg-cover bg-center"
         style={{ backgroundImage: "url('/brand/hero-bg.png')" }}
       />
-      <RollingQr />
+      <RollingQr divisions={divisions} second={second} />
 
       <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
         <div className="flex min-w-0 flex-col justify-center pr-[3%]">
@@ -79,6 +84,14 @@ export function CountdownStage({ event, className }: CountdownStageProps) {
             <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} />
           </div>
           <SocialRow />
+          <a
+            href={EVENT_LINK}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-[0.7cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] tracking-[0.04em] text-white/80 no-underline"
+          >
+            events.hyphenonline.com/HyphenFestival2026
+          </a>
         </div>
 
         <div className="flex h-full items-center justify-center">
@@ -198,13 +211,13 @@ function QrSlot() {
   )
 }
 
-function RollingQr() {
-  const [tick, setTick] = useState(0)
+function clampChecker(value: number) {
+  if (!Number.isFinite(value)) return 6
+  return Math.min(12, Math.max(4, Math.round(value)))
+}
 
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((n) => n + 1), 1000)
-    return () => window.clearInterval(id)
-  }, [])
+function RollingQr({ divisions, second }: { divisions: number; second: number }) {
+  const cells = divisions * divisions
 
   return (
     <div className="pointer-events-none absolute top-[4.6%] right-[4.4%] z-20 flex flex-col items-center">
@@ -212,14 +225,17 @@ function RollingQr() {
         className="size-[8.4cqi] rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]"
         aria-hidden
       >
-        <div className="grid h-full w-full grid-cols-6 gap-[0.16cqi] rounded-[0.62cqi] bg-black p-[0.62cqi]">
-          {Array.from({ length: 36 }, (_, index) => {
-            const anchor = index * 7 % 3 === 0
-            const lit = ((index * 17 + tick * 13) % 11) > 4
+        <div
+          className="grid h-full w-full gap-[0.12cqi] rounded-[0.62cqi] bg-black p-[0.5cqi]"
+          style={{ gridTemplateColumns: `repeat(${divisions}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: cells }, (_, index) => {
+            const anchor = index % divisions === 0 || index < divisions
+            const lit = ((index * 17 + second * 13) % 11) > 4
             return (
               <span
                 key={index}
-                className="rounded-[0.08cqi] bg-white transition-opacity duration-700"
+                className="rounded-[0.06cqi] bg-white transition-opacity duration-500"
                 style={{ opacity: anchor ? 1 : lit ? 0.92 : 0.22 }}
               />
             )

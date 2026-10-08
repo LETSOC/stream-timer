@@ -33,6 +33,7 @@ export function OperatorConsole() {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | null>(null)
+  const [checker, setChecker] = useState(6)
   const now = useNow()
 
   const target = wallTimeInZone(date, time, timeZone)
@@ -57,9 +58,10 @@ export function OperatorConsole() {
       tz: timeZone,
       venue,
       rsvp: rsvpUrl,
+      grid: String(checker),
     })
     return `/stream?${params.toString()}`
-  }, [name, date, time, endTime, timeZone, venue, rsvpUrl])
+  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, checker])
 
   const streamCommand = buildStreamShellCommand({
     eventName: name,
@@ -117,7 +119,7 @@ export function OperatorConsole() {
             </p>
           </div>
           <div className="overflow-hidden rounded-xl ring-1 ring-white/10">
-            <CountdownStage event={event} />
+            <CountdownStage event={event} checker={checker} />
           </div>
           {!valid ? (
             <p className="text-sm text-red-300">Enter a valid date, time, and zone.</p>
@@ -201,6 +203,27 @@ export function OperatorConsole() {
                   value={rsvpUrl}
                   onChange={(event) => updateEvent({ rsvpUrl: event.target.value })}
                 />
+              </Field>
+              <Field label="Checker division" htmlFor="checker">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setChecker((value) => Math.max(4, value - 1))}
+                  >
+                    −
+                  </Button>
+                  <span id="checker" className="min-w-16 text-center text-sm tabular-nums">
+                    {checker}×{checker}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setChecker((value) => Math.min(12, value + 1))}
+                  >
+                    +
+                  </Button>
+                </div>
               </Field>
               <Field label="Time zone" htmlFor="tz">
                 <select
