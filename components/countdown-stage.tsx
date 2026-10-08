@@ -51,7 +51,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             : { backgroundColor: "#070a16", backgroundImage: "url('/brand/hero-bg.png')" }
         }
       />
-      <RollingQr divisions={divisions} second={second} label={joinLabel} />
+      <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
 
       <div className="relative grid h-full grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] items-center px-[5.4%] py-[8%]">
         <div className="flex min-w-0 flex-col justify-center pr-[3%]">
@@ -161,8 +161,12 @@ function ClockDisplay({
   }
   if (remaining.done) {
     return (
-      <div className="max-w-[42cqi]">
-        <p className="m-0 font-[Arial,Helvetica,sans-serif] text-[2.2cqi] leading-tight font-bold text-[#ff3c00]">
+      <div className="flex max-w-[46cqi] items-center gap-[1cqi]">
+        <span className="inline-flex items-center gap-[0.45cqi] rounded-[0.4cqi] border border-[#ff3c00] px-[0.8cqi] py-[0.45cqi] font-[Arial,Helvetica,sans-serif] text-[1.15cqi] font-bold tracking-[0.12em] text-[#ff3c00] uppercase">
+          <span className="size-[0.55cqi] rounded-full bg-[#ff3c00]" />
+          Live
+        </span>
+        <p className="m-0 font-[Arial,Helvetica,sans-serif] text-[1.7cqi] leading-tight font-bold text-white">
           Doors are open — the festival has started
         </p>
       </div>
