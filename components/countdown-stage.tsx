@@ -93,7 +93,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           </div>
 
           <div className="mt-[1.6cqi]">
-            <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} />
+            <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} scale={clockScale} />
           </div>
           <SocialRow
             links={[
@@ -149,13 +149,15 @@ function ClockDisplay({
   remaining,
   valid,
   ready,
+  scale = 1,
 }: {
   remaining: Remaining | null
   valid: boolean
   ready: boolean
+  scale?: number
 }) {
   if (!ready) {
-    return <UnitRow days="--" hours="--" minutes="--" seconds="--" muted scale={clockScale} />
+    return <UnitRow days="--" hours="--" minutes="--" seconds="--" muted scale={scale} />
   }
   if (!valid || !remaining) {
     return <p className="stage-h4 m-0 text-red-300">The start time could not be parsed.</p>
@@ -179,7 +181,7 @@ function ClockDisplay({
       hours={pad2(remaining.hours)}
       minutes={pad2(remaining.minutes)}
       seconds={pad2(remaining.seconds)}
-      scale={clockScale}
+      scale={scale}
     />
   )
 }
