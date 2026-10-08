@@ -157,19 +157,11 @@ function UnitRow({
     { value: seconds, label: "Seconds" },
   ]
   return (
-    <div
-      className={cn(
-        "inline-grid grid-cols-4 overflow-hidden rounded-[0.55cqi] border border-white/80",
-        muted && "opacity-40",
-      )}
-    >
-      {units.map((unit, index) => (
+    <div className={cn("inline-flex gap-[0.55cqi]", muted && "opacity-40")}>
+      {units.map((unit) => (
         <div
           key={unit.label}
-          className={cn(
-            "min-w-[6.6cqi] px-[1.35cqi] py-[0.7cqi] text-center",
-            index > 0 && "border-l border-white/80",
-          )}
+          className="min-w-[6.6cqi] rounded-[0.45cqi] border border-white px-[1.15cqi] py-[0.7cqi] text-center"
         >
           <div className="font-[Arial,Helvetica,sans-serif] text-[1.85cqi] leading-none font-bold tabular-nums">
             {unit.value}
