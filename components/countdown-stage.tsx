@@ -188,7 +188,7 @@ function SpeakerGallery({
   const card = cards[index] ?? cards[0]
   return (
     <div className="absolute right-[6%] z-20 flex w-[34%] flex-col items-center text-center" style={{ top: `calc(50% + ${offset}px)`, transform: "translateY(-50%)" }}>
-      <div className="overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]" style={{ width: `${Math.round(420 * scale / 100)}px`, height: `${Math.round(420 * scale / 100)}px` }}>
+      <div className="overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]" style={{ width: `${(22 * scale) / 100}cqi`, height: `${(22 * scale) / 100}cqi` }}>
         {card.image ? <img src={card.image} alt="" className="size-full object-cover" draggable={false} /> : null}
       </div>
       <p className="mt-[0.7cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[1.8cqi] font-bold text-white">{card.name}</p>
