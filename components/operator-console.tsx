@@ -35,7 +35,7 @@ export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
-  const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
+  const [rtmpLive, setRtmpLive] = useState(false)
   const [rtmpMessage, setRtmpMessage] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
   const [checker, setChecker] = useState(6)
@@ -492,6 +492,12 @@ export function OperatorConsole() {
           </details>
 
           <Panel title="FFmpeg">
+            <div className="flex items-center justify-between gap-3">
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/45"}`}>
+                <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
+                {rtmpLive ? "Stream live" : "Stream off"}
+              </span>
+            </div>
             <Field label="RTMP URL" htmlFor="rtmp">
               <Input id="rtmp" type="password" autoComplete="off" placeholder="rtmp://uk.castr.io/static/…?password=…" value={rtmpUrl} onChange={(event) => setRtmpUrl(event.target.value)} />
             </Field>
@@ -533,6 +539,7 @@ export function OperatorConsole() {
                 onClick={() => {
                   void fetch("/api/encoder?target=rtmp", { method: "DELETE", headers: { "x-encoder-token": token } }).then(() => {
                     setRtmpState("idle")
+                    setRtmpLive(false)
                     setRtmpMessage("Stream stopped.")
                   })
                 }}

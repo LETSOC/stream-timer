@@ -131,6 +131,10 @@ export function EncodedPreview({
         <h2 className="text-sm tracking-[0.2em] text-zinc-400 uppercase">
           FFmpeg output
         </h2>
+        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${status.rtmpRunning ? "bg-[#128a3e] text-white" : "bg-white/10 text-white/45"}`}>
+          <span className={`size-1.5 rounded-full ${status.rtmpRunning ? "animate-pulse bg-white" : "bg-white/30"}`} />
+          {status.rtmpRunning ? "Stream live" : "Stream off"}
+        </span>
         <div className="flex gap-2">
           <Button
             disabled={busy || status.running || !valid || !status.ffmpeg}
