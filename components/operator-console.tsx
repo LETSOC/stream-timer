@@ -603,7 +603,7 @@ export function OperatorConsole() {
               <Input id="gallery-offset" type="number" min={-600} max={400} value={galleryOffset} onChange={(event) => setGalleryOffset(Math.min(400, Math.max(-600, Number(event.target.value) || 0)))} />
             </Field>
             <Field label="Portrait size (%)" htmlFor="gallery-scale">
-              <Input id="gallery-scale" type="number" min={40} max={160} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(160, Math.max(40, Number(event.target.value) || 80)))} />
+              <Input id="gallery-scale" type="number" min={40} max={200} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(200, Math.max(40, Number(event.target.value) || 80)))} />
             </Field>
             {speakers.map((speaker, index) => (
               <div key={index} className="space-y-2 rounded-xl border border-black/10 p-3">

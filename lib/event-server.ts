@@ -71,7 +71,7 @@ function readStage(value: unknown): StageOptions {
 function clampScale(value: unknown) {
   const number = Number(value)
   if (!Number.isFinite(number)) return 80
-  return Math.min(160, Math.max(40, Math.round(number)))
+  return Math.min(200, Math.max(40, Math.round(number)))
 }
 
 function clampOffset(value: unknown) {
