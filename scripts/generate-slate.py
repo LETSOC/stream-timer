@@ -181,12 +181,6 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
         rounded_rect(draw, (x, COUNT_Y, x + BOX_W, COUNT_Y + BOX_H), 8, outline=(255, 255, 255, 230), width=2)
         draw.text((x + BOX_W / 2, COUNT_Y + BOX_H - 18), label, font=unit_font, fill=(220, 220, 220, 255), anchor="mm")
 
-    for i, colour in enumerate(((0, 0, 0), (59, 89, 152), (10, 102, 194), (225, 48, 108), (255, 0, 51))):
-        cx = pad_x + 16 + i * 36
-        cy = 640
-        draw.ellipse((cx - 14, cy - 14, cx + 14, cy + 14), outline=(255, 255, 255, 255), width=2)
-        draw.ellipse((cx - 12, cy - 12, cx + 12, cy + 12), fill=colour + (255,))
-
     logo_w = 430
     ratio = logo_w / logo.size[0]
     logo_h = int(logo.size[1] * ratio)
