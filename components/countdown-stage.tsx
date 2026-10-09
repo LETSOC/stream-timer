@@ -117,7 +117,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
         <img
           src={logoUrl.trim() || "/brand/hyphen-emerald.png"}
           alt="hyphen. Cultures, communities, connections. Presented with Emerald."
-          className="h-auto w-full select-none"
+          className="h-auto w-[90%] select-none"
           draggable={false}
         />
         {showLink ? (
@@ -181,12 +181,12 @@ function SpeakerGallery({
   if (!active || cards.length === 0 || !visible) return null
   const card = cards[index] ?? cards[0]
   return (
-    <div className="absolute inset-x-0 top-0 z-20 flex flex-col items-center text-center">
-      <div className="size-[16cqi] overflow-hidden rounded-full border border-white/30 bg-white shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+    <div className="absolute inset-x-0 top-[-2cqi] z-20 flex flex-col items-center text-center">
+      <div className="size-[26cqi] overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]">
         {card.image ? <img src={card.image} alt="" className="size-full object-cover" draggable={false} /> : null}
       </div>
-      <p className="mt-[0.8cqi] font-[Arial,Helvetica,sans-serif] text-[1.3cqi] font-bold text-white">{card.name}</p>
-      <p className="mt-[0.3cqi] max-w-[24cqi] font-[Arial,Helvetica,sans-serif] text-[0.85cqi] leading-snug text-white/75">{card.description}</p>
+      <p className="mt-[0.7cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[1.35cqi] font-bold text-white">{card.name}</p>
+      <p className="mt-[0.25cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] leading-snug text-white/75">{card.description}</p>
     </div>
   )
 }
