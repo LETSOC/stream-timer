@@ -120,9 +120,6 @@ echo "Live slate:   $LIVE_SLATE"
 echo "Mode:         $MODE"
 
 if [[ -f "$LIVE_SLATE" ]]; then
-  FILTER_FILE="$ROOT/data/encoder-filter.txt"
-  mkdir -p "$ROOT/data"
-  printf '%s\n' "[0:v]${VF}[counted];[counted][2:v]overlay=enable='gte(t,${remaining})'[v]" > "$FILTER_FILE"
   common_input=(
     -hide_banner
     -loglevel info
@@ -130,7 +127,7 @@ if [[ -f "$LIVE_SLATE" ]]; then
     -loop 1 -framerate "$FPS" -i "$SLATE"
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
     -loop 1 -framerate "$FPS" -i "$LIVE_SLATE"
-    -filter_complex_script "$FILTER_FILE"
+    -filter_complex "[0:v]${VF}[counted];[counted][2:v]overlay=enable='gte(t,${remaining})'[v]"
     -map "[v]"
     -map 1:a:0
     -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k
