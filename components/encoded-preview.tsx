@@ -20,7 +20,10 @@ const emptyStatus: EncoderStatus = {
   burnedRemainingAtStart: null,
   refreshSeconds: null,
   rtmpRunning: false,
+  rtmpReconnecting: false,
+  rtmpRestarts: 0,
   rtmpLogTail: "",
+  strayPublishers: [],
 };
 
 export function EncodedPreview({

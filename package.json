@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 43211",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test lib/countdown.test.ts lib/encoder-auth.test.ts lib/countdown-size.test.ts lib/encoder-log.test.ts",
+    "test": "node --experimental-strip-types --test lib/countdown.test.ts lib/encoder-auth.test.ts lib/countdown-size.test.ts lib/encoder-log.test.ts lib/encoder-supervisor.test.ts",
     "stream:test": "bash scripts/stream-countdown.sh --file hyphen-countdown-test.mp4 --duration 4"
   },
   "dependencies": {

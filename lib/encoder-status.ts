@@ -12,5 +12,11 @@ export type EncoderStatus = {
   burnedRemainingAtStart: number | null
   refreshSeconds: number | null
   rtmpRunning: boolean
+  /** The supervisor is waiting to relaunch ffmpeg after it exited. */
+  rtmpReconnecting: boolean
+  /** How many times the supervisor has relaunched ffmpeg since Start stream. */
+  rtmpRestarts: number
   rtmpLogTail: string
+  /** Other ffmpeg processes publishing over RTMP that this app did not start. */
+  strayPublishers: { pid: number; command: string }[]
 }

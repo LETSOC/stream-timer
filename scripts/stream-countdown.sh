@@ -111,18 +111,36 @@ M="fontfile='${MONO_FONT}'"
 # Number centres match scripts/generate-slate.py separate boxes (1280x720).
 VF="drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=124-text_w/2:y=526:text='%{eif\:max(0\,trunc((${remaining}-t)/86400))\:d}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=236-text_w/2:y=526:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/3600\,24))\:d\:2}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=348-text_w/2:y=526:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/60\,60))\:d\:2}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=460-text_w/2:y=526:text='%{eif\:mod(max(0\,${remaining}-t)\,60)\:d\:2}'"
 
+fingerprint() {
+  # Short content hash + size, so the log proves exactly which image is on air.
+  local sum
+  if command -v shasum >/dev/null 2>&1; then
+    sum="$(shasum -a 1 "$1" | cut -c1-12)"
+  elif command -v sha1sum >/dev/null 2>&1; then
+    sum="$(sha1sum "$1" | cut -c1-12)"
+  else
+    sum="n/a"
+  fi
+  printf 'sha1 %s, %s bytes' "$sum" "$(wc -c < "$1" | tr -d ' ')"
+}
+
 echo "Event:        $EVENT_NAME"
 echo "Line:         $EVENT_LINE_DISPLAY"
 echo "Target unix:  $TARGET_UNIX"
 echo "Remaining:    ${remaining}s at launch (drawtext t=0)"
-echo "Slate:        $SLATE"
-echo "Live slate:   $LIVE_SLATE"
+echo "Slate:        $SLATE ($(fingerprint "$SLATE"))"
+if [[ -f "$LIVE_SLATE" ]]; then
+  echo "Live slate:   $LIVE_SLATE ($(fingerprint "$LIVE_SLATE"))"
+else
+  echo "Live slate:   none (plain countdown continues after zero)"
+fi
 echo "Mode:         $MODE"
 
 if [[ -f "$LIVE_SLATE" ]]; then
   common_input=(
     -hide_banner
     -loglevel info
+    -stats_period 10
     -re
     -loop 1 -framerate "$FPS" -i "$SLATE"
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
@@ -138,6 +156,7 @@ else
   common_input=(
     -hide_banner
     -loglevel info
+    -stats_period 10
     -re
     -loop 1 -framerate "$FPS" -i "$SLATE"
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
@@ -188,7 +207,8 @@ case "$MODE" in
       echo "RTMP_URL must start with rtmp:// or rtmps:// and contain no spaces." >&2
       exit 1
     fi
-    run_ffmpeg -f flv "$RTMP_URL"
+    # -rw_timeout: abandon a stalled connection after 10s so the supervisor can reconnect.
+    run_ffmpeg -rw_timeout 10000000 -f flv "$RTMP_URL"
     ;;
   hls)
     mkdir -p "$OUTPUT_DIR"

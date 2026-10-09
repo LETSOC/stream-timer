@@ -36,6 +36,9 @@ export function OperatorConsole() {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
   const [rtmpLive, setRtmpLive] = useState(false)
+  const [rtmpReconnecting, setRtmpReconnecting] = useState(false)
+  const [rtmpRestarts, setRtmpRestarts] = useState(0)
+  const [strayPids, setStrayPids] = useState<number[]>([])
   const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
   const [rtmpMessage, setRtmpMessage] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
@@ -119,8 +122,12 @@ export function OperatorConsole() {
     const load = () => {
       void fetch("/api/encoder", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { rtmpRunning?: boolean }) => {
-          if (!cancelled) setRtmpLive(body.rtmpRunning === true)
+        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; strayPublishers?: { pid: number }[] }) => {
+          if (cancelled) return
+          setRtmpLive(body.rtmpRunning === true)
+          setRtmpReconnecting(body.rtmpReconnecting === true)
+          setRtmpRestarts(typeof body.rtmpRestarts === "number" ? body.rtmpRestarts : 0)
+          setStrayPids(Array.isArray(body.strayPublishers) ? body.strayPublishers.map((item) => item.pid) : [])
         })
         .catch(() => undefined)
     }
@@ -512,9 +519,10 @@ export function OperatorConsole() {
 
           <Panel title="FFmpeg">
             <div className="flex items-center justify-between gap-3">
-              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/45"}`}>
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? (rtmpReconnecting ? "bg-[#b45309] text-white" : "bg-[#128a3e] text-white") : "bg-black/5 text-black/45"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
-                {rtmpLive ? "Stream live" : "Stream off"}
+                {rtmpLive ? (rtmpReconnecting ? "Reconnecting" : "Stream live") : "Stream off"}
+                {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
               </span>
             </div>
             <Field label="RTMP URL" htmlFor="rtmp">
@@ -567,7 +575,7 @@ export function OperatorConsole() {
                 Stop stream
               </Button>
             </div>
-            {rtmpMessage ? <p className={`font-mono text-[11px] ${rtmpState === "error" ? "text-red-600" : "text-black/60"}`}>{rtmpMessage}</p> : null}
+            {strayPids.length > 0 ? <p className="font-mono text-[11px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
             <p className="font-mono text-[11px] leading-5 text-black/60">
               Start stream sends 1280×720, 30 fps, H.264 2500 kbps, yuv420p, AAC stereo 128 kbps, silent audio, FLV over RTMP. The local player is the same picture as 2-second HLS segments.
             </p>

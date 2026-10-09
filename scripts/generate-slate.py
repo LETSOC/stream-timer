@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import math
 from pathlib import Path
 
@@ -232,20 +233,32 @@ def save_rgba(img: Image.Image, path: Path) -> None:
 
 
 def main() -> None:
-    PUBLIC.mkdir(parents=True, exist_ok=True)
-    ASSETS.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(description="Bake the ffmpeg slates (countdown-slate.png and live-slate.png).")
+    parser.add_argument(
+        "--shared",
+        action="store_true",
+        help=(
+            "Also rewrite the shared brand images (assets/ and public/brand/: hyphen-emerald, rsvp-qr, hero-bg). "
+            "public/brand/ is what the /stream OBS page loads, so only use this when you mean to change it."
+        ),
+    )
+    args = parser.parse_args()
 
     logo = process_logo(LOGO_SRC)
-    save_rgba(logo, ASSETS / "hyphen-emerald.png")
-    save_rgba(logo, PUBLIC / "hyphen-emerald.png")
-
     qr = make_qr(RSVP_URL, 256)
-    save_rgb(qr, ASSETS / "rsvp-qr.png")
-    save_rgb(qr, PUBLIC / "rsvp-qr.png")
-
     bg = make_hero_bg((W, H))
-    save_rgb(bg, ASSETS / "hero-bg.png")
-    save_rgb(bg, PUBLIC / "hero-bg.png")
+
+    if args.shared:
+        print("--shared: rewriting shared brand images, including public/brand/ (used by the OBS page)")
+        PUBLIC.mkdir(parents=True, exist_ok=True)
+        save_rgba(logo, ASSETS / "hyphen-emerald.png")
+        save_rgba(logo, PUBLIC / "hyphen-emerald.png")
+        save_rgb(qr, ASSETS / "rsvp-qr.png")
+        save_rgb(qr, PUBLIC / "rsvp-qr.png")
+        save_rgb(bg, ASSETS / "hero-bg.png")
+        save_rgb(bg, PUBLIC / "hero-bg.png")
+    else:
+        print("Writing only the ffmpeg slates in assets/. public/brand/ (OBS page) is not touched.")
 
     slate = make_slate(bg, logo, qr)
     save_rgb(slate, ASSETS / "countdown-slate.png")

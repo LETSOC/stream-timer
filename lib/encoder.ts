@@ -10,7 +10,9 @@ export const META_FILE = path.join(DATA_DIR, "encoder.json");
 export const LOG_FILE = path.join(DATA_DIR, "encoder.log");
 export const RTMP_META_FILE = path.join(DATA_DIR, "rtmp.json");
 export const RTMP_LOG_FILE = path.join(DATA_DIR, "rtmp.log");
+export const RTMP_STATE_FILE = path.join(DATA_DIR, "rtmp-supervisor.json");
 export const SCRIPT = path.join(ROOT, "scripts", "stream-countdown.sh");
+export const SUPERVISOR = path.join(ROOT, "scripts", "rtmp-supervisor.sh");
 
 type Meta = {
   pid: number;
@@ -97,6 +99,8 @@ export function ffmpegAvailable(): boolean {
 
 export function readStatus(): EncoderStatus {
   const meta = readMeta();
+  const rtmpRunning = rtmpAlive();
+  const supervisor = rtmpRunning ? readSupervisorState() : { state: null, restarts: 0 };
   const running = meta ? alive(meta.pid) : false;
   if (meta && !running) {
     try {
@@ -118,32 +122,97 @@ export function readStatus(): EncoderStatus {
     slateAgeSeconds: running && meta ? Math.floor((Date.now() - meta.startedAt) / 1000) : null,
     burnedRemainingAtStart: running && meta ? meta.burnedRemainingAtStart : null,
     refreshSeconds: running && meta ? meta.refreshSeconds : null,
-    rtmpRunning: rtmpAlive(),
+    rtmpRunning,
+    rtmpReconnecting: rtmpRunning && supervisor.state === "waiting",
+    rtmpRestarts: supervisor.restarts,
     rtmpLogTail: redact(readTail(RTMP_LOG_FILE).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
+    strayPublishers: findStrayPublishers(),
   };
 }
 
-function rtmpAlive(): boolean {
+function readRtmpPid(): number | null {
   try {
     const meta = JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number }
-    return typeof meta.pid === "number" && alive(meta.pid)
+    return typeof meta.pid === "number" ? meta.pid : null
   } catch {
-    return false
+    return null
   }
 }
 
+function rtmpAlive(): boolean {
+  const pid = readRtmpPid()
+  return pid !== null && alive(pid)
+}
+
+function readSupervisorState(): { state: "running" | "waiting" | null; restarts: number } {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(RTMP_STATE_FILE, "utf8")) as { state?: unknown; restarts?: unknown }
+    return {
+      state: parsed.state === "running" || parsed.state === "waiting" ? parsed.state : null,
+      restarts: typeof parsed.restarts === "number" ? parsed.restarts : 0,
+    }
+  } catch {
+    return { state: null, restarts: 0 }
+  }
+}
+
+export type StrayPublisher = { pid: number; command: string }
+
+/**
+ * Finds ffmpeg processes that publish over RTMP but do not belong to this app's
+ * supervisor (for example one left running in a Terminal tab). Two publishers on
+ * one Castr key is a common reason an old picture stays on air.
+ * Input is `ps -axo pid=,pgid=,command=` output so it can be tested without ps.
+ */
+export function parseStrayPublishers(psOutput: string, ownPgid: number | null, selfPid: number): StrayPublisher[] {
+  const strays: StrayPublisher[] = []
+  for (const line of psOutput.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+    if (!match) continue
+    const pid = Number(match[1])
+    const pgid = Number(match[2])
+    const command = match[3]
+    if (pid === selfPid) continue
+    if (ownPgid !== null && pgid === ownPgid) continue
+    const isFfmpeg = /^(\S*\/)?ffmpeg(\s|$)/.test(command)
+    if (!isFfmpeg || !/\s-f\s+flv\s/.test(command) || !/rtmps?:\/\//.test(command)) continue
+    strays.push({ pid, command: redact(command).slice(0, 160) })
+  }
+  return strays
+}
+
+let strayCache: { at: number; value: StrayPublisher[] } = { at: 0, value: [] }
+
+/** Cached for 5s because the desk polls status every couple of seconds. */
+export function findStrayPublishers(): StrayPublisher[] {
+  if (Date.now() - strayCache.at < 5000) return strayCache.value
+  const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
+  const value = result.status === 0 ? parseStrayPublishers(result.stdout, readRtmpPid(), process.pid) : []
+  strayCache = { at: Date.now(), value }
+  return value
+}
+
+const SUPERVISOR_EXIT = /\[supervisor [^\]]*\] ffmpeg exited/
+
+/**
+ * Starts the RTMP stream under scripts/rtmp-supervisor.sh, which relaunches
+ * ffmpeg whenever it exits. Replaces any stream this app started earlier.
+ */
 export async function startRtmpStream(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const url = rtmpUrl.trim()
   if (!/^rtmps?:\/\/\S+$/.test(url)) {
     return { ok: false, error: "Paste an rtmp:// or rtmps:// URL with no spaces.", status: 400 }
   }
   if (!ffmpegAvailable()) return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 }
-  if (!fs.existsSync(SCRIPT)) return { ok: false, error: "The countdown script is missing.", status: 500 }
+  if (!fs.existsSync(SCRIPT) || !fs.existsSync(SUPERVISOR)) {
+    return { ok: false, error: "The countdown script is missing.", status: 500 }
+  }
   stopRtmpStream()
+  strayCache = { at: 0, value: [] }
   fs.mkdirSync(DATA_DIR, { recursive: true })
   fs.writeFileSync(RTMP_LOG_FILE, "")
   const logFd = fs.openSync(RTMP_LOG_FILE, "a")
-  const child = spawn("bash", [SCRIPT], {
+  const child = spawn("bash", [SUPERVISOR], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
     cwd: ROOT,
@@ -153,29 +222,43 @@ export async function startRtmpStream(input: StartInput, rtmpUrl: string): Promi
       EVENT_LINE: input.dateLine,
       TARGET_UNIX: String(input.targetUnix),
       RTMP_URL: url,
+      RTMP_STATE_FILE,
     },
   })
   child.unref()
   fs.closeSync(logFd)
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
   fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: child.pid, startedAt: Date.now() }))
-  await delay(1200)
-  if (!alive(child.pid)) {
-    return { ok: false, error: redact(readTail(RTMP_LOG_FILE)) || "ffmpeg exited before the stream connected.", status: 500 }
+
+  // Wait for the first connection. "Output #0" means ffmpeg opened the RTMP output.
+  // A supervisor "exited" line this early means the URL or script is wrong, so stop
+  // retrying and show the error instead of looping silently.
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    await delay(400)
+    if (!alive(child.pid)) break
+    const log = readTail(RTMP_LOG_FILE, 32768)
+    if (SUPERVISOR_EXIT.test(log)) {
+      stopRtmpStream()
+      return { ok: false, error: redact(readTail(RTMP_LOG_FILE, 4000)) || "ffmpeg exited before the stream connected.", status: 500 }
+    }
+    if (/Output #0/.test(log)) return { ok: true }
   }
+  if (!alive(child.pid)) {
+    return { ok: false, error: redact(readTail(RTMP_LOG_FILE, 4000)) || "The RTMP supervisor exited.", status: 500 }
+  }
+  // Still connecting after 8s: the supervisor keeps retrying and the desk shows "Reconnecting".
   return { ok: true }
 }
 
 export function stopRtmpStream() {
-  try {
-    const meta = JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number }
-    if (typeof meta.pid === "number") {
-      try { process.kill(-meta.pid, "SIGTERM") } catch { try { process.kill(meta.pid, "SIGTERM") } catch { /* already gone */ } }
-    }
-  } catch {
-    /* no stream */
+  const pid = readRtmpPid()
+  if (pid !== null) {
+    // The supervisor, the script and ffmpeg share one process group.
+    try { process.kill(-pid, "SIGTERM") } catch { try { process.kill(pid, "SIGTERM") } catch { /* already gone */ } }
   }
   try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
+  try { fs.unlinkSync(RTMP_STATE_FILE) } catch { /* already gone */ }
 }
 
 export function parseStartInput(body: unknown): StartInput | null {
