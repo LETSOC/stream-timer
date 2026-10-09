@@ -609,46 +609,6 @@ export function OperatorConsole() {
         </section>
 
         <section className="space-y-4">
-          <Panel title="End card">
-            <p className="font-mono text-[11px] leading-5 text-black/55">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
-            <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
-            <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
-            <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
-            <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
-            <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
-            <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full bg-black px-4 py-2 text-sm text-white no-underline">Open end card</a>
-          </Panel>
-          <Panel title="Speaker gallery">
-            <p className="font-mono text-[11px] leading-5 text-black/55">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
-            <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
-              <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
-            </Field>
-            <Field label="Pause before it returns" htmlFor="gallery-pause">
-              <Input id="gallery-pause" type="number" min={2} max={30} value={galleryPause} onChange={(event) => setGalleryPause(Math.min(30, Math.max(2, Number(event.target.value) || 6)))} />
-            </Field>
-            <Field label="Vertical position (px, higher moves it down)" htmlFor="gallery-offset">
-              <Input id="gallery-offset" type="number" min={-600} max={400} value={galleryOffset} onChange={(event) => setGalleryOffset(Math.min(400, Math.max(-600, Number(event.target.value) || 0)))} />
-            </Field>
-            <Field label="Portrait size (%)" htmlFor="gallery-scale">
-              <Input id="gallery-scale" type="number" min={40} max={200} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(200, Math.max(40, Number(event.target.value) || 80)))} />
-            </Field>
-            {speakers.map((speaker, index) => (
-              <div key={index} className="space-y-2 rounded-xl border border-black/10 p-3">
-                <Field label="Image URL" htmlFor={`speaker-image-${index}`}>
-                  <GrowingText id={`speaker-image-${index}`} value={speaker.image} onChange={(value) => setSpeakers((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, image: value } : item))} />
-                </Field>
-                <Field label="Title" htmlFor={`speaker-name-${index}`}>
-                  <GrowingText id={`speaker-name-${index}`} value={speaker.name} onChange={(value) => setSpeakers((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, name: value } : item))} />
-                </Field>
-                <Field label="Description" htmlFor={`speaker-desc-${index}`}>
-                  <GrowingText id={`speaker-desc-${index}`} value={speaker.description} onChange={(value) => setSpeakers((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item))} />
-                </Field>
-                <button type="button" className="rounded-full border border-black px-3 py-1 text-xs" onClick={() => setSpeakers((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
-              </div>
-            ))}
-            <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</button>
-          </Panel>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">
@@ -703,6 +663,46 @@ export function OperatorConsole() {
             {transparent ? " Transparent background is on: in OBS leave the browser source CSS empty so the page can show through." : ""}
           </p>
           <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
+          <Panel title="End card">
+            <p className="font-mono text-[11px] leading-5 text-black/55">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
+            <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
+            <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
+            <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
+            <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
+            <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
+            <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
+            <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full bg-black px-4 py-2 text-sm text-white no-underline">Open end card</a>
+          </Panel>
+          <Panel title="Speaker gallery">
+            <p className="font-mono text-[11px] leading-5 text-black/55">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
+            <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
+              <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
+            </Field>
+            <Field label="Pause before it returns" htmlFor="gallery-pause">
+              <Input id="gallery-pause" type="number" min={2} max={30} value={galleryPause} onChange={(event) => setGalleryPause(Math.min(30, Math.max(2, Number(event.target.value) || 6)))} />
+            </Field>
+            <Field label="Vertical position (px, higher moves it down)" htmlFor="gallery-offset">
+              <Input id="gallery-offset" type="number" min={-600} max={400} value={galleryOffset} onChange={(event) => setGalleryOffset(Math.min(400, Math.max(-600, Number(event.target.value) || 0)))} />
+            </Field>
+            <Field label="Portrait size (%)" htmlFor="gallery-scale">
+              <Input id="gallery-scale" type="number" min={40} max={200} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(200, Math.max(40, Number(event.target.value) || 80)))} />
+            </Field>
+            {speakers.map((speaker, index) => (
+              <div key={index} className="space-y-2 rounded-xl border border-black/10 p-3">
+                <Field label="Image URL" htmlFor={`speaker-image-${index}`}>
+                  <GrowingText id={`speaker-image-${index}`} value={speaker.image} onChange={(value) => setSpeakers((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, image: value } : item))} />
+                </Field>
+                <Field label="Title" htmlFor={`speaker-name-${index}`}>
+                  <GrowingText id={`speaker-name-${index}`} value={speaker.name} onChange={(value) => setSpeakers((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, name: value } : item))} />
+                </Field>
+                <Field label="Description" htmlFor={`speaker-desc-${index}`}>
+                  <GrowingText id={`speaker-desc-${index}`} value={speaker.description} onChange={(value) => setSpeakers((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item))} />
+                </Field>
+                <button type="button" className="rounded-full border border-black px-3 py-1 text-xs" onClick={() => setSpeakers((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
+              </div>
+            ))}
+            <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</button>
+          </Panel>
         </section>
       </main>
     </div>
