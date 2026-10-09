@@ -21,7 +21,7 @@ RSVP_URL = "https://events.hyphenonline.com/HyphenFestival2026#/buyTickets"
 
 # Four separate boxes — keep the centres in sync with scripts/stream-countdown.sh
 COUNT_X, COUNT_Y, BOX_W, BOX_H, BOX_GAP = 72, 508, 104, 92, 8
-COUNT_FONT = 32
+COUNT_FONT = 43
 
 
 def lerp(a: float, b: float, t: float) -> float:
@@ -169,7 +169,7 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
     rounded_rect(draw, btn, 7, fill=(255, 60, 0, 255))
     draw.text((pad_x + 74, 414), "RSVP - Open", font=rsvp_font, fill=(255, 255, 255, 255), anchor="mm")
 
-    qr_size = 62
+    qr_size = 71
     qr_x, qr_y = pad_x + 166, 386
     img.paste(qr.resize((qr_size, qr_size), Image.Resampling.NEAREST), (qr_x, qr_y))
     scan = ImageFont.truetype(str(BOLD), 9)
