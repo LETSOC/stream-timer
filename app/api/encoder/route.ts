@@ -6,7 +6,9 @@ import {
   readStatus,
   restartEncoder,
   startEncoder,
+  startRtmpStream,
   stopEncoder,
+  stopRtmpStream,
 } from "@/lib/encoder"
 
 export async function GET(request: Request) {
@@ -34,7 +36,12 @@ export async function POST(request: Request) {
       { status: 400 },
     )
   }
-  const record = body as { replace?: boolean; restart?: boolean }
+  const record = body as { replace?: boolean; restart?: boolean; mode?: string; rtmpUrl?: string }
+  if (record.mode === "rtmp") {
+    const result = await startRtmpStream(input, typeof record.rtmpUrl === "string" ? record.rtmpUrl : "")
+    if (!result.ok) return Response.json({ error: result.error }, { status: result.status })
+    return Response.json(readStatus())
+  }
   const result =
     record.replace || record.restart ? await restartEncoder(input) : await startEncoder(input)
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status })
@@ -46,5 +53,6 @@ export async function DELETE(request: Request) {
   const denied = authorizeMutation(request)
   if (denied) return denied
   stopEncoder()
+  if (new URL(request.url).searchParams.get("target") === "rtmp") stopRtmpStream()
   return Response.json(readStatus())
 }

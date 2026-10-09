@@ -34,7 +34,8 @@ import {
 export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
-  const [rtmpUrl, setRtmpUrl] = useState("")
+  const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
+  const [rtmpMessage, setRtmpMessage] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
@@ -493,6 +494,52 @@ export function OperatorConsole() {
             <Field label="RTMP URL" htmlFor="rtmp">
               <Input id="rtmp" type="password" autoComplete="off" placeholder="rtmp://uk.castr.io/static/…?password=…" value={rtmpUrl} onChange={(event) => setRtmpUrl(event.target.value)} />
             </Field>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                className="rounded-full bg-black text-white"
+                disabled={!valid || rtmpUrl.trim().length === 0}
+                onClick={() => {
+                  setRtmpState("idle")
+                  setRtmpMessage("")
+                  void fetch("/api/encoder", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "x-encoder-token": token },
+                    body: JSON.stringify({ mode: "rtmp", rtmpUrl, eventName: name, dateLine, targetUnix, refreshSeconds: 0 }),
+                  })
+                    .then(async (response) => {
+                      const body = await response.json().catch(() => null)
+                      if (!response.ok) {
+                        setRtmpState("error")
+                        setRtmpMessage(body?.error || "The stream did not start.")
+                        return
+                      }
+                      setRtmpState("live")
+                      setRtmpMessage("Sending to the pasted RTMP URL. The player above stays local.")
+                    })
+                    .catch(() => {
+                      setRtmpState("error")
+                      setRtmpMessage("The desk could not reach the encoder.")
+                    })
+                }}
+              >
+                Start stream
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-full"
+                onClick={() => {
+                  void fetch("/api/encoder?target=rtmp", { method: "DELETE", headers: { "x-encoder-token": token } }).then(() => {
+                    setRtmpState("idle")
+                    setRtmpMessage("Stream stopped.")
+                  })
+                }}
+              >
+                Stop stream
+              </Button>
+            </div>
+            {rtmpMessage ? <p className={`font-mono text-[11px] ${rtmpState === "error" ? "text-red-600" : "text-black/60"}`}>{rtmpMessage}</p> : null}
             <CommandBlock value={streamCommand} copied={copied === "stream"} onCopy={() => copy("stream", streamCommand)} />
             <CommandBlock value={fileCommand} copied={copied === "file"} onCopy={() => copy("file", fileCommand)} />
           </Panel>

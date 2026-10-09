@@ -8,6 +8,8 @@ export const DATA_DIR = path.join(ROOT, "data");
 export const HLS_DIR = path.join(DATA_DIR, "hls");
 export const META_FILE = path.join(DATA_DIR, "encoder.json");
 export const LOG_FILE = path.join(DATA_DIR, "encoder.log");
+export const RTMP_META_FILE = path.join(DATA_DIR, "rtmp.json");
+export const RTMP_LOG_FILE = path.join(DATA_DIR, "rtmp.log");
 export const SCRIPT = path.join(ROOT, "scripts", "stream-countdown.sh");
 
 type Meta = {
@@ -116,7 +118,64 @@ export function readStatus(): EncoderStatus {
     slateAgeSeconds: running && meta ? Math.floor((Date.now() - meta.startedAt) / 1000) : null,
     burnedRemainingAtStart: running && meta ? meta.burnedRemainingAtStart : null,
     refreshSeconds: running && meta ? meta.refreshSeconds : null,
+    rtmpRunning: rtmpAlive(),
+    rtmpLogTail: redact(readTail(RTMP_LOG_FILE).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
   };
+}
+
+function rtmpAlive(): boolean {
+  try {
+    const meta = JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number }
+    return typeof meta.pid === "number" && alive(meta.pid)
+  } catch {
+    return false
+  }
+}
+
+export async function startRtmpStream(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const url = rtmpUrl.trim()
+  if (!/^rtmps?:\/\/\S+$/.test(url)) {
+    return { ok: false, error: "Paste an rtmp:// or rtmps:// URL with no spaces.", status: 400 }
+  }
+  if (!ffmpegAvailable()) return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 }
+  if (!fs.existsSync(SCRIPT)) return { ok: false, error: "The countdown script is missing.", status: 500 }
+  stopRtmpStream()
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.writeFileSync(RTMP_LOG_FILE, "")
+  const logFd = fs.openSync(RTMP_LOG_FILE, "a")
+  const child = spawn("bash", [SCRIPT], {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      EVENT_NAME: input.eventName,
+      EVENT_LINE: input.dateLine,
+      TARGET_UNIX: String(input.targetUnix),
+      RTMP_URL: url,
+    },
+  })
+  child.unref()
+  fs.closeSync(logFd)
+  if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
+  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: child.pid, startedAt: Date.now() }))
+  await delay(1200)
+  if (!alive(child.pid)) {
+    return { ok: false, error: redact(readTail(RTMP_LOG_FILE)) || "ffmpeg exited before the stream connected.", status: 500 }
+  }
+  return { ok: true }
+}
+
+export function stopRtmpStream() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number }
+    if (typeof meta.pid === "number") {
+      try { process.kill(-meta.pid, "SIGTERM") } catch { try { process.kill(meta.pid, "SIGTERM") } catch { /* already gone */ } }
+    }
+  } catch {
+    /* no stream */
+  }
+  try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
 }
 
 export function parseStartInput(body: unknown): StartInput | null {

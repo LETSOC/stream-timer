@@ -11,4 +11,6 @@ export type EncoderStatus = {
   slateAgeSeconds: number | null
   burnedRemainingAtStart: number | null
   refreshSeconds: number | null
+  rtmpRunning: boolean
+  rtmpLogTail: string
 }
