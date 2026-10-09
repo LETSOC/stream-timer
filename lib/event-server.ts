@@ -25,6 +25,7 @@ export type StageOptions = {
   speakers: SpeakerCard[]
   gallerySeconds: number
   galleryPause: number
+  galleryOffset: number
 }
 
 const DEFAULT_STAGE: StageOptions = {
@@ -40,6 +41,7 @@ const DEFAULT_STAGE: StageOptions = {
   speakers: [],
   gallerySeconds: 4,
   galleryPause: 6,
+  galleryOffset: -152,
 }
 
 function readStage(value: unknown): StageOptions {
@@ -59,7 +61,14 @@ function readStage(value: unknown): StageOptions {
     speakers: readSpeakers(record.speakers),
     gallerySeconds: clampSeconds(record.gallerySeconds, 4),
     galleryPause: clampSeconds(record.galleryPause, 6),
+    galleryOffset: clampOffset(record.galleryOffset),
   }
+}
+
+function clampOffset(value: unknown) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return -152
+  return Math.min(400, Math.max(-600, Math.round(number)))
 }
 
 function clampSeconds(value: unknown, fallback: number) {
