@@ -19,7 +19,7 @@ export function clampSize(value: unknown, range: SizeRange, fallback = 1): numbe
 
 /** All lengths are in cqi (1% of the stage width) at countdown size 1 and text size 1. */
 export const CLOCK_GEOMETRY = {
-  digit: 3.1,
+  digit: 2.7,
   label: 0.72,
   boxMinWidth: 8.6,
   boxMinHeight: 6.1,
