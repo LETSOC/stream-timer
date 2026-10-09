@@ -192,8 +192,23 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
     logo_h = int(logo.size[1] * ratio)
     logo_fit = logo.resize((logo_w, logo_h), Image.Resampling.LANCZOS)
     lx = W - 56 - logo_w
-    ly = (H - logo_h) // 2
+    ly = (H - logo_h) // 2 + 18
     img.paste(logo_fit, (lx, ly), logo_fit)
+
+    # The rolling QR only exists on the browser page. The encode gets the same frame, still.
+    frame = 92
+    fx, fy = W - 72 - frame, 36
+    rounded_rect(draw, (fx - 6, fy - 6, fx + frame + 6, fy + frame + 6), 12, fill=(255, 255, 255, 255))
+    cell = frame / 6
+    for row in range(6):
+        for col in range(6):
+            lit = ((row * 6 + col) * 17 + row * 3) % 5 > 1
+            draw.rectangle(
+                (fx + col * cell + 1, fy + row * cell + 1, fx + (col + 1) * cell - 1, fy + (row + 1) * cell - 1),
+                fill=(20, 20, 20, 255) if lit else (235, 235, 235, 255),
+            )
+    join = ImageFont.truetype(str(BOLD), 11)
+    draw.text((fx + frame / 2, fy + frame + 18), "JOIN LIVE", font=join, fill=(255, 255, 255, 230), anchor="mm")
     return img
 
 
