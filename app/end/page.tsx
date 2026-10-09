@@ -10,7 +10,7 @@ type EndCard = {
   body: string
   qrUrl: string
   button: string
-  socials: { label: string; href: string; color: string; mark: string }[]
+  socials: { label: string; href: string; icon: React.ReactNode }[]
 }
 
 const DEFAULT_CARD: EndCard = {
@@ -64,7 +64,9 @@ export function EndStreamPage({ card }: { card: EndCard }) {
       <a href={card.qrUrl} className="relative mt-[1.6cqi] rounded-full bg-[#ff3c00] px-[2cqi] py-[0.8cqi] font-[Arial,Helvetica,sans-serif] text-[1cqi] font-bold tracking-[0.08em] text-white uppercase no-underline">{card.button}</a>
       <div className="relative mt-[1.6cqi] flex gap-[0.7cqi]">
         {card.socials.map((item) => (
-          <a key={item.label} href={item.href} aria-label={item.label} className="inline-flex size-[2.6cqi] items-center justify-center rounded-full text-[0.7cqi] font-bold text-white" style={{ background: item.color }}>{item.mark}</a>
+          <a key={item.label} href={item.href} target="_blank" rel="noreferrer" aria-label={item.label} className="inline-flex size-[2.99cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline">
+            {item.icon}
+          </a>
         ))}
       </div>
     </div>
@@ -73,12 +75,28 @@ export function EndStreamPage({ card }: { card: EndCard }) {
 
 function socials(event: EventConfig) {
   return [
-    { label: "X", href: event.xUrl, color: "#111", mark: "X" },
-    { label: "Facebook", href: event.facebookUrl, color: "#3b5998", mark: "f" },
-    { label: "LinkedIn", href: event.linkedinUrl, color: "#0a66c2", mark: "in" },
-    { label: "Instagram", href: event.instagramUrl, color: "#e1306c", mark: "ig" },
-    { label: "YouTube", href: event.youtubeUrl, color: "#ff0033", mark: "▶" },
+    { label: "X", href: event.xUrl, icon: <XMark /> },
+    { label: "Facebook", href: event.facebookUrl, icon: <FacebookMark /> },
+    { label: "LinkedIn", href: event.linkedinUrl, icon: <LinkedInMark /> },
+    { label: "Instagram", href: event.instagramUrl, icon: <InstagramMark /> },
+    { label: "YouTube", href: event.youtubeUrl, icon: <YouTubeMark /> },
   ]
+}
+
+function XMark() {
+  return <span className="flex size-full items-center justify-center rounded-full bg-black"><svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white"><path d="M14.7 10.3 21.4 3h-1.6l-5.8 6.4L9.2 3H3.4l7 10-7 7.6h1.6l6.1-6.8 4.9 6.8h5.8l-7.1-9.3Zm-2.2 2.4-.7-1L5.6 4.2h2.4l4.5 6.2.7 1 5.9 8.1h-2.4l-4.8-6.8Z" /></svg></span>
+}
+function FacebookMark() {
+  return <span className="flex size-full items-center justify-center rounded-full bg-[#3b5998]"><svg viewBox="0 0 24 24" className="size-[1.35cqi]" fill="white"><path d="M14.5 8.5V6.8c0-.7.5-1 1.2-1H17V3h-2.1C12.4 3 11 4.5 11 6.6v1.9H9v2.7h2V21h3.5v-9.8h2.3l.4-2.7h-2.7Z" /></svg></span>
+}
+function LinkedInMark() {
+  return <span className="flex size-full items-center justify-center rounded-full bg-[#0a66c2]"><svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="white"><path d="M6.7 9.2H4V20h2.7V9.2ZM5.3 4C4.4 4 3.7 4.7 3.7 5.6s.7 1.6 1.6 1.6 1.6-.7 1.6-1.6S6.2 4 5.3 4ZM20 20h-2.7v-5.6c0-1.6-.6-2.6-1.9-2.6-1 0-1.5.7-1.8 1.3-.1.2-.1.6-.1.9V20H11V9.2h2.6v1.5c.4-.7 1.3-1.8 3.2-1.8 2.3 0 4.2 1.5 4.2 4.8V20Z" /></svg></span>
+}
+function InstagramMark() {
+  return <span className="flex size-full items-center justify-center rounded-full" style={{ background: "linear-gradient(135deg,#f7d046,#e13b6b 55%,#7b3ff2)" }}><svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="none" stroke="white" strokeWidth="1.8"><rect x="5" y="5" width="14" height="14" rx="4" /><circle cx="12" cy="12" r="3.2" /><circle cx="16.4" cy="7.6" r="0.7" fill="white" stroke="none" /></svg></span>
+}
+function YouTubeMark() {
+  return <span className="flex size-full items-center justify-center rounded-full bg-[#ff0033]"><svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.5 31.5 0 0 0 0 12a31.5 31.5 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.5 31.5 0 0 0 24 12a31.5 31.5 0 0 0-.5-5.8zM9.8 15.5v-7l6.2 3.5-6.2 3.5z" /></svg></span>
 }
 
 function text(value: unknown, fallback: string) {
