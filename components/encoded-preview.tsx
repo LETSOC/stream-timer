@@ -136,13 +136,13 @@ export function EncodedPreview({
       </div>
       <div className="space-y-4 p-5">
         <div className="flex flex-wrap gap-2">
-          <Button className="rounded-full bg-black text-white" disabled={busy || status.running || !valid || !status.ffmpeg} onClick={() => void start(false)}>
+          <Button className="rounded-full bg-black text-white hover:bg-black" style={{ backgroundColor: "#111", color: "#fff" }} disabled={busy || status.running || !valid || !status.ffmpeg} onClick={() => void start(false)}>
             Play encoded slate
           </Button>
-          <Button variant="outline" className="rounded-full" disabled={busy || !status.running} onClick={() => void start(true)}>
+          <Button variant="outline" className="rounded-full border-black bg-white text-black" style={{ backgroundColor: "#fff", color: "#111" }} disabled={busy || !status.running} onClick={() => void start(true)}>
             Restart slate
           </Button>
-          <Button variant="outline" className="rounded-full" disabled={busy || !status.running} onClick={() => void stop()}>
+          <Button variant="outline" className="rounded-full border-black bg-white text-black" style={{ backgroundColor: "#fff", color: "#111" }} disabled={busy || !status.running} onClick={() => void stop()}>
             Stop player
           </Button>
         </div>

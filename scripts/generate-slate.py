@@ -196,10 +196,10 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
     img.paste(logo_fit, (lx, ly), logo_fit)
 
     # The top-right mark is the orange Hyphen h, not a rolling QR. The encode cannot animate.
-    mark = Image.open(ASSETS / "hyphen-mark.png").convert("RGBA").resize((96, 96), Image.Resampling.LANCZOS)
-    img.paste(mark, (W - 72 - 96, 36), mark)
-    join = ImageFont.truetype(str(BOLD), 11)
-    draw.text((W - 72 - 48, 36 + 96 + 16), "JOIN LIVE", font=join, fill=(255, 255, 255, 230), anchor="mm")
+    mark = Image.open(ASSETS / "hyphen-mark.png").convert("RGBA").resize((128, 128), Image.Resampling.NEAREST)
+    img.paste(mark, (W - 64 - 128, 28), mark)
+    join = ImageFont.truetype(str(BOLD), 12)
+    draw.text((W - 64 - 64, 28 + 128 + 16), "JOIN LIVE", font=join, fill=(255, 255, 255, 255), anchor="mm")
     return img
 
 
