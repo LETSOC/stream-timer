@@ -529,9 +529,9 @@ export function OperatorConsole() {
               <Input id="rtmp" type="password" autoComplete="off" placeholder="rtmp://uk.castr.io/static/…?password=…" value={rtmpUrl} onChange={(event) => setRtmpUrl(event.target.value)} />
             </Field>
             <div className="flex gap-2">
-              <Button
+              <button
                 type="button"
-                className="rounded-full bg-black text-white"
+                className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
                 disabled={!valid || rtmpUrl.trim().length === 0}
                 onClick={() => {
                   setRtmpState("idle")
@@ -559,11 +559,10 @@ export function OperatorConsole() {
                 }}
               >
                 Start stream
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                variant="outline"
-                className="rounded-full"
+                className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black"
                 onClick={() => {
                   void fetch("/api/encoder?target=rtmp", { method: "DELETE", headers: { "x-encoder-token": token } }).then(() => {
                     setRtmpState("idle")
@@ -573,7 +572,7 @@ export function OperatorConsole() {
                 }}
               >
                 Stop stream
-              </Button>
+              </button>
             </div>
             {strayPids.length > 0 ? <p className="font-mono text-[11px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
             <p className="font-mono text-[11px] leading-5 text-black/60">
