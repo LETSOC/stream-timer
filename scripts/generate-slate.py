@@ -190,13 +190,10 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
     ly = (H - logo_h) // 2 + 18
     img.paste(logo_fit, (lx, ly), logo_fit)
 
-    # Drawn here so the encode cannot fall back to the old QR frame.
     mark_size = 118
     mx, my = W - 56 - mark_size, 28
-    draw.rounded_rectangle((mx, my, mx + mark_size, my + mark_size), radius=10, fill=(255, 60, 0, 255))
-    h_font = ImageFont.truetype(str(BOLD), 86)
-    draw.text((mx + mark_size / 2, my + mark_size / 2 - 6), "h", font=h_font, fill=(255, 255, 255, 255), anchor="mm")
-    draw.rectangle((mx + 74, my + 72, mx + 86, my + 84), fill=(20, 20, 20, 255))
+    mark = Image.open(ASSETS / "hyphen-mark.png").convert("RGBA").resize((mark_size, mark_size), Image.Resampling.LANCZOS)
+    img.paste(mark, (mx, my), mark)
     join = ImageFont.truetype(str(BOLD), 12)
     draw.text((mx + mark_size / 2, my + mark_size + 16), "JOIN LIVE", font=join, fill=(255, 255, 255, 255), anchor="mm")
     return img
