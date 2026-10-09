@@ -568,6 +568,9 @@ export function OperatorConsole() {
               </Button>
             </div>
             {rtmpMessage ? <p className={`font-mono text-[11px] ${rtmpState === "error" ? "text-red-600" : "text-black/60"}`}>{rtmpMessage}</p> : null}
+            <p className="font-mono text-[11px] leading-5 text-black/60">
+              Start stream sends 1280×720, 30 fps, H.264 2500 kbps, yuv420p, AAC stereo 128 kbps, silent audio, FLV over RTMP. The local player is the same picture as 2-second HLS segments.
+            </p>
             <CommandBlock value={streamCommand} copied={copied === "stream"} onCopy={() => copy("stream", streamCommand)} />
             <CommandBlock value={fileCommand} copied={copied === "file"} onCopy={() => copy("file", fileCommand)} />
           </Panel>
