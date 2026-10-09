@@ -109,7 +109,7 @@ fi
 
 M="fontfile='${MONO_FONT}'"
 # Number centres match scripts/generate-slate.py separate boxes (1280x720).
-VF="drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=124-text_w/2:y=526:text='%{eif\:max(0\,trunc((${remaining}-t)/86400))\:d}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=236-text_w/2:y=526:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/3600\,24))\:d\:2}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=348-text_w/2:y=526:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/60\,60))\:d\:2}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=2:bordercolor=white:x=460-text_w/2:y=526:text='%{eif\:mod(max(0\,${remaining}-t)\,60)\:d\:2}'"
+VF="drawtext=${M}:fontsize=49:fontcolor=white:borderw=1:bordercolor=white:x=124-text_w/2:y=528:text='%{eif\:max(0\,trunc((${remaining}-t)/86400))\:d}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=1:bordercolor=white:x=236-text_w/2:y=528:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/3600\,24))\:d\:2}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=1:bordercolor=white:x=348-text_w/2:y=528:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/60\,60))\:d\:2}',drawtext=${M}:fontsize=49:fontcolor=white:borderw=1:bordercolor=white:x=460-text_w/2:y=528:text='%{eif\:mod(max(0\,${remaining}-t)\,60)\:d\:2}'"
 
 fingerprint() {
   # Short content hash + size, so the log proves exactly which image is on air.

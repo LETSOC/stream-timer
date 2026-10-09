@@ -41,7 +41,8 @@ export function EncodedPreview({
   const [status, setStatus] = useState<EncoderStatus>(emptyStatus);
   const [refreshSlate, setRefreshSlate] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false)
+  const playlistUrl = typeof window === "undefined" ? "/media/stream.m3u8" : `${window.location.origin}/media/stream.m3u8`;
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/encoder", { cache: "no-store" });
@@ -148,6 +149,24 @@ export function EncodedPreview({
           <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-40" disabled={busy || !status.running} onClick={() => void stop()}>
             Stop player
           </button>
+        </div>
+        <p className="font-mono text-[11px] break-all text-black/70">{playlistUrl}</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white"
+            onClick={() => {
+              void navigator.clipboard.writeText(playlistUrl).then(() => {
+                setCopied(true)
+                window.setTimeout(() => setCopied(false), 1500)
+              })
+            }}
+          >
+            {copied ? "Copied" : "Copy m3u8 link"}
+          </button>
+          <a className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black no-underline" href={playlistUrl} target="_blank" rel="noreferrer">
+            Open m3u8 in new tab
+          </a>
         </div>
         <div className="relative aspect-video overflow-hidden rounded-[16px] border border-black/10 bg-black">
           {playing && status.pid ? (
