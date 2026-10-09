@@ -49,7 +49,7 @@ function StreamView() {
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
-  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, clockText: 1, logoUrl: "", speakers: [] as { image: string; name: string; description: string }[], gallerySeconds: 4, galleryPause: 6, galleryOffset: -152 })
+  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, clockText: 1, logoUrl: "", speakers: [] as { image: string; name: string; description: string }[], gallerySeconds: 4, galleryPause: 6, galleryOffset: -86 })
 
   useEffect(() => {
     let cancelled = false
@@ -76,7 +76,7 @@ function StreamView() {
               speakers: Array.isArray(body.stage.speakers) ? body.stage.speakers as { image: string; name: string; description: string }[] : [],
               gallerySeconds: Number(body.stage.gallerySeconds) || 4,
               galleryPause: Number(body.stage.galleryPause) || 6,
-              galleryOffset: Number.isFinite(Number(body.stage.galleryOffset)) ? Number(body.stage.galleryOffset) : -152,
+              galleryOffset: Number.isFinite(Number(body.stage.galleryOffset)) ? Number(body.stage.galleryOffset) : -86,
             })
           }
         })

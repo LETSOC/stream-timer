@@ -54,7 +54,7 @@ export function OperatorConsole() {
   const [speakers, setSpeakers] = useState<{ image: string; name: string; description: string }[]>([])
   const [gallerySeconds, setGallerySeconds] = useState(4)
   const [galleryPause, setGalleryPause] = useState(6)
-  const [galleryOffset, setGalleryOffset] = useState(-152)
+  const [galleryOffset, setGalleryOffset] = useState(-86)
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)

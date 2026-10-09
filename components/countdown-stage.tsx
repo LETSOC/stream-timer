@@ -185,11 +185,11 @@ function SpeakerGallery({
   const card = cards[index] ?? cards[0]
   return (
     <div className="absolute inset-x-0 z-20 flex flex-col items-center text-center" style={{ top: offset }}>
-      <div className="size-[420px] overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]">
+      <div className="size-[441px] overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]">
         {card.image ? <img src={card.image} alt="" className="size-full object-cover" draggable={false} /> : null}
       </div>
-      <p className="mt-[0.7cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[1.35cqi] font-bold text-white">{card.name}</p>
-      <p className="mt-[0.25cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] leading-snug text-white/75">{card.description}</p>
+      <p className="mt-[0.7cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[1.8cqi] font-bold text-white">{card.name}</p>
+      <p className="mt-[0.35cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[1.05cqi] leading-snug text-white/75">{card.description}</p>
     </div>
   )
 }
