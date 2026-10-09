@@ -233,7 +233,7 @@ function UnitRow({
           className="flex flex-col items-center justify-center rounded-[0.5cqi] border border-white text-center"
           style={{ minHeight: `${g.boxMinHeight * size}cqi`, padding: `${g.padY * size}cqi ${g.padX * size}cqi` }}
         >
-          <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${g.digit * size * text}cqi` }}>
+          <div className="font-[Arial,Helvetica,sans-serif] leading-none font-black tabular-nums" style={{ fontSize: `${g.digit * size * text}cqi` }}>
             {unit.value}
           </div>
           <div
@@ -274,31 +274,10 @@ function clampChecker(value: number) {
   return Math.min(12, Math.max(4, Math.round(value)))
 }
 
-function RollingQr({ divisions, second, label }: { divisions: number; second: number; label: string }) {
-  const cells = divisions * divisions
-
+function RollingQr({ label }: { divisions: number; second: number; label: string }) {
   return (
     <div className="pointer-events-none absolute top-[4.6%] right-[4.4%] z-20 flex flex-col items-center">
-      <div
-        className="size-[8.4cqi] rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]"
-        aria-hidden
-      >
-        <div
-          className="grid h-full w-full gap-[0.12cqi] rounded-[0.62cqi] bg-black p-[0.5cqi]"
-          style={{ gridTemplateColumns: `repeat(${divisions}, minmax(0, 1fr))` }}
-        >
-          {Array.from({ length: cells }, (_, index) => {
-            const lit = seeded(second, index) > 0.42
-            return (
-              <span
-                key={index}
-                className="rounded-[0.06cqi] bg-white transition-opacity duration-500"
-                style={{ opacity: lit ? 0.96 : 0.16 }}
-              />
-            )
-          })}
-        </div>
-      </div>
+      <img src="/brand/hyphen-mark.png" alt="" className="size-[8.4cqi] rounded-[0.7cqi] object-cover" draggable={false} />
       <span className="mt-[0.55cqi] font-[Arial,Helvetica,sans-serif] text-[0.85cqi] font-bold tracking-[0.14em] text-white uppercase">
         {label}
       </span>
