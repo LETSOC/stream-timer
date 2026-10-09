@@ -36,6 +36,7 @@ export function OperatorConsole() {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
   const [rtmpLive, setRtmpLive] = useState(false)
+  const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
   const [rtmpMessage, setRtmpMessage] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
   const [checker, setChecker] = useState(6)
@@ -112,6 +113,24 @@ export function OperatorConsole() {
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
   const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}`
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      void fetch("/api/encoder", { cache: "no-store" })
+        .then((response) => response.json())
+        .then((body: { rtmpRunning?: boolean }) => {
+          if (!cancelled) setRtmpLive(body.rtmpRunning === true)
+        })
+        .catch(() => undefined)
+    }
+    load()
+    const id = window.setInterval(load, 1500)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
 
   useEffect(() => {
     const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
@@ -522,7 +541,8 @@ export function OperatorConsole() {
                         return
                       }
                       setRtmpState("live")
-                      setRtmpMessage("Sending to the pasted RTMP URL. The player above stays local.")
+                      setRtmpLive(true)
+                      setRtmpMessage("Sending to the pasted RTMP URL.")
                     })
                     .catch(() => {
                       setRtmpState("error")
