@@ -43,7 +43,10 @@ export function EncodedPreview({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const playlistUrl = typeof window === "undefined" ? "/media/stream.m3u8" : `${window.location.origin}/media/stream.m3u8`;
+  const [playlistUrl, setPlaylistUrl] = useState("/media/stream.m3u8")
+  useEffect(() => {
+    setPlaylistUrl(`${window.location.origin}/media/stream.m3u8`)
+  }, []);
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/encoder", { cache: "no-store" });
