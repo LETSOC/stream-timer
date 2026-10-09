@@ -181,7 +181,7 @@ function SpeakerGallery({
   if (!active || cards.length === 0 || !visible) return null
   const card = cards[index] ?? cards[0]
   return (
-    <div className="absolute inset-x-0 top-[-2cqi] z-20 flex flex-col items-center text-center">
+    <div className="absolute inset-x-0 z-20 flex flex-col items-center text-center" style={{ top: "calc(-2cqi - 152px)" }}>
       <div className="size-[525px] overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]">
         {card.image ? <img src={card.image} alt="" className="size-full object-cover" draggable={false} /> : null}
       </div>
