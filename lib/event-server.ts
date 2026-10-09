@@ -33,6 +33,8 @@ export type StageOptions = {
   endBody: string
   endQrUrl: string
   endButton: string
+  endAt: string
+  forceEnd: boolean
 }
 
 const DEFAULT_STAGE: StageOptions = {
@@ -56,6 +58,8 @@ const DEFAULT_STAGE: StageOptions = {
   endBody: "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.",
   endQrUrl: "https://linktr.ee/onlinehyphen",
   endButton: "Watch replay — coming soon",
+  endAt: "16:15",
+  forceEnd: false,
 }
 
 function readStage(value: unknown): StageOptions {
@@ -83,6 +87,8 @@ function readStage(value: unknown): StageOptions {
     endBody: textOr(record.endBody, "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly."),
     endQrUrl: textOr(record.endQrUrl, "https://linktr.ee/onlinehyphen"),
     endButton: textOr(record.endButton, "Watch replay — coming soon"),
+    endAt: textOr(record.endAt, "16:15"),
+    forceEnd: record.forceEnd === true,
   }
 }
 

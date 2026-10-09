@@ -62,6 +62,8 @@ export function OperatorConsole() {
   const [endBody, setEndBody] = useState("The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.")
   const [endQrUrl, setEndQrUrl] = useState("https://linktr.ee/onlinehyphen")
   const [endButton, setEndButton] = useState("Watch replay — coming soon")
+  const [endAt, setEndAt] = useState("16:15")
+  const [forceEnd, setForceEnd] = useState(false)
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
@@ -126,7 +128,7 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
-  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${endTitle}:${endSubtitle}:${endDate}:${endBody}:${endQrUrl}:${endButton}:${JSON.stringify(speakers)}`
+  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${endTitle}:${endSubtitle}:${endDate}:${endBody}:${endQrUrl}:${endButton}:${endAt}:${forceEnd}:${JSON.stringify(speakers)}`
 
   useEffect(() => {
     let cancelled = false
@@ -175,6 +177,8 @@ export function OperatorConsole() {
         if (typeof stage.endBody === "string") setEndBody(stage.endBody)
         if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
         if (typeof stage.endButton === "string") setEndButton(stage.endButton)
+        if (typeof stage.endAt === "string") setEndAt(stage.endAt)
+        if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
       } catch {
         /* ignore a bad local draft */
       }
@@ -212,8 +216,8 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd }))
+  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -236,7 +240,7 @@ export function OperatorConsole() {
           event,
           testUntil,
           pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton },
+          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd },
         }),
       })
         .then(async (response) => {
@@ -635,7 +639,16 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
+            {forceEnd ? (
+              <div className="flex aspect-video items-center justify-center bg-[#070a16] text-white">
+                <div className="text-center">
+                  <p className="font-mono text-[11px] tracking-[0.16em] uppercase">End card is on /stream</p>
+                  <p className="mt-3 text-3xl font-bold">{endTitle}</p>
+                </div>
+              </div>
+            ) : (
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
+            )}
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">
@@ -670,8 +683,13 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
+            <Field label="Show end card at" htmlFor="end-at"><Input id="end-at" type="time" value={endAt} onChange={(event) => setEndAt(event.target.value)} /></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
-            <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full bg-black px-4 py-2 text-sm text-white no-underline">Open end card</a>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white" onClick={() => setForceEnd(true)}>Show end card now</button>
+              <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm text-black" onClick={() => setForceEnd(false)}>Back to countdown</button>
+              <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full border border-black bg-white px-4 py-2 text-sm text-black no-underline">Open end card</a>
+            </div>
           </Panel>
           <Panel title="Speaker gallery">
             <p className="font-mono text-[11px] leading-5 text-black/55">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
