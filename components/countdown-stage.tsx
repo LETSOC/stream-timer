@@ -326,7 +326,7 @@ function SocialRow({
           target="_blank"
           rel="noreferrer"
           aria-label={link.label}
-          className="inline-flex size-[3.15cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline"
+          className="inline-flex size-[2.99cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline"
         >
           {link.icon}
         </a>
@@ -384,7 +384,7 @@ function YouTubeIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-[#ff0033]">
       <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>
-        <path d="M9.2 7.6v8.8l7.4-4.4-7.4-4.4Z" />
+        <path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.5 31.5 0 0 0 0 12a31.5 31.5 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.5 31.5 0 0 0 24 12a31.5 31.5 0 0 0-.5-5.8zM9.8 15.5v-7l6.2 3.5-6.2 3.5z" />
       </svg>
     </span>
   )
