@@ -126,81 +126,54 @@ export function EncodedPreview({
   }
 
   return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm tracking-[0.2em] text-zinc-400 uppercase">
-          FFmpeg output
-        </h2>
-        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${status.rtmpRunning ? "bg-[#128a3e] text-white" : "bg-white/10 text-white/45"}`}>
-          <span className={`size-1.5 rounded-full ${status.rtmpRunning ? "animate-pulse bg-white" : "bg-white/30"}`} />
+    <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-5 py-4">
+        <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">Encoded player</h2>
+        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${status.rtmpRunning ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/45"}`}>
+          <span className={`size-1.5 rounded-full ${status.rtmpRunning ? "animate-pulse bg-white" : "bg-black/30"}`} />
           {status.rtmpRunning ? "Stream live" : "Stream off"}
         </span>
-        <div className="flex gap-2">
-          <Button
-            disabled={busy || status.running || !valid || !status.ffmpeg}
-            onClick={() => void start(false)}
-          >
+      </div>
+      <div className="space-y-4 p-5">
+        <div className="flex flex-wrap gap-2">
+          <Button className="rounded-full bg-black text-white" disabled={busy || status.running || !valid || !status.ffmpeg} onClick={() => void start(false)}>
             Play encoded slate
           </Button>
-          <Button
-            variant="outline"
-            disabled={busy || !status.running}
-            onClick={() => void start(true)}
-          >
+          <Button variant="outline" className="rounded-full" disabled={busy || !status.running} onClick={() => void start(true)}>
             Restart slate
           </Button>
-          <Button
-            variant="destructive"
-            disabled={busy || !status.running}
-            onClick={() => void stop()}
-          >
-            Stop
+          <Button variant="outline" className="rounded-full" disabled={busy || !status.running} onClick={() => void stop()}>
+            Stop player
           </Button>
         </div>
+        <div className="relative aspect-video overflow-hidden rounded-[16px] border border-black/10 bg-black">
+          {playing && status.pid ? (
+            <StreamPlayer src={`/media/stream.m3u8?run=${status.pid}`} />
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center">
+              <p className="font-mono text-[12px] text-white/80">
+                {status.running ? "Writing the first two-second segment." : "Play the encoded slate to preview it here."}
+              </p>
+              <p className="max-w-sm font-mono text-[11px] leading-5 text-white/45">
+                1280×720 · 30 fps · H.264 2500 kbps · silent stereo. This player is local. Start stream sends the same picture to RTMP.
+              </p>
+            </div>
+          )}
+        </div>
+        <label className="flex items-center gap-2 font-mono text-[11px] text-black/60">
+          <input type="checkbox" checked={refreshSlate} onChange={(event) => setRefreshSlate(event.target.checked)} />
+          Auto-refresh the burned-in clock every 10 minutes
+        </label>
+        {status.running && status.slateAgeSeconds !== null ? (
+          <p className="font-mono text-[11px] text-black/50">
+            Slate age {status.slateAgeSeconds}s.
+            {status.refreshSeconds ? " Auto-refresh is on." : " Auto-refresh is off."}
+          </p>
+        ) : null}
+        {!status.ffmpeg ? <p className="font-mono text-[11px] text-red-600">ffmpeg is not on PATH. The browser preview still runs.</p> : null}
+        {stale ? <p className="font-mono text-[11px] text-black/50">The form changed after this encode started. Restart the slate to burn in the new title.</p> : null}
+        {error ? <pre className="max-h-36 overflow-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[11px] leading-5 whitespace-pre-wrap text-red-700">{error}</pre> : null}
       </div>
-      <div className="relative aspect-video overflow-hidden rounded-xl bg-[#111111] ring-1 ring-white/10">
-        {playing && status.pid ? (
-          <StreamPlayer src={`/media/stream.m3u8?run=${status.pid}`} />
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center">
-            <p className="text-sm text-white/80">
-              {status.running
-                ? "Writing the first two-second segment."
-                : "Play the H.264 slate here before you send it to Castr."}
-            </p>
-            <p className="max-w-sm text-xs text-white/45">
-              1280×720, 30 fps, 2500 kbps, silent stereo. The burned-in clock
-              starts when ffmpeg starts.
-            </p>
-          </div>
-        )}
-      </div>
-      <label className="flex items-center gap-2 text-xs text-zinc-400">
-        <input type="checkbox" checked={refreshSlate} onChange={(event) => setRefreshSlate(event.target.checked)} />
-        Auto-refresh the burned-in clock every 10 minutes
-      </label>
-      {status.running && status.slateAgeSeconds !== null ? (
-        <p className="text-xs text-zinc-400">
-          Slate age {status.slateAgeSeconds}s.
-          {status.refreshSeconds ? " Auto-refresh is on: the slate restarts at 10 minutes." : " Auto-refresh is off."}
-        </p>
-      ) : null}
-      {!status.ffmpeg ? (
-        <p className="text-sm text-red-300">
-          ffmpeg is not on PATH. The browser preview still runs.
-        </p>
-      ) : null}
-      {stale ? (
-        <p className="text-sm text-zinc-400">
-          The form changed after this encode started. Stop and play again to
-          burn in the new title or gate.
-        </p>
-      ) : null}
-      {error ? (
-        <pre className="max-h-36 overflow-auto rounded-lg bg-black/50 p-3 text-xs leading-relaxed whitespace-pre-wrap text-red-200">
-          {error}
-        </pre>
-      ) : null}
     </section>
-  );
+  )
 }
