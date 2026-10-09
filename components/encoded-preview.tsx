@@ -136,15 +136,15 @@ export function EncodedPreview({
       </div>
       <div className="space-y-4 p-5">
         <div className="flex flex-wrap gap-2">
-          <Button className="rounded-full bg-black text-white hover:bg-black" style={{ backgroundColor: "#111", color: "#fff" }} disabled={busy || status.running || !valid || !status.ffmpeg} onClick={() => void start(false)}>
+          <button type="button" className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-40" disabled={busy || status.running || !valid || !status.ffmpeg} onClick={() => void start(false)}>
             Play encoded slate
-          </Button>
-          <Button variant="outline" className="rounded-full border-black bg-white text-black" style={{ backgroundColor: "#fff", color: "#111" }} disabled={busy || !status.running} onClick={() => void start(true)}>
+          </button>
+          <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-40" disabled={busy || !status.running} onClick={() => void start(true)}>
             Restart slate
-          </Button>
-          <Button variant="outline" className="rounded-full border-black bg-white text-black" style={{ backgroundColor: "#fff", color: "#111" }} disabled={busy || !status.running} onClick={() => void stop()}>
+          </button>
+          <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-40" disabled={busy || !status.running} onClick={() => void stop()}>
             Stop player
-          </Button>
+          </button>
         </div>
         <div className="relative aspect-video overflow-hidden rounded-[16px] border border-black/10 bg-black">
           {playing && status.pid ? (
