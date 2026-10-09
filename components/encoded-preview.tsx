@@ -19,6 +19,8 @@ const emptyStatus: EncoderStatus = {
   slateAgeSeconds: null,
   burnedRemainingAtStart: null,
   refreshSeconds: null,
+  rtmpRunning: false,
+  rtmpLogTail: "",
 };
 
 export function EncodedPreview({
