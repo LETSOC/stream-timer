@@ -46,7 +46,7 @@ export function OperatorConsole() {
   const [clockText, setClockText] = useState(1)
   const [logoUrl, setLogoUrl] = useState("")
   const token = useEncoderToken()
-  const [syncState, setSyncState] = useState<"idle" | "saved" | "error">("idle")
+  const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
@@ -290,7 +290,7 @@ export function OperatorConsole() {
               </span>
             </span>
             <span className="font-mono text-[10px] text-black/50 uppercase">
-              Desk {syncState === "saved" ? "saved" : syncState === "local" ? "local" : syncState}
+              Desk {syncState}
             </span>
             <Button type="button" className="rounded-full bg-black text-white" onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}

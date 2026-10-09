@@ -66,7 +66,8 @@ export function readServerState(): { event: EventConfig; testUntil: number | nul
       pausedAt: typeof parsed.pausedAt === "number" ? parsed.pausedAt : null,
       stage: readStage(parsed.stage),
     }
-  } catch {
+  } catch (error) {
+    console.warn("Could not read event.json, using the default event.", error)
     return { event: { ...DEFAULT_EVENT }, testUntil: null, pausedAt: null, stage: { ...DEFAULT_STAGE } }
   }
 }
@@ -81,18 +82,18 @@ export function writeServerEvent(
   if (!event) return null
   fs.mkdirSync(DATA_DIR, { recursive: true })
   const current = readServerState()
-  fs.writeFileSync(
-    EVENT_FILE,
-    JSON.stringify(
-      {
-        event,
-        testUntil: testUntil === undefined ? current.testUntil : testUntil,
-        pausedAt: pausedAt === undefined ? current.pausedAt : pausedAt,
-        stage: stage ?? current.stage,
-      },
-      null,
-      2,
-    ),
+  const payload = JSON.stringify(
+    {
+      event,
+      testUntil: testUntil === undefined ? current.testUntil : testUntil,
+      pausedAt: pausedAt === undefined ? current.pausedAt : pausedAt,
+      stage: stage ?? current.stage,
+    },
+    null,
+    2,
   )
+  const temporary = `${EVENT_FILE}.tmp`
+  fs.writeFileSync(temporary, payload)
+  fs.renameSync(temporary, EVENT_FILE)
   return event
 }

@@ -62,17 +62,35 @@ function playlistReady(): boolean {
   }
 }
 
-function tailLog(): string {
+/** Reads at most the last `maxBytes` of a file, so a long-running log costs the same to read as a short one. */
+export function readTail(file: string, maxBytes = 8192): string {
+  let fd: number | null = null
   try {
-    const text = fs.readFileSync(LOG_FILE, "utf8");
-    return redact(text.split(/\r?\n/).slice(-30).join("\n").slice(-4000));
+    fd = fs.openSync(file, "r")
+    const { size } = fs.fstatSync(fd)
+    const length = Math.min(size, maxBytes)
+    const buffer = Buffer.alloc(length)
+    fs.readSync(fd, buffer, 0, length, size - length)
+    return buffer.toString("utf8")
   } catch {
-    return "";
+    return ""
+  } finally {
+    if (fd !== null) fs.closeSync(fd)
   }
 }
 
+function tailLog(): string {
+  return redact(readTail(LOG_FILE).split(/\r?\n/).slice(-30).join("\n").slice(-4000))
+}
+
+let ffmpegFoundUntil = 0
+
+/** The desk polls status every couple of seconds; spawning ffmpeg each time blocked the server for ~50ms. */
 export function ffmpegAvailable(): boolean {
-  return spawnSync("ffmpeg", ["-hide_banner", "-version"], { stdio: "ignore" }).status === 0;
+  if (Date.now() < ffmpegFoundUntil) return true
+  const found = spawnSync("ffmpeg", ["-hide_banner", "-version"], { stdio: "ignore" }).status === 0
+  if (found) ffmpegFoundUntil = Date.now() + 60_000
+  return found
 }
 
 export function readStatus(): EncoderStatus {
