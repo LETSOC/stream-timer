@@ -65,7 +65,7 @@ export function EndStreamPage({ card }: { card: EndCard }) {
       <div className="relative mt-[1.6cqi] flex gap-[0.7cqi]">
         {card.socials.map((item) => (
           <a key={item.label} href={item.href} target="_blank" rel="noreferrer" aria-label={item.label} className="inline-flex size-[2.99cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline">
-            {item.icon}
+            {iconFor(item.label)}
           </a>
         ))}
       </div>
@@ -73,6 +73,13 @@ export function EndStreamPage({ card }: { card: EndCard }) {
   )
 }
 
+function iconFor(label: string) {
+  if (label === "Facebook") return <FacebookMark />
+  if (label === "LinkedIn") return <LinkedInMark />
+  if (label === "Instagram") return <InstagramMark />
+  if (label === "YouTube") return <YouTubeMark />
+  return <XMark />
+}
 function socials(event: EventConfig) {
   return [
     { label: "X", href: event.xUrl, icon: <XMark /> },
