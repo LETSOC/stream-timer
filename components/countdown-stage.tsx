@@ -32,10 +32,11 @@ type CountdownStageProps = {
   gallerySeconds?: number
   galleryPause?: number
   galleryOffset?: number
+  galleryScale?: number
   clock?: Date | null
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -152, clock }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -86, galleryScale = 80, clock }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -50,7 +51,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
 
   return (
     <div
-      className={cn("countdown-stage relative isolate overflow-hidden text-white", className)}
+      className={cn("countdown-stage relative isolate overflow-visible text-white", className)}
       style={{ aspectRatio: "16 / 9" }}
     >
       <div
@@ -131,8 +132,8 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             {eventLinkLabel}
           </a>
         ) : null}
-        <SpeakerGallery speakers={speakers} seconds={gallerySeconds} pause={galleryPause} offset={galleryOffset} active={Boolean(remaining && !remaining.done)} />
       </div>
+      <SpeakerGallery speakers={speakers} seconds={gallerySeconds} pause={galleryPause} offset={galleryOffset} scale={galleryScale} active={Boolean(remaining && !remaining.done)} />
     </div>
   )
 }
@@ -142,12 +143,14 @@ function SpeakerGallery({
   seconds,
   pause,
   offset,
+  scale,
   active,
 }: {
   speakers: { image: string; name: string; description: string }[]
   seconds: number
   pause: number
   offset: number
+  scale: number
   active: boolean
 }) {
   const cards = speakers.filter((item) => item.image || item.name)
@@ -184,8 +187,8 @@ function SpeakerGallery({
   if (!active || cards.length === 0 || !visible) return null
   const card = cards[index] ?? cards[0]
   return (
-    <div className="absolute inset-x-0 z-20 flex flex-col items-center text-center" style={{ top: offset }}>
-      <div className="size-[441px] overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]">
+    <div className="absolute right-[6%] z-20 flex w-[34%] flex-col items-center text-center" style={{ top: `calc(50% + ${offset}px)`, transform: "translateY(-50%)" }}>
+      <div className="overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]" style={{ width: `${Math.round(420 * scale / 100)}px`, height: `${Math.round(420 * scale / 100)}px` }}>
         {card.image ? <img src={card.image} alt="" className="size-full object-cover" draggable={false} /> : null}
       </div>
       <p className="mt-[0.7cqi] max-w-[28cqi] font-[Arial,Helvetica,sans-serif] text-[1.8cqi] font-bold text-white">{card.name}</p>

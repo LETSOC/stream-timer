@@ -55,6 +55,7 @@ export function OperatorConsole() {
   const [gallerySeconds, setGallerySeconds] = useState(4)
   const [galleryPause, setGalleryPause] = useState(6)
   const [galleryOffset, setGalleryOffset] = useState(-86)
+  const [galleryScale, setGalleryScale] = useState(80)
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
@@ -119,7 +120,7 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
-  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${JSON.stringify(speakers)}`
+  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${JSON.stringify(speakers)}`
 
   useEffect(() => {
     let cancelled = false
@@ -161,6 +162,7 @@ export function OperatorConsole() {
         if (typeof stage.gallerySeconds === "number") setGallerySeconds(stage.gallerySeconds)
         if (typeof stage.galleryPause === "number") setGalleryPause(stage.galleryPause)
         if (typeof stage.galleryOffset === "number") setGalleryOffset(stage.galleryOffset)
+        if (typeof stage.galleryScale === "number") setGalleryScale(stage.galleryScale)
       } catch {
         /* ignore a bad local draft */
       }
@@ -198,8 +200,8 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale }))
+  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -222,7 +224,7 @@ export function OperatorConsole() {
           event,
           testUntil,
           pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset },
+          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale },
         }),
       })
         .then(async (response) => {
@@ -600,6 +602,9 @@ export function OperatorConsole() {
             <Field label="Vertical position (px, higher moves it down)" htmlFor="gallery-offset">
               <Input id="gallery-offset" type="number" min={-600} max={400} value={galleryOffset} onChange={(event) => setGalleryOffset(Math.min(400, Math.max(-600, Number(event.target.value) || 0)))} />
             </Field>
+            <Field label="Portrait size (%)" htmlFor="gallery-scale">
+              <Input id="gallery-scale" type="number" min={40} max={160} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(160, Math.max(40, Number(event.target.value) || 80)))} />
+            </Field>
             {speakers.map((speaker, index) => (
               <div key={index} className="space-y-2 rounded-xl border border-black/10 p-3">
                 <Field label="Image URL" htmlFor={`speaker-image-${index}`}>
@@ -645,7 +650,7 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} clock={previewNow} />
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">
