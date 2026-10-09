@@ -27,6 +27,12 @@ export type StageOptions = {
   galleryPause: number
   galleryOffset: number
   galleryScale: number
+  endTitle: string
+  endSubtitle: string
+  endDate: string
+  endBody: string
+  endQrUrl: string
+  endButton: string
 }
 
 const DEFAULT_STAGE: StageOptions = {
@@ -44,6 +50,12 @@ const DEFAULT_STAGE: StageOptions = {
   galleryPause: 6,
   galleryOffset: -86,
   galleryScale: 80,
+  endTitle: "Thank you for joining",
+  endSubtitle: "Hyphen Festival 2026",
+  endDate: "Wed, 04 Nov, 2026",
+  endBody: "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.",
+  endQrUrl: "https://linktr.ee/onlinehyphen",
+  endButton: "Watch replay — coming soon",
 }
 
 function readStage(value: unknown): StageOptions {
@@ -65,7 +77,17 @@ function readStage(value: unknown): StageOptions {
     galleryPause: clampSeconds(record.galleryPause, 6),
     galleryOffset: clampOffset(record.galleryOffset),
     galleryScale: clampScale(record.galleryScale),
+    endTitle: textOr(record.endTitle, "Thank you for joining"),
+    endSubtitle: textOr(record.endSubtitle, "Hyphen Festival 2026"),
+    endDate: textOr(record.endDate, "Wed, 04 Nov, 2026"),
+    endBody: textOr(record.endBody, "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly."),
+    endQrUrl: textOr(record.endQrUrl, "https://linktr.ee/onlinehyphen"),
+    endButton: textOr(record.endButton, "Watch replay — coming soon"),
   }
+}
+
+function textOr(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value : fallback
 }
 
 function clampScale(value: unknown) {

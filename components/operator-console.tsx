@@ -56,6 +56,12 @@ export function OperatorConsole() {
   const [galleryPause, setGalleryPause] = useState(6)
   const [galleryOffset, setGalleryOffset] = useState(-86)
   const [galleryScale, setGalleryScale] = useState(80)
+  const [endTitle, setEndTitle] = useState("Thank you for joining")
+  const [endSubtitle, setEndSubtitle] = useState("Hyphen Festival 2026")
+  const [endDate, setEndDate] = useState("Wed, 04 Nov, 2026")
+  const [endBody, setEndBody] = useState("The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.")
+  const [endQrUrl, setEndQrUrl] = useState("https://linktr.ee/onlinehyphen")
+  const [endButton, setEndButton] = useState("Watch replay — coming soon")
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
@@ -120,7 +126,7 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
-  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${JSON.stringify(speakers)}`
+  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${endTitle}:${endSubtitle}:${endDate}:${endBody}:${endQrUrl}:${endButton}:${JSON.stringify(speakers)}`
 
   useEffect(() => {
     let cancelled = false
@@ -163,6 +169,12 @@ export function OperatorConsole() {
         if (typeof stage.galleryPause === "number") setGalleryPause(stage.galleryPause)
         if (typeof stage.galleryOffset === "number") setGalleryOffset(stage.galleryOffset)
         if (typeof stage.galleryScale === "number") setGalleryScale(stage.galleryScale)
+        if (typeof stage.endTitle === "string") setEndTitle(stage.endTitle)
+        if (typeof stage.endSubtitle === "string") setEndSubtitle(stage.endSubtitle)
+        if (typeof stage.endDate === "string") setEndDate(stage.endDate)
+        if (typeof stage.endBody === "string") setEndBody(stage.endBody)
+        if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
+        if (typeof stage.endButton === "string") setEndButton(stage.endButton)
       } catch {
         /* ignore a bad local draft */
       }
@@ -200,8 +212,8 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton }))
+  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -224,7 +236,7 @@ export function OperatorConsole() {
           event,
           testUntil,
           pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale },
+          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton },
         }),
       })
         .then(async (response) => {
@@ -408,6 +420,9 @@ export function OperatorConsole() {
               <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition-colors hover:bg-black hover:text-white active:translate-y-px" onClick={restoreFestival}>
                 Restore 4 Nov
               </button>
+              <a href="/end" target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-8 items-center justify-center rounded-full bg-black text-sm font-medium text-white no-underline">
+                Open end card
+              </a>
             </div>
             <p className="font-mono text-[10px] leading-5 text-black/55">
               Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
@@ -590,6 +605,16 @@ export function OperatorConsole() {
             </p>
             <CommandBlock value={streamCommand} copied={copied === "stream"} onCopy={() => copy("stream", streamCommand)} />
             <CommandBlock value={fileCommand} copied={copied === "file"} onCopy={() => copy("file", fileCommand)} />
+          </Panel>
+          <Panel title="End card">
+            <p className="font-mono text-[11px] leading-5 text-black/55">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
+            <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
+            <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
+            <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
+            <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
+            <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
+            <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
+            <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full bg-black px-4 py-2 text-sm text-white no-underline">Open end card</a>
           </Panel>
           <Panel title="Speaker gallery">
             <p className="font-mono text-[11px] leading-5 text-black/55">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
