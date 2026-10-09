@@ -343,6 +343,7 @@ function clampChecker(value: number) {
 
 function RollingQr({ divisions, second, label }: { divisions: number; second: number; label: string }) {
   const cells = divisions * divisions
+  const marker = markerIndex(second, cells)
 
   return (
     <div className="pointer-events-none absolute top-[4.6%] right-[4.4%] z-20 flex flex-col items-center">
@@ -355,12 +356,16 @@ function RollingQr({ divisions, second, label }: { divisions: number; second: nu
           style={{ gridTemplateColumns: `repeat(${divisions}, minmax(0, 1fr))` }}
         >
           {Array.from({ length: cells }, (_, index) => {
+            const isMarker = index === marker
             const lit = seeded(second, index) > 0.42
             return (
               <span
                 key={index}
-                className="rounded-[0.06cqi] bg-white transition-opacity duration-500"
-                style={{ opacity: lit ? 0.96 : 0.16 }}
+                className="rounded-[0.06cqi] transition-opacity duration-500"
+                style={{
+                  background: isMarker ? "#ff3c00" : "#fff",
+                  opacity: isMarker ? 1 : lit ? 0.96 : 0.16,
+                }}
               />
             )
           })}
@@ -371,6 +376,12 @@ function RollingQr({ divisions, second, label }: { divisions: number; second: nu
       </span>
     </div>
   )
+}
+
+function markerIndex(second: number, cells: number) {
+  let n = Math.imul(second + 1, 374761393) ^ 0x9e3779b9
+  n = Math.imul(n ^ (n >>> 13), 1274126177)
+  return (n >>> 0) % cells
 }
 
 function seeded(second: number, index: number) {
