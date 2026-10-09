@@ -606,6 +606,9 @@ export function OperatorConsole() {
             <CommandBlock value={streamCommand} copied={copied === "stream"} onCopy={() => copy("stream", streamCommand)} />
             <CommandBlock value={fileCommand} copied={copied === "file"} onCopy={() => copy("file", fileCommand)} />
           </Panel>
+        </section>
+
+        <section className="space-y-4">
           <Panel title="End card">
             <p className="font-mono text-[11px] leading-5 text-black/55">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
             <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
@@ -646,9 +649,6 @@ export function OperatorConsole() {
             ))}
             <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</button>
           </Panel>
-        </section>
-
-        <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">
