@@ -212,6 +212,24 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
     return img
 
 
+def make_live_slate(slate: Image.Image) -> Image.Image:
+    img = slate.convert("RGBA")
+    wash = Image.new("RGBA", img.size, (255, 60, 0, 128))
+    img = Image.alpha_composite(img, wash)
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((60, 500, 560, 670), fill=(120, 28, 0, 230))
+    live = ImageFont.truetype(str(BOLD), 18)
+    message = ImageFont.truetype(str(BOLD), 22)
+    rounded_rect(draw, (72, 528, 150, 562), 8, outline=(255, 60, 0, 255), width=2)
+    draw.ellipse((84, 539, 96, 551), fill=(255, 60, 0, 255))
+    draw.text((112, 545), "LIVE", font=live, fill=(255, 60, 0, 255), anchor="mm")
+    draw.text((168, 545), "Doors are open — the festival has started", font=message, fill=(255, 255, 255, 255), anchor="lm")
+    watch = ImageFont.truetype(str(BOLD), 11)
+    draw.rectangle((1108, 146, 1210, 166), fill=(90, 24, 0, 220))
+    draw.text((1159, 156), "WATCH LIVE", font=watch, fill=(255, 255, 255, 255), anchor="mm")
+    return img
+
+
 def save_rgb(img: Image.Image, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(path, "PNG", optimize=True)
@@ -242,6 +260,7 @@ def main() -> None:
 
     slate = make_slate(bg, logo, qr)
     save_rgb(slate, ASSETS / "countdown-slate.png")
+    save_rgb(make_live_slate(slate), ASSETS / "live-slate.png")
 
     centers = [COUNT_X + i * (BOX_W + BOX_GAP) + BOX_W / 2 for i in range(4)]
     print(

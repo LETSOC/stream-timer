@@ -70,6 +70,7 @@ done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SLATE="${SLATE:-$ROOT/assets/countdown-slate.png}"
+LIVE_SLATE="${LIVE_SLATE:-$ROOT/assets/live-slate.png}"
 SERIF_FONT="${SERIF_FONT:-$ROOT/assets/fonts/InstrumentSerif-Regular.ttf}"
 MONO_FONT="${MONO_FONT:-$ROOT/assets/fonts/JetBrainsMono-Medium.ttf}"
 
@@ -115,21 +116,42 @@ echo "Line:         $EVENT_LINE_DISPLAY"
 echo "Target unix:  $TARGET_UNIX"
 echo "Remaining:    ${remaining}s at launch (drawtext t=0)"
 echo "Slate:        $SLATE"
+echo "Live slate:   $LIVE_SLATE"
 echo "Mode:         $MODE"
 
-common_input=(
-  -hide_banner
-  -loglevel info
-  -re
-  -loop 1 -framerate "$FPS" -i "$SLATE"
-  -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
-  -vf "$VF"
-  -map 0:v:0
-  -map 1:a:0
-  -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k
-  -g 60 -pix_fmt yuv420p
-  -c:a aac -b:a 128k -ar 44100
-)
+if [[ -f "$LIVE_SLATE" ]]; then
+  FILTER_FILE="$ROOT/data/encoder-filter.txt"
+  mkdir -p "$ROOT/data"
+  printf '%s\n' "[0:v]${VF}[counted];[counted][2:v]overlay=enable='gte(t,${remaining})'[v]" > "$FILTER_FILE"
+  common_input=(
+    -hide_banner
+    -loglevel info
+    -re
+    -loop 1 -framerate "$FPS" -i "$SLATE"
+    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
+    -loop 1 -framerate "$FPS" -i "$LIVE_SLATE"
+    -filter_complex_script "$FILTER_FILE"
+    -map "[v]"
+    -map 1:a:0
+    -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k
+    -g 60 -pix_fmt yuv420p
+    -c:a aac -b:a 128k -ar 44100
+  )
+else
+  common_input=(
+    -hide_banner
+    -loglevel info
+    -re
+    -loop 1 -framerate "$FPS" -i "$SLATE"
+    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
+    -vf "$VF"
+    -map 0:v:0
+    -map 1:a:0
+    -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k
+    -g 60 -pix_fmt yuv420p
+    -c:a aac -b:a 128k -ar 44100
+  )
+fi
 
 # macOS ships Bash 3.2; `set -u` plus an empty "${array[@]}" is an unbound variable.
 DURATION_SECS=""
