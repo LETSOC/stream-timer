@@ -10,6 +10,8 @@ export function readServerEvent(): EventConfig {
   return readServerState().event
 }
 
+export type SpeakerCard = { image: string; name: string; description: string }
+
 export type StageOptions = {
   checker: number
   showMeta: boolean
@@ -20,6 +22,9 @@ export type StageOptions = {
   clockScale: number
   clockText: number
   logoUrl: string
+  speakers: SpeakerCard[]
+  gallerySeconds: number
+  galleryPause: number
 }
 
 const DEFAULT_STAGE: StageOptions = {
@@ -32,6 +37,9 @@ const DEFAULT_STAGE: StageOptions = {
   clockScale: 1,
   clockText: 1,
   logoUrl: "",
+  speakers: [],
+  gallerySeconds: 4,
+  galleryPause: 6,
 }
 
 function readStage(value: unknown): StageOptions {
@@ -48,7 +56,28 @@ function readStage(value: unknown): StageOptions {
     clockScale: clampSize(record.clockScale, CLOCK_SCALE_RANGE),
     clockText: clampSize(record.clockText, CLOCK_TEXT_RANGE),
     logoUrl: typeof record.logoUrl === "string" ? record.logoUrl : "",
+    speakers: readSpeakers(record.speakers),
+    gallerySeconds: clampSeconds(record.gallerySeconds, 4),
+    galleryPause: clampSeconds(record.galleryPause, 6),
   }
+}
+
+function clampSeconds(value: unknown, fallback: number) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(30, Math.max(2, Math.round(number)))
+}
+
+function readSpeakers(value: unknown): SpeakerCard[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 12).map((item) => {
+    const record = item && typeof item === "object" ? item as Record<string, unknown> : {}
+    return {
+      image: typeof record.image === "string" ? record.image : "",
+      name: typeof record.name === "string" ? record.name : "",
+      description: typeof record.description === "string" ? record.description : "",
+    }
+  }).filter((item) => item.image || item.name || item.description)
 }
 
 export function readServerState(): { event: EventConfig; testUntil: number | null; pausedAt: number | null; stage: StageOptions } {

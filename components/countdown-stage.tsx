@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
+import { useEffect, useState } from "react"
 import {
   formatBannerDate,
   formatTimeRange,
@@ -27,10 +28,13 @@ type CountdownStageProps = {
   clockScale?: number
   clockText?: number
   logoUrl?: string
+  speakers?: { image: string; name: string; description: string }[]
+  gallerySeconds?: number
+  galleryPause?: number
   clock?: Date | null
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", clock }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, clock }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -126,11 +130,66 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             {eventLinkLabel}
           </a>
         ) : null}
+        <SpeakerGallery speakers={speakers} seconds={gallerySeconds} pause={galleryPause} active={Boolean(remaining && !remaining.done)} />
       </div>
     </div>
   )
 }
 
+function SpeakerGallery({
+  speakers,
+  seconds,
+  pause,
+  active,
+}: {
+  speakers: { image: string; name: string; description: string }[]
+  seconds: number
+  pause: number
+  active: boolean
+}) {
+  const cards = speakers.filter((item) => item.image || item.name)
+  const [index, setIndex] = useState(0)
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    if (!active || cards.length === 0) return
+    let cancelled = false
+    let timer = 0
+    const run = () => {
+      setVisible(false)
+      timer = window.setTimeout(() => {
+        if (cancelled) return
+        let step = 0
+        const show = () => {
+          if (cancelled) return
+          setIndex(step)
+          setVisible(true)
+          timer = window.setTimeout(() => {
+            step += 1
+            if (step >= cards.length) run()
+            else show()
+          }, seconds * 1000)
+        }
+        show()
+      }, pause * 1000)
+    }
+    run()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [active, cards.length, seconds, pause])
+  if (!active || cards.length === 0 || !visible) return null
+  const card = cards[index] ?? cards[0]
+  return (
+    <div className="absolute inset-x-0 top-0 z-20 flex flex-col items-center text-center">
+      <div className="size-[16cqi] overflow-hidden rounded-full border border-white/30 bg-white shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+        {card.image ? <img src={card.image} alt="" className="size-full object-cover" draggable={false} /> : null}
+      </div>
+      <p className="mt-[0.8cqi] font-[Arial,Helvetica,sans-serif] text-[1.3cqi] font-bold text-white">{card.name}</p>
+      <p className="mt-[0.3cqi] max-w-[24cqi] font-[Arial,Helvetica,sans-serif] text-[0.85cqi] leading-snug text-white/75">{card.description}</p>
+    </div>
+  )
+}
 function MetaRow({
   icon,
   children,

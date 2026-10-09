@@ -49,7 +49,7 @@ function StreamView() {
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
-  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, clockText: 1, logoUrl: "" })
+  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, clockText: 1, logoUrl: "", speakers: [] as { image: string; name: string; description: string }[], gallerySeconds: 4, galleryPause: 6 })
 
   useEffect(() => {
     let cancelled = false
@@ -73,6 +73,9 @@ function StreamView() {
               clockScale: clampSize(body.stage.clockScale, CLOCK_SCALE_RANGE),
               clockText: clampSize(body.stage.clockText, CLOCK_TEXT_RANGE),
               logoUrl: typeof body.stage.logoUrl === "string" ? body.stage.logoUrl : "",
+              speakers: Array.isArray(body.stage.speakers) ? body.stage.speakers as { image: string; name: string; description: string }[] : [],
+              gallerySeconds: Number(body.stage.gallerySeconds) || 4,
+              galleryPause: Number(body.stage.galleryPause) || 6,
             })
           }
         })
@@ -128,6 +131,9 @@ function StreamView() {
         clockScale={clockScale}
         clockText={clockText}
         logoUrl={stage.logoUrl}
+        speakers={stage.speakers}
+        gallerySeconds={stage.gallerySeconds}
+        galleryPause={stage.galleryPause}
         clock={testClock}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
