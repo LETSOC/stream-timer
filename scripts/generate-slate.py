@@ -19,8 +19,8 @@ BOLD = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 REGULAR = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 RSVP_URL = "https://events.hyphenonline.com/HyphenFestival2026#/buyTickets"
 
-# Compact countdown box — keep in sync with scripts/stream-countdown.sh
-COUNT_X, COUNT_Y, COUNT_W, COUNT_H = 72, 536, 436, 86
+# Four separate boxes — keep the centres in sync with scripts/stream-countdown.sh
+COUNT_X, COUNT_Y, BOX_W, BOX_H, BOX_GAP = 72, 508, 104, 92, 8
 COUNT_FONT = 32
 
 
@@ -138,13 +138,19 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
     unit_font = ImageFont.truetype(str(REGULAR), 11)
 
     pad_x = 72
-    y = 78
-    draw.text((pad_x, y), "Hyphen Festival", font=h1, fill=(255, 255, 255, 255))
-    y += int(56 * 1.14285714) - 4
-    draw.text((pad_x, y), "2026", font=h1, fill=(255, 255, 255, 255))
+    y = 52
+    badge = ImageFont.truetype(str(BOLD), 11)
+    badge_box = (pad_x, y, pad_x + 148, y + 28)
+    rounded_rect(draw, badge_box, 14, fill=(255, 255, 255, 255))
+    draw.text((pad_x + 74, y + 14), "LIVE COUNTDOWN", font=badge, fill=(0, 0, 0, 255), anchor="mm")
+    meta = ImageFont.truetype(str(REGULAR), 12)
+    draw.text((pad_x + 164, y + 8), "2026-11-04    EUROPE/LONDON", font=meta, fill=(255, 255, 255, 110))
 
-    y = 250
-    icon = 24
+    y = 98
+    draw.text((pad_x, y), "Hyphen Festival 2026", font=h1, fill=(255, 255, 255, 255))
+
+    y = 186
+    icon = 22
     rows = [
         (draw_icon_calendar, "Wed, 04 Nov, 2026"),
         (draw_icon_clock, "09:30 – 16:15"),
@@ -152,49 +158,41 @@ def make_slate(bg: Image.Image, logo: Image.Image, qr: Image.Image) -> Image.Ima
     ]
     for icon_fn, label in rows:
         icon_fn(draw, pad_x, y + 2, icon, (255, 255, 255, 255))
-        lines = wrap_text(draw, label, h4, 540)
+        lines = wrap_text(draw, label, h4, 620)
         ty = y
         for line in lines:
-            draw.text((pad_x + 36, ty), line, font=h4, fill=(245, 245, 245, 255))
-            ty += 30
-        y = ty + 8
+            draw.text((pad_x + 34, ty), line, font=h4, fill=(245, 245, 245, 255))
+            ty += 28
+        y = ty + 6
 
-    btn = (pad_x, 430, pad_x + 148, 430 + 44)
+    btn = (pad_x, 392, pad_x + 148, 436)
     rounded_rect(draw, btn, 7, fill=(255, 60, 0, 255))
-    draw.text((pad_x + 74, 452), "RSVP - Open", font=rsvp_font, fill=(255, 255, 255, 255), anchor="mm")
+    draw.text((pad_x + 74, 414), "RSVP - Open", font=rsvp_font, fill=(255, 255, 255, 255), anchor="mm")
 
-    qr_size = 64
-    qr_x, qr_y = pad_x + 164, 420
-    qr_resized = qr.resize((qr_size, qr_size), Image.Resampling.NEAREST)
-    img.paste(qr_resized, (qr_x, qr_y))
+    qr_size = 62
+    qr_x, qr_y = pad_x + 166, 386
+    img.paste(qr.resize((qr_size, qr_size), Image.Resampling.NEAREST), (qr_x, qr_y))
+    scan = ImageFont.truetype(str(BOLD), 9)
+    draw.text((qr_x + qr_size / 2, qr_y + qr_size + 12), "SCAN TO JOIN", font=scan, fill=(255, 255, 255, 230), anchor="mm")
 
-    rounded_rect(
-        draw,
-        (COUNT_X, COUNT_Y, COUNT_X + COUNT_W, COUNT_Y + COUNT_H),
-        8,
-        outline=(255, 255, 255, 210),
-        width=2,
-    )
-    cell_w = COUNT_W / 4
     labels = ("DAYS", "HOURS", "MINUTES", "SECONDS")
     for i, label in enumerate(labels):
-        x = COUNT_X + i * cell_w
-        if i:
-            draw.line((x, COUNT_Y + 8, x, COUNT_Y + COUNT_H - 8), fill=(255, 255, 255, 200), width=1)
-        draw.text(
-            (x + cell_w / 2, COUNT_Y + COUNT_H - 16),
-            label,
-            font=unit_font,
-            fill=(220, 220, 220, 255),
-            anchor="mm",
-        )
+        x = COUNT_X + i * (BOX_W + BOX_GAP)
+        rounded_rect(draw, (x, COUNT_Y, x + BOX_W, COUNT_Y + BOX_H), 8, outline=(255, 255, 255, 230), width=2)
+        draw.text((x + BOX_W / 2, COUNT_Y + BOX_H - 18), label, font=unit_font, fill=(220, 220, 220, 255), anchor="mm")
 
-    logo_w = 470
+    for i, colour in enumerate(((0, 0, 0), (59, 89, 152), (10, 102, 194), (225, 48, 108), (255, 0, 51))):
+        cx = pad_x + 16 + i * 36
+        cy = 640
+        draw.ellipse((cx - 14, cy - 14, cx + 14, cy + 14), outline=(255, 255, 255, 255), width=2)
+        draw.ellipse((cx - 12, cy - 12, cx + 12, cy + 12), fill=colour + (255,))
+
+    logo_w = 430
     ratio = logo_w / logo.size[0]
     logo_h = int(logo.size[1] * ratio)
     logo_fit = logo.resize((logo_w, logo_h), Image.Resampling.LANCZOS)
-    lx = W - 72 - logo_w
-    ly = (H - logo_h) // 2 - 8
+    lx = W - 56 - logo_w
+    ly = (H - logo_h) // 2
     img.paste(logo_fit, (lx, ly), logo_fit)
     return img
 
@@ -230,8 +228,7 @@ def main() -> None:
     slate = make_slate(bg, logo, qr)
     save_rgb(slate, ASSETS / "countdown-slate.png")
 
-    cell_w = COUNT_W / 4
-    centers = [COUNT_X + cell_w * (i + 0.5) for i in range(4)]
+    centers = [COUNT_X + i * (BOX_W + BOX_GAP) + BOX_W / 2 for i in range(4)]
     print(
         "countdown numbers: "
         + " ".join(f"x={c:.1f}" for c in centers)

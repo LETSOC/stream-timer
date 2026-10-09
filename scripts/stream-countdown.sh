@@ -107,8 +107,8 @@ if [[ ! -f "$MONO_FONT" ]]; then
 fi
 
 M="fontfile='${MONO_FONT}'"
-# Number centres match scripts/generate-slate.py COUNT_* box (1280x720).
-VF="drawtext=${M}:fontsize=32:fontcolor=white:x=126.5-text_w/2:y=550:text='%{eif\:max(0\,trunc((${remaining}-t)/86400))\:d}',drawtext=${M}:fontsize=32:fontcolor=white:x=235.5-text_w/2:y=550:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/3600\,24))\:d\:2}',drawtext=${M}:fontsize=32:fontcolor=white:x=344.5-text_w/2:y=550:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/60\,60))\:d\:2}',drawtext=${M}:fontsize=32:fontcolor=white:x=453.5-text_w/2:y=550:text='%{eif\:mod(max(0\,${remaining}-t)\,60)\:d\:2}'"
+# Number centres match scripts/generate-slate.py separate boxes (1280x720).
+VF="drawtext=${M}:fontsize=32:fontcolor=white:x=124-text_w/2:y=548:text='%{eif\:max(0\,trunc((${remaining}-t)/86400))\:d}',drawtext=${M}:fontsize=32:fontcolor=white:x=236-text_w/2:y=548:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/3600\,24))\:d\:2}',drawtext=${M}:fontsize=32:fontcolor=white:x=348-text_w/2:y=548:text='%{eif\:trunc(mod(max(0\,${remaining}-t)/60\,60))\:d\:2}',drawtext=${M}:fontsize=32:fontcolor=white:x=460-text_w/2:y=548:text='%{eif\:mod(max(0\,${remaining}-t)\,60)\:d\:2}'"
 
 echo "Event:        $EVENT_NAME"
 echo "Line:         $EVENT_LINE_DISPLAY"
