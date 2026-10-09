@@ -34,6 +34,7 @@ import {
 export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
+  const [rtmpUrl, setRtmpUrl] = useState("")
   const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
   const [rtmpMessage, setRtmpMessage] = useState("")
   const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
