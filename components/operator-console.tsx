@@ -361,8 +361,8 @@ export function OperatorConsole() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1600px] items-start gap-6 px-4 py-6 lg:grid-cols-[380px_1fr] sm:px-6">
-        <section className="space-y-4 lg:sticky lg:top-24">
+      <main className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 lg:h-[calc(100dvh-5.5rem)] lg:flex-row lg:overflow-hidden lg:pt-6 lg:pb-0">
+        <section className="space-y-4 lg:w-[380px] lg:shrink-0 lg:overflow-y-auto lg:pr-2 lg:pb-6 [scrollbar-width:thin]">
           <div className="rounded-[20px] bg-black p-5 text-white">
             {previewRemaining?.done ? (
               <div>
@@ -631,7 +631,8 @@ export function OperatorConsole() {
           </Panel>
         </section>
 
-        <section className="space-y-4">
+        <section className="space-y-4 lg:flex-1 lg:overflow-y-auto lg:pr-2 lg:pb-6 [scrollbar-width:thin]">
+          <div className="space-y-4 lg:sticky lg:top-0 lg:z-10 lg:bg-[#F6F6F3] lg:pb-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">
@@ -678,6 +679,7 @@ export function OperatorConsole() {
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
           </div>
+          </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">
               <span className="text-black/50">Stream params preview: </span>
@@ -685,7 +687,7 @@ export function OperatorConsole() {
             </p>
             <Button
               type="button"
-              className="rounded-full bg-black text-white"
+              className={pillClass()}
               onClick={() => copy("link", `${window.location.origin}${stableHref}`)}
             >
               {copied === "link" ? "Copied" : "Copy OBS URL"}
@@ -693,7 +695,7 @@ export function OperatorConsole() {
             <Button
               type="button"
               variant="outline"
-              className="rounded-full"
+              className={pillClass("outline")}
               onClick={() => copy("params", `${window.location.origin}${streamHref}`)}
             >
               {copied === "params" ? "Copied" : "Copy full param URL"}
