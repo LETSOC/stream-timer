@@ -29,14 +29,14 @@ function loopbackHost(value: string | null): boolean {
 
 /**
  * Route handlers cannot see the socket address, and the Host header is set by
- * the client, so it is never trusted. A request counts as local only when the
- * server itself is bound to loopback (HOST unset or 127.0.0.1/::1/localhost)
- * and no proxy header names a non-loopback client. When HOST is a LAN or
+ * the client, so it is never trusted. (Not HOST: zsh on macOS sets HOST to the machine name.) A request counts as local only when the
+ * server itself is bound to loopback (BIND_HOST unset or 127.0.0.1/::1/localhost)
+ * and no proxy header names a non-loopback client. When BIND_HOST is a LAN or
  * public address, every request is treated as remote: the token is never
  * handed out and mutations need ENCODER_ALLOW_REMOTE=1 plus ENCODER_TOKEN.
  */
 export function isLoopbackRequest(request: Request): boolean {
-  const bind = process.env.HOST?.trim()
+  const bind = process.env.BIND_HOST?.trim()
   if (bind && !loopbackHost(bind)) return false
   const forwarded = request.headers.get("x-forwarded-for")
   const realIp = request.headers.get("x-real-ip")

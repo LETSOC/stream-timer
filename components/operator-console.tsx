@@ -859,13 +859,13 @@ function CommandBlock({
 }
 
 function SyncBadge({ state, hasToken }: { state: "idle" | "saved" | "local" | "error"; hasToken: boolean }) {
-  const view = !hasToken
-    ? { label: "Out of sync · no encoder token", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
-    : state === "saved"
-      ? { label: "Saved · /stream in sync", tone: "border-[#128a3e]/30 bg-[#128a3e]/10 text-[#0b5e2a]", dot: "bg-[#128a3e]" }
-      : state === "idle"
+  const view = state === "saved"
+    ? { label: "Saved · /stream in sync", tone: "border-[#128a3e]/30 bg-[#128a3e]/10 text-[#0b5e2a]", dot: "bg-[#128a3e]" }
+    : state === "local" || state === "error"
+      ? { label: "Local only · /stream not updated", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+      : hasToken
         ? { label: "Syncing…", tone: "border-black/15 bg-black/5 text-black/75", dot: "bg-black/40" }
-        : { label: "Local only · /stream not updated", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+        : { label: "Out of sync · no encoder token", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
   return (
     <span role="status" aria-live="polite" className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[12px] font-bold tracking-[0.08em] uppercase ${view.tone}`}>
       <span className={`size-2 rounded-full ${view.dot}`} aria-hidden />
