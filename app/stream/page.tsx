@@ -8,6 +8,7 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
+import type { StageOptions } from "@/lib/event-server"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
@@ -57,7 +58,7 @@ function StreamView() {
     const load = () => {
       void fetch("/api/event", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: unknown; showMeta?: unknown; showLink?: unknown; transparent?: unknown; lineSpacing?: unknown; blockGap?: unknown; clockScale?: unknown; clockText?: unknown; logoUrl?: unknown } }) => {
+        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (!hasOverrides && next) setServerEvent(next)
