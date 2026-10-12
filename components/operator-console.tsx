@@ -24,7 +24,7 @@ import {
 } from "@/lib/countdown"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import { useNow } from "@/lib/use-now"
-import { TIME_ZONES, DEFAULT_EVENT } from "@/lib/event"
+import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { useEncoderToken } from "@/lib/use-encoder-token"
 import type { StageOptions } from "@/lib/event-server"
@@ -70,6 +70,7 @@ export function OperatorConsole() {
   const [holdCountdown, setHoldCountdown] = useState(false)
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
+  const [syncError, setSyncError] = useState("")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
@@ -132,7 +133,6 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
-  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${endTitle}:${endSubtitle}:${endDate}:${endBody}:${endQrUrl}:${endButton}:${endAt}:${forceEnd}:${holdCountdown}:${JSON.stringify(speakers)}`
 
   useEffect(() => {
     let cancelled = false
@@ -157,33 +157,35 @@ export function OperatorConsole() {
   }, [])
 
   useEffect(() => {
+    const applyStage = (stage: Partial<StageOptions>) => {
+      if (stage.checker) setChecker(stage.checker)
+      if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
+      if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
+      if (typeof stage.transparent === "boolean") setTransparent(stage.transparent)
+      if (typeof stage.lineSpacing === "number") setLineSpacing(stage.lineSpacing)
+      if (typeof stage.blockGap === "number") setBlockGap(stage.blockGap)
+      if (typeof stage.clockScale === "number") setClockScale(clampSize(stage.clockScale, CLOCK_SCALE_RANGE))
+      if (typeof stage.clockText === "number") setClockText(clampSize(stage.clockText, CLOCK_TEXT_RANGE))
+      if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
+      if (Array.isArray(stage.speakers)) setSpeakers(stage.speakers)
+      if (typeof stage.gallerySeconds === "number") setGallerySeconds(stage.gallerySeconds)
+      if (typeof stage.galleryPause === "number") setGalleryPause(stage.galleryPause)
+      if (typeof stage.galleryOffset === "number") setGalleryOffset(stage.galleryOffset)
+      if (typeof stage.galleryScale === "number") setGalleryScale(stage.galleryScale)
+      if (typeof stage.endTitle === "string") setEndTitle(stage.endTitle)
+      if (typeof stage.endSubtitle === "string") setEndSubtitle(stage.endSubtitle)
+      if (typeof stage.endDate === "string") setEndDate(stage.endDate)
+      if (typeof stage.endBody === "string") setEndBody(stage.endBody)
+      if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
+      if (typeof stage.endButton === "string") setEndButton(stage.endButton)
+      if (typeof stage.endAt === "string") setEndAt(stage.endAt)
+      if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
+      if (typeof stage.holdCountdown === "boolean") setHoldCountdown(stage.holdCountdown)
+    }
     const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
     if (stageRaw) {
       try {
-        const stage = JSON.parse(stageRaw) as Partial<StageOptions>
-        if (stage.checker) setChecker(stage.checker)
-        if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
-        if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
-        if (typeof stage.transparent === "boolean") setTransparent(stage.transparent)
-        if (typeof stage.lineSpacing === "number") setLineSpacing(stage.lineSpacing)
-        if (typeof stage.blockGap === "number") setBlockGap(stage.blockGap)
-        if (typeof stage.clockScale === "number") setClockScale(clampSize(stage.clockScale, CLOCK_SCALE_RANGE))
-        if (typeof stage.clockText === "number") setClockText(clampSize(stage.clockText, CLOCK_TEXT_RANGE))
-        if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
-        if (Array.isArray(stage.speakers)) setSpeakers(stage.speakers)
-        if (typeof stage.gallerySeconds === "number") setGallerySeconds(stage.gallerySeconds)
-        if (typeof stage.galleryPause === "number") setGalleryPause(stage.galleryPause)
-        if (typeof stage.galleryOffset === "number") setGalleryOffset(stage.galleryOffset)
-        if (typeof stage.galleryScale === "number") setGalleryScale(stage.galleryScale)
-        if (typeof stage.endTitle === "string") setEndTitle(stage.endTitle)
-        if (typeof stage.endSubtitle === "string") setEndSubtitle(stage.endSubtitle)
-        if (typeof stage.endDate === "string") setEndDate(stage.endDate)
-        if (typeof stage.endBody === "string") setEndBody(stage.endBody)
-        if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
-        if (typeof stage.endButton === "string") setEndButton(stage.endButton)
-        if (typeof stage.endAt === "string") setEndAt(stage.endAt)
-        if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
-        if (typeof stage.holdCountdown === "boolean") setHoldCountdown(stage.holdCountdown)
+        applyStage(JSON.parse(stageRaw) as Partial<StageOptions>)
       } catch {
         /* ignore a bad local draft */
       }
@@ -202,19 +204,16 @@ export function OperatorConsole() {
     }
     void fetch("/api/event", { cache: "no-store" })
       .then((response) => response.json())
-      .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions> }) => {
+      .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; hasSaved?: boolean }) => {
         const saved = asEventConfig(body.event)
-        if (saved && !window.localStorage.getItem("hyphen-countdown-event")) updateEvent(saved)
-        if (!clockRaw) {
-          if (typeof body.testUntil === "number") setTestUntil(body.testUntil)
-          if (typeof body.pausedAt === "number") setPausedAt(new Date(body.pausedAt))
+        // data/event.json is the source of truth once it exists; localStorage is only a fallback draft.
+        const serverWins = body.hasSaved === true
+        if (saved && (serverWins || !window.localStorage.getItem("hyphen-countdown-event"))) updateEvent(saved)
+        if (serverWins || !clockRaw) {
+          setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
+          setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
         }
-        if (!stageRaw && body.stage) {
-          if (body.stage.checker) setChecker(body.stage.checker)
-          if (typeof body.stage.showMeta === "boolean") setShowMeta(body.stage.showMeta)
-          if (typeof body.stage.showLink === "boolean") setShowLink(body.stage.showLink)
-          if (typeof body.stage.transparent === "boolean") setTransparent(body.stage.transparent)
-        }
+        if ((serverWins || !stageRaw) && body.stage) applyStage(body.stage)
       })
       .finally(() => setHydrated(true))
   }, [updateEvent])
@@ -235,32 +234,65 @@ export function OperatorConsole() {
     window.localStorage.setItem("hyphen-countdown-rtmp", rtmpUrl)
   }, [hydrated, rtmpUrl])
 
+  const savePayload = {
+      event,
+      testUntil,
+      pausedAt: pausedMs || null,
+      stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown },
+  }
+  const payloadJson = JSON.stringify(savePayload)
+  const saveTimer = useRef<number | null>(null)
+  const saveChain = useRef<Promise<void>>(Promise.resolve())
+  const saveSeq = useRef(0)
+  const lastSent = useRef("")
+
+  /** Serialised save: one PUT at a time, in order; only the newest response updates the badge. */
+  function sendSave(payload: typeof savePayload) {
+    if (!token) return
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    const json = JSON.stringify(payload)
+    if (json === lastSent.current) return
+    lastSent.current = json
+    const seq = ++saveSeq.current
+    saveChain.current = saveChain.current.then(async () => {
+      try {
+        const response = await fetch("/api/event", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "x-encoder-token": token },
+          body: json,
+        })
+        if (seq !== saveSeq.current) return
+        if (response.ok) {
+          setSyncState("saved")
+          setSyncError("")
+          return
+        }
+        const body = (await response.json().catch(() => null)) as { error?: string } | null
+        lastSent.current = ""
+        setSyncState("error")
+        setSyncError(body?.error ?? `Server returned ${response.status}.`)
+      } catch {
+        if (seq !== saveSeq.current) return
+        lastSent.current = ""
+        setSyncState("local")
+        setSyncError("Could not reach the server.")
+      }
+    })
+  }
+  const sendSaveRef = useRef(sendSave)
+  useEffect(() => {
+    sendSaveRef.current = sendSave
+  })
+
   useEffect(() => {
     if (!token || !hydrated) return
-    const id = window.setTimeout(() => {
-      void fetch("/api/event", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "x-encoder-token": token },
-        body: JSON.stringify({
-          event,
-          testUntil,
-          pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown },
-        }),
-      })
-        .then(async (response) => {
-          if (response.ok) {
-            setSyncState("saved")
-            return
-          }
-          const body = await response.json().catch(() => null)
-          setSyncState("local")
-          if (body?.error) console.warn(body.error)
-        })
-        .catch(() => setSyncState("local"))
-    }, 400)
+    const id = window.setTimeout(() => sendSaveRef.current(JSON.parse(payloadJson)), 400)
+    saveTimer.current = id
     return () => window.clearTimeout(id)
-  }, [event, token, testUntil, syncKey, hydrated])
+  }, [payloadJson, token, hydrated])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
@@ -293,11 +325,7 @@ export function OperatorConsole() {
     const nextUntil = Date.now() + seconds * 1000
     setTestUntil(nextUntil)
     setSkewMs(target.getTime() - nextUntil)
-    void fetch("/api/event", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", "x-encoder-token": token },
-      body: JSON.stringify({ event, testUntil: nextUntil, pausedAt: null }),
-    })
+    sendSave({ ...savePayload, testUntil: nextUntil, pausedAt: null })
   }
 
   function goLiveNow() {
@@ -306,11 +334,7 @@ export function OperatorConsole() {
     setPausedAt(null)
     setTestUntil(nextUntil)
     setSkewMs(target.getTime() - nextUntil)
-    void fetch("/api/event", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", "x-encoder-token": token },
-      body: JSON.stringify({ event, testUntil: nextUntil, pausedAt: null }),
-    })
+    sendSave({ ...savePayload, testUntil: nextUntil, pausedAt: null })
   }
 
   function restoreFestival() {
@@ -319,11 +343,7 @@ export function OperatorConsole() {
     setTestUntil(null)
     setSkewMs(0)
     updateEvent(restored)
-    void fetch("/api/event", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", "x-encoder-token": token },
-      body: JSON.stringify({ event: { ...event, ...restored }, testUntil: null, pausedAt: null }),
-    })
+    sendSave({ ...savePayload, event: { ...event, ...restored }, testUntil: null, pausedAt: null })
   }
 
   async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
@@ -350,7 +370,7 @@ export function OperatorConsole() {
                 {previewRemaining?.done ? "LIVE" : "Armed"}
               </span>
             </span>
-            <SyncBadge state={syncState} hasToken={Boolean(token)} />
+            <SyncBadge state={syncState} hasToken={Boolean(token)} error={syncError} />
             <Button type="button" className={pillClass()} onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
             </Button>
@@ -360,6 +380,13 @@ export function OperatorConsole() {
           </div>
         </div>
       </header>
+      {!valid ? (
+        <div role="alert" className="border-b border-[#ff3c00]/40 bg-[#ff3c00]/10 px-4 py-3 font-mono text-[13px] text-[#a32600] sm:px-6">
+          <div className="mx-auto max-w-[1600px]">
+            Countdown is not running: {eventProblems(event).join(" ") || "the start date or time is invalid."} Fix it in Event details; /stream keeps the last valid save.
+          </div>
+        </div>
+      ) : null}
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 lg:h-[calc(100dvh-5.5rem)] lg:flex-row lg:overflow-hidden lg:pt-6 lg:pb-0">
         <section className="space-y-4 lg:w-[380px] lg:shrink-0 lg:overflow-y-auto lg:pr-2 lg:pb-6 [scrollbar-width:thin]">
@@ -858,16 +885,18 @@ function CommandBlock({
   )
 }
 
-function SyncBadge({ state, hasToken }: { state: "idle" | "saved" | "local" | "error"; hasToken: boolean }) {
+function SyncBadge({ state, hasToken, error }: { state: "idle" | "saved" | "local" | "error"; hasToken: boolean; error?: string }) {
   const view = state === "saved"
     ? { label: "Saved · /stream in sync", tone: "border-[#128a3e]/30 bg-[#128a3e]/10 text-[#0b5e2a]", dot: "bg-[#128a3e]" }
-    : state === "local" || state === "error"
+    : state === "error"
+      ? { label: `Save failed · ${error || "server rejected the change"}`, tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+    : state === "local"
       ? { label: "Local only · /stream not updated", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
       : hasToken
         ? { label: "Syncing…", tone: "border-black/15 bg-black/5 text-black/75", dot: "bg-black/40" }
         : { label: "Out of sync · no encoder token", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
   return (
-    <span role="status" aria-live="polite" className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[12px] font-bold tracking-[0.08em] uppercase ${view.tone}`}>
+    <span role="status" aria-live="polite" title={error || undefined} className={`max-w-[42ch] truncate inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[12px] font-bold tracking-[0.08em] uppercase ${view.tone}`}>
       <span className={`size-2 rounded-full ${view.dot}`} aria-hidden />
       {view.label}
     </span>

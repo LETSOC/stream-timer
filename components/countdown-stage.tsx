@@ -15,6 +15,7 @@ import { CLOCK_GEOMETRY, CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitCloc
 import type { EventConfig } from "@/lib/event"
 import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
+import { safeUrl } from "@/lib/event"
 
 type CountdownStageProps = {
   event: EventConfig
@@ -92,7 +93,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             <a
               className="stage-rsvp inline-flex items-center justify-center text-white no-underline"
               style={{ backgroundColor: "#ff3c00", opacity: 1 }}
-              href={rsvpUrl}
+              href={safeUrl(rsvpUrl, "#")}
               target="_blank"
               rel="noreferrer"
             >
@@ -117,14 +118,14 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       </div>
       <div className="pointer-events-none absolute top-1/2 right-[6%] z-10 flex w-[34%] -translate-y-1/2 flex-col items-center">
         <img
-          src={logoUrl.trim() || "/brand/hyphen-emerald.png"}
+          src={safeUrl(logoUrl, "/brand/hyphen-emerald.png", { relative: true, dataImage: true })}
           alt="hyphen. Cultures, communities, connections. Presented with Emerald."
           className="h-auto w-[90%] select-none"
           draggable={false}
         />
         {showLink ? (
           <a
-            href={eventLink}
+            href={safeUrl(eventLink, "#")}
             target="_blank"
             rel="noreferrer"
             className="pointer-events-auto mt-[1.2cqi] max-w-full text-center font-[Arial,Helvetica,sans-serif] text-[0.85cqi] leading-tight tracking-[0.02em] break-all text-white/80 no-underline"
@@ -189,7 +190,7 @@ function SpeakerGallery({
   return (
     <div className="absolute right-[6%] z-20 w-[34%]" style={{ top: `calc(50% + ${offset / 19.2}cqi)` }}>
       <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-full border border-white/40 bg-white shadow-[0_18px_50px_rgba(0,0,0,0.4)]" style={{ width: `${(22 * scale) / 100}cqi`, height: `${(22 * scale) / 100}cqi` }}>
-        {card.image ? <img src={card.image} alt="" className="size-full object-cover" draggable={false} /> : null}
+        {safeUrl(card.image, "", { relative: true, dataImage: true }) ? <img src={safeUrl(card.image, "", { relative: true, dataImage: true })} alt="" className="size-full object-cover" draggable={false} /> : null}
       </div>
       <div className="absolute left-1/2 w-full -translate-x-1/2 text-center" style={{ top: `${(11 * scale) / 100}cqi` }}>
         <p className="mt-[0.7cqi] font-[Arial,Helvetica,sans-serif] text-[1.8cqi] font-bold text-white">{card.name}</p>
@@ -400,7 +401,7 @@ function SocialRow({
       {links.map((link) => (
         <a
           key={link.label}
-          href={link.href}
+          href={safeUrl(link.href, "#")}
           target="_blank"
           rel="noreferrer"
           aria-label={link.label}

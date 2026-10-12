@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { DATA_DIR } from "@/lib/encoder"
-import { asEventConfig, DEFAULT_EVENT, type EventConfig } from "@/lib/event"
+import { asEventConfig, DEFAULT_EVENT, safeUrl, sanitizeSpeakers, type EventConfig, type SpeakerCard } from "@/lib/event"
 
 const EVENT_FILE = path.join(DATA_DIR, "event.json")
 
@@ -10,7 +10,7 @@ export function readServerEvent(): EventConfig {
   return readServerState().event
 }
 
-export type SpeakerCard = { image: string; name: string; description: string }
+export type { SpeakerCard }
 
 export type StageOptions = {
   checker: number
@@ -77,8 +77,8 @@ function readStage(value: unknown): StageOptions {
     blockGap: Number.isFinite(Number(record.blockGap)) ? Math.min(8, Math.max(0, Number(record.blockGap))) : 1.2,
     clockScale: clampSize(record.clockScale, CLOCK_SCALE_RANGE),
     clockText: clampSize(record.clockText, CLOCK_TEXT_RANGE),
-    logoUrl: typeof record.logoUrl === "string" ? record.logoUrl : "",
-    speakers: readSpeakers(record.speakers),
+    logoUrl: safeUrl(record.logoUrl, "", { relative: true, dataImage: true }),
+    speakers: sanitizeSpeakers(record.speakers),
     gallerySeconds: clampSeconds(record.gallerySeconds, 4),
     galleryPause: clampSeconds(record.galleryPause, 6),
     galleryOffset: clampOffset(record.galleryOffset),
@@ -87,7 +87,7 @@ function readStage(value: unknown): StageOptions {
     endSubtitle: textOr(record.endSubtitle, "Hyphen Festival 2026"),
     endDate: textOr(record.endDate, "Wed, 04 Nov, 2026"),
     endBody: textOr(record.endBody, "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly."),
-    endQrUrl: textOr(record.endQrUrl, "https://linktr.ee/onlinehyphen"),
+    endQrUrl: safeUrl(record.endQrUrl, "https://linktr.ee/onlinehyphen"),
     endButton: textOr(record.endButton, "Watch replay — coming soon"),
     endAt: textOr(record.endAt, "16:15"),
     forceEnd: record.forceEnd === true,
@@ -117,17 +117,6 @@ function clampSeconds(value: unknown, fallback: number) {
   return Math.min(30, Math.max(2, Math.round(number)))
 }
 
-function readSpeakers(value: unknown): SpeakerCard[] {
-  if (!Array.isArray(value)) return []
-  return value.slice(0, 12).map((item) => {
-    const record = item && typeof item === "object" ? item as Record<string, unknown> : {}
-    return {
-      image: typeof record.image === "string" ? record.image : "",
-      name: typeof record.name === "string" ? record.name : "",
-      description: typeof record.description === "string" ? record.description : "",
-    }
-  }).filter((item) => item.image || item.name || item.description)
-}
 
 export function readServerState(): { event: EventConfig; testUntil: number | null; pausedAt: number | null; stage: StageOptions } {
   try {
@@ -154,7 +143,7 @@ export function writeServerEvent(
   value: unknown,
   testUntil?: number | null,
   pausedAt?: number | null,
-  stage?: StageOptions,
+  stage?: unknown,
 ): EventConfig | null {
   const event = asEventConfig(value)
   if (!event) return null
@@ -165,7 +154,7 @@ export function writeServerEvent(
       event,
       testUntil: testUntil === undefined ? current.testUntil : testUntil,
       pausedAt: pausedAt === undefined ? current.pausedAt : pausedAt,
-      stage: stage ?? current.stage,
+      stage: stage === undefined ? current.stage : readStage(stage),
     },
     null,
     2,
@@ -174,4 +163,9 @@ export function writeServerEvent(
   fs.writeFileSync(temporary, payload)
   fs.renameSync(temporary, EVENT_FILE)
   return event
+}
+
+/** True once an operator has saved at least once (data/event.json exists). */
+export function hasServerEvent(): boolean {
+  return fs.existsSync(EVENT_FILE)
 }
