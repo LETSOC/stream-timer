@@ -20,12 +20,28 @@ const emptyStatus: EncoderStatus = {
   slateAgeSeconds: null,
   burnedRemainingAtStart: null,
   refreshSeconds: null,
+  encoderState: "stopped",
+  rtmpState: "stopped",
+  stopNote: null,
   rtmpRunning: false,
   rtmpReconnecting: false,
   rtmpRestarts: 0,
   rtmpLogTail: "",
   strayPublishers: [],
 };
+
+const ENCODER_LABEL: Record<EncoderStatus["encoderState"], string> = {
+  stopped: "Player off",
+  starting: "Starting…",
+  running: "Player live",
+  stalled: "Stalled · restart",
+}
+const ENCODER_TONE: Record<EncoderStatus["encoderState"], string> = {
+  stopped: "bg-black/5 text-black/70",
+  starting: "bg-black text-white",
+  running: "bg-[#128a3e] text-white",
+  stalled: "bg-[#ff3c00] text-white",
+}
 
 export function EncodedPreview({
   eventName,
@@ -138,9 +154,9 @@ export function EncodedPreview({
     <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-5 py-4">
         <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">Encoded player</h2>
-        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${status.rtmpRunning ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
-          <span className={`size-1.5 rounded-full ${status.rtmpRunning ? "animate-pulse bg-white" : "bg-black/30"}`} />
-          {status.rtmpRunning ? "Stream live" : "Stream off"}
+        <span role="status" title="HLS preview health: the playlist must keep advancing" className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${ENCODER_TONE[status.encoderState]}`}>
+          <span className={`size-1.5 rounded-full ${status.encoderState === "running" ? "animate-pulse bg-white" : status.encoderState === "stopped" ? "bg-black/30" : "bg-white"}`} />
+          {ENCODER_LABEL[status.encoderState]}
         </span>
       </div>
       <div className="space-y-4 p-5">
@@ -197,6 +213,7 @@ export function EncodedPreview({
             {status.refreshSeconds ? " Auto-refresh is on." : " Auto-refresh is off."}
           </p>
         ) : null}
+        {status.stopNote ? <p className="font-mono text-[13px] text-[#a32600]">{status.stopNote}</p> : null}
         {!status.ffmpeg ? <p className="font-mono text-[13px] text-red-600">ffmpeg is not on PATH. The browser preview still runs.</p> : null}
         {stale ? <p className="font-mono text-[13px] text-black/70">The form changed after this encode started. Restart the slate to burn in the new title.</p> : null}
         {error ? <pre className="max-h-36 overflow-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[13px] leading-5 whitespace-pre-wrap text-red-700">{error}</pre> : null}
