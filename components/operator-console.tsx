@@ -461,6 +461,12 @@ export function OperatorConsole() {
               <a href="/end" target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-8 items-center justify-center rounded-full bg-black text-sm font-medium text-white no-underline transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95">
                 Open end card
               </a>
+              <button type="button" className="h-8 rounded-full bg-black text-sm font-medium text-white transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>
+                Show end card now
+              </button>
+              <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>
+                Back to countdown
+              </button>
             </div>
             <p className="font-mono text-[10px] leading-5 text-black/55">
               Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
