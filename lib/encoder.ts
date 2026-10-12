@@ -35,8 +35,69 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Hides passwords and stream keys: everything after the host in an rtmp(s) URL, plus any password= value. */
 export function redact(text: string): string {
-  return text.replace(/(password=)[^\s&'"]+/gi, "$1••••");
+  return text
+    .replace(/(rtmps?:\/\/[^\s/'"]+)\/[^\s'"]*/gi, "$1/••••")
+    .replace(/(password=)[^\s&'"]+/gi, "$1••••");
+}
+
+/** Child processes never need the encoder token. */
+function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  delete env.ENCODER_TOKEN;
+  return env;
+}
+
+/**
+ * Confirms a pid from a pidfile still belongs to our script, so a stale pidfile
+ * after a reboot or crash can never make us signal an unrelated process that
+ * reused the pid.
+ */
+export function pidRunsScript(pid: number, scriptPath: string): boolean {
+  if (!alive(pid)) return false;
+  const result = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" });
+  if (result.status !== 0) return false;
+  return result.stdout.includes(path.basename(scriptPath));
+}
+
+/** SIGTERM the process group, wait up to `graceMs`, then SIGKILL whatever is left. */
+async function killGroup(pid: number, graceMs = 3000): Promise<void> {
+  const signal = (sig: NodeJS.Signals) => {
+    try { process.kill(-pid, sig) } catch { try { process.kill(pid, sig) } catch { /* already gone */ } }
+  };
+  signal("SIGTERM");
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    if (!groupAlive(pid)) return;
+    await delay(100);
+  }
+  signal("SIGKILL");
+  const hardDeadline = Date.now() + 1000;
+  while (Date.now() < hardDeadline && groupAlive(pid)) await delay(50);
+}
+
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return alive(pgid);
+  }
+}
+
+/** Serialises encoder start/restart/stop so concurrent requests or tabs cannot launch two ffmpegs. */
+let encoderLock: Promise<unknown> = Promise.resolve();
+function withEncoderLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = encoderLock.then(task, task);
+  encoderLock = run.catch(() => undefined);
+  return run;
+}
+let rtmpLock: Promise<unknown> = Promise.resolve();
+function withRtmpLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = rtmpLock.then(task, task);
+  rtmpLock = run.catch(() => undefined);
+  return run;
 }
 
 function readMeta(): Meta | null {
@@ -101,7 +162,7 @@ export function readStatus(): EncoderStatus {
   const meta = readMeta();
   const rtmpRunning = rtmpAlive();
   const supervisor = rtmpRunning ? readSupervisorState() : { state: null, restarts: 0 };
-  const running = meta ? alive(meta.pid) : false;
+  const running = meta ? pidRunsScript(meta.pid, SCRIPT) : false;
   if (meta && !running) {
     try {
       fs.unlinkSync(META_FILE);
@@ -141,7 +202,24 @@ function readRtmpPid(): number | null {
 
 function rtmpAlive(): boolean {
   const pid = readRtmpPid()
-  return pid !== null && alive(pid)
+  if (pid === null) return false
+  if (pidRunsScript(pid, SUPERVISOR)) return true
+  // Stale pidfile (crash, reboot, pid reused): forget it.
+  try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
+  try { fs.unlinkSync(RTMP_STATE_FILE) } catch { /* already gone */ }
+  return false
+}
+
+function allowedRtmpHost(url: string): boolean {
+  const list = (process.env.RTMP_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
+  if (list.length === 0) return true
+  let host = ""
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+  return list.some((allowed) => host === allowed || host.endsWith(`.${allowed}`))
 }
 
 function readSupervisorState(): { state: "running" | "waiting" | null; restarts: number } {
@@ -198,32 +276,43 @@ const SUPERVISOR_EXIT = /\[supervisor [^\]]*\] ffmpeg exited/
  * Starts the RTMP stream under scripts/rtmp-supervisor.sh, which relaunches
  * ffmpeg whenever it exits. Replaces any stream this app started earlier.
  */
-export async function startRtmpStream(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+export function startRtmpStream(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  return withRtmpLock(() => startRtmpStreamUnlocked(input, rtmpUrl))
+}
+
+async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const url = rtmpUrl.trim()
   if (!/^rtmps?:\/\/\S+$/.test(url)) {
     return { ok: false, error: "Paste an rtmp:// or rtmps:// URL with no spaces.", status: 400 }
+  }
+  if (!allowedRtmpHost(url)) {
+    return { ok: false, error: "That RTMP host is not in RTMP_ALLOWED_HOSTS.", status: 400 }
   }
   if (!ffmpegAvailable()) return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 }
   if (!fs.existsSync(SCRIPT) || !fs.existsSync(SUPERVISOR)) {
     return { ok: false, error: "The countdown script is missing.", status: 500 }
   }
-  stopRtmpStream()
+  // Wait for the old publisher to be fully gone before connecting again, so two
+  // ffmpegs never push to the same stream key at once.
+  await stopRtmpStreamUnlocked()
   strayCache = { at: 0, value: [] }
   fs.mkdirSync(DATA_DIR, { recursive: true })
-  fs.writeFileSync(RTMP_LOG_FILE, "")
+  // The raw log holds the ingest URL (key + password): owner-only.
+  fs.writeFileSync(RTMP_LOG_FILE, "", { mode: 0o600 })
+  fs.chmodSync(RTMP_LOG_FILE, 0o600)
   const logFd = fs.openSync(RTMP_LOG_FILE, "a")
   const child = spawn("bash", [SUPERVISOR], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
     cwd: ROOT,
-    env: {
-      ...process.env,
+    env: childEnv({
       EVENT_NAME: input.eventName,
       EVENT_LINE: input.dateLine,
       TARGET_UNIX: String(input.targetUnix),
       RTMP_URL: url,
       RTMP_STATE_FILE,
-    },
+      RTMP_LOG_FILE,
+    }),
   })
   child.unref()
   fs.closeSync(logFd)
@@ -239,7 +328,7 @@ export async function startRtmpStream(input: StartInput, rtmpUrl: string): Promi
     if (!alive(child.pid)) break
     const log = readTail(RTMP_LOG_FILE, 32768)
     if (SUPERVISOR_EXIT.test(log)) {
-      stopRtmpStream()
+      await stopRtmpStreamUnlocked()
       return { ok: false, error: redact(readTail(RTMP_LOG_FILE, 4000)) || "ffmpeg exited before the stream connected.", status: 500 }
     }
     if (/Output #0/.test(log)) return { ok: true }
@@ -251,12 +340,15 @@ export async function startRtmpStream(input: StartInput, rtmpUrl: string): Promi
   return { ok: true }
 }
 
-export function stopRtmpStream() {
+export function stopRtmpStream(): Promise<void> {
+  return withRtmpLock(stopRtmpStreamUnlocked)
+}
+
+async function stopRtmpStreamUnlocked(): Promise<void> {
   const pid = readRtmpPid()
-  if (pid !== null) {
-    // The supervisor, the script and ffmpeg share one process group.
-    try { process.kill(-pid, "SIGTERM") } catch { try { process.kill(pid, "SIGTERM") } catch { /* already gone */ } }
-  }
+  // The supervisor, the script and ffmpeg share one process group. Only signal it
+  // if the pid is still our supervisor (not a reused pid from a stale file).
+  if (pid !== null && pidRunsScript(pid, SUPERVISOR)) await killGroup(pid)
   try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
   try { fs.unlinkSync(RTMP_STATE_FILE) } catch { /* already gone */ }
 }
@@ -287,12 +379,19 @@ export function parseStartInput(body: unknown): StartInput | null {
   return { eventName, dateLine, targetUnix, refreshSeconds };
 }
 
-export async function startEncoder(
+export function startEncoder(
+  input: StartInput,
+  options: { replace?: boolean } = {},
+): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  return withEncoderLock(() => startEncoderUnlocked(input, options))
+}
+
+async function startEncoderUnlocked(
   input: StartInput,
   options: { replace?: boolean } = {},
 ): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const current = readMeta();
-  if (current && alive(current.pid)) {
+  if (current && pidRunsScript(current.pid, SCRIPT)) {
     if (!options.replace) {
       return {
         ok: false,
@@ -300,8 +399,7 @@ export async function startEncoder(
         status: 409,
       };
     }
-    stopEncoder();
-    await delay(400);
+    await stopEncoderUnlocked();
   }
   if (!ffmpegAvailable()) {
     return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 };
@@ -321,12 +419,11 @@ export async function startEncoder(
     detached: true,
     stdio: ["ignore", logFd, logFd],
     cwd: ROOT,
-    env: {
-      ...process.env,
+    env: childEnv({
       EVENT_NAME: input.eventName,
       EVENT_LINE: input.dateLine,
       TARGET_UNIX: String(input.targetUnix),
-    },
+    }),
   });
   child.unref();
   fs.closeSync(logFd);
@@ -367,31 +464,34 @@ export function restartEncoder(input: StartInput) {
   return startEncoder(input, { replace: true })
 }
 
-export async function maybeRefreshStaleSlate(): Promise<void> {
+let refreshInFlight: Promise<void> | null = null
+
+/** Polled by every open desk tab; at most one refresh runs at a time and the stale check is repeated inside the lock. */
+export function maybeRefreshStaleSlate(): Promise<void> {
+  if (refreshInFlight) return refreshInFlight
   const meta = readMeta()
-  if (!meta || !alive(meta.pid) || meta.refreshSeconds <= 0) return
-  if (Date.now() - meta.startedAt < meta.refreshSeconds * 1000) return
-  await restartEncoder({
-    eventName: meta.eventName,
-    dateLine: meta.dateLine,
-    targetUnix: meta.targetUnix,
-    refreshSeconds: meta.refreshSeconds,
-  })
+  if (!meta || meta.refreshSeconds <= 0 || Date.now() - meta.startedAt < meta.refreshSeconds * 1000) return Promise.resolve()
+  refreshInFlight = withEncoderLock(async () => {
+    const current = readMeta()
+    if (!current || current.refreshSeconds <= 0 || !pidRunsScript(current.pid, SCRIPT)) return
+    if (Date.now() - current.startedAt < current.refreshSeconds * 1000) return
+    await startEncoderUnlocked({
+      eventName: current.eventName,
+      dateLine: current.dateLine,
+      targetUnix: current.targetUnix,
+      refreshSeconds: current.refreshSeconds,
+    }, { replace: true })
+  }).then(() => undefined).finally(() => { refreshInFlight = null })
+  return refreshInFlight
 }
 
-export function stopEncoder(): void {
+export function stopEncoder(): Promise<void> {
+  return withEncoderLock(stopEncoderUnlocked)
+}
+
+async function stopEncoderUnlocked(): Promise<void> {
   const meta = readMeta();
-  if (meta && alive(meta.pid)) {
-    try {
-      process.kill(-meta.pid, "SIGTERM");
-    } catch {
-      try {
-        process.kill(meta.pid, "SIGTERM");
-      } catch {
-        /* already gone */
-      }
-    }
-  }
+  if (meta && pidRunsScript(meta.pid, SCRIPT)) await killGroup(meta.pid);
   try {
     fs.unlinkSync(META_FILE);
   } catch {

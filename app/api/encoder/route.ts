@@ -52,7 +52,7 @@ export async function DELETE(request: Request) {
   await connection()
   const denied = authorizeMutation(request)
   if (denied) return denied
-  stopEncoder()
-  if (new URL(request.url).searchParams.get("target") === "rtmp") stopRtmpStream()
+  await stopEncoder()
+  if (new URL(request.url).searchParams.get("target") === "rtmp") await stopRtmpStream()
   return Response.json(readStatus())
 }

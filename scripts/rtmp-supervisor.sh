@@ -45,7 +45,22 @@ trap stop TERM INT HUP
 
 log "supervisor started (pid $$)"
 
+LOG_FILE="${RTMP_LOG_FILE:-}"
+LOG_MAX_BYTES=5000000
+
+trim_log() {
+  # The desk opens the log with O_APPEND, so truncating in place is safe.
+  if [[ -n "$LOG_FILE" && -f "$LOG_FILE" ]]; then
+    size=$(wc -c < "$LOG_FILE" | tr -d ' ')
+    if (( size > LOG_MAX_BYTES )); then
+      tail -c 200000 "$LOG_FILE" > "$LOG_FILE.tmp" && cat "$LOG_FILE.tmp" > "$LOG_FILE" && rm -f "$LOG_FILE.tmp"
+      log "log trimmed (was ${size} bytes)"
+    fi
+  fi
+}
+
 while true; do
+  trim_log
   started=$(date +%s)
   write_state running
   bash "$DIR/stream-countdown.sh" &
