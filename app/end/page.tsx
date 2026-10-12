@@ -27,8 +27,12 @@ const DEFAULT_CARD: EndCard = {
 export default function EndPage() {
   const [card, setCard] = useState<EndCard>(DEFAULT_CARD)
   useEffect(() => {
-    void fetch("/api/event", { cache: "no-store" })
-      .then((response) => response.json())
+    const key = new URLSearchParams(window.location.search).get("k")
+    void fetch(key ? `/api/public/state?k=${encodeURIComponent(key)}` : "/api/public/state", { cache: "no-store" })
+      .then((response) => {
+        if (response.status === 401) throw new Error("view key required")
+        return response.json()
+      })
       .then((body: { event?: unknown; stage?: Record<string, unknown> }) => {
         const event = asEventConfig(body.event) ?? DEFAULT_EVENT
         const stage = body.stage ?? {}

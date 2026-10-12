@@ -5,7 +5,7 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { Button } from "@/components/ui/button";
 import type { EncoderStatus } from "@/lib/encoder-status";
 import { StreamPlayer } from "@/components/stream-player";
-import { useEncoderToken } from "@/lib/use-encoder-token";
+import { handleUnauthorized } from "@/lib/use-operator";
 
 const emptyStatus: EncoderStatus = {
   running: false,
@@ -54,7 +54,6 @@ export function EncodedPreview({
   targetUnix: number;
   valid: boolean;
 }) {
-  const token = useEncoderToken();
   const [status, setStatus] = useState<EncoderStatus>(emptyStatus);
   const [refreshSlate, setRefreshSlate] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -67,7 +66,7 @@ export function EncodedPreview({
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/encoder", { cache: "no-store" });
-    if (!response.ok) return;
+    if (handleUnauthorized(response) || !response.ok) return;
     setStatus((await response.json()) as EncoderStatus);
   }, []);
 
@@ -91,26 +90,15 @@ export function EncodedPreview({
       status.dateLine !== dateLine ||
       status.targetUnix !== targetUnix);
 
-  async function authToken() {
-    if (token) return token
-    const boot = await fetch("/api/event", { cache: "no-store" }).then((response) => response.json()).catch(() => null)
-    return typeof boot?.token === "string" ? boot.token : ""
-  }
 
   async function start(replace = false) {
     setBusy(true);
     setError(null);
     try {
-      const auth = await authToken()
-      if (!auth) {
-        setError("The encoder token was not issued. Open the desk at http://localhost:43211.")
-        return
-      }
       const response = await fetch("/api/encoder", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-encoder-token": auth,
         },
         body: JSON.stringify({
           eventName,
@@ -120,6 +108,7 @@ export function EncodedPreview({
           replace,
         }),
       });
+      if (handleUnauthorized(response)) return;
       const body = (await response.json()) as EncoderStatus & { error?: string };
       if (!response.ok) {
         setError(body.error || "ffmpeg did not start.");
@@ -137,11 +126,10 @@ export function EncodedPreview({
     setBusy(true);
     setError(null);
     try {
-      const auth = await authToken()
       const response = await fetch("/api/encoder", {
         method: "DELETE",
-        headers: { "x-encoder-token": auth },
       });
+      if (handleUnauthorized(response)) return;
       if (response.ok) setStatus((await response.json()) as EncoderStatus);
     } catch {
       setError("The player could not stop ffmpeg.");
@@ -177,7 +165,7 @@ export function EncodedPreview({
             type="button"
             className={pill("solid")}
             onClick={() => {
-              void navigator.clipboard.writeText(playlistUrl).then(() => {
+              void navigator.clipboard?.writeText(playlistUrl).then(() => {
                 setCopied(true)
                 window.setTimeout(() => setCopied(false), 1500)
               })

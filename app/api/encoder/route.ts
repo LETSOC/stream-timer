@@ -1,5 +1,5 @@
 import { connection } from "next/server"
-import { authorizeMutation, getEncoderToken, isLoopbackRequest } from "@/lib/encoder-auth"
+import { authorizeMutation, requireOperator } from "@/lib/auth"
 import {
   maybeRefreshStaleSlate,
   parseStartInput,
@@ -13,10 +13,10 @@ import {
 
 export async function GET(request: Request) {
   await connection()
+  const denied = requireOperator(request)
+  if (denied) return denied
   await maybeRefreshStaleSlate()
-  const status = readStatus()
-  if (!isLoopbackRequest(request)) return Response.json(status)
-  return Response.json({ ...status, token: getEncoderToken() })
+  return Response.json(readStatus())
 }
 
 export async function POST(request: Request) {

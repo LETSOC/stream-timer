@@ -24,6 +24,8 @@ export default function StreamPage() {
 function StreamView() {
   const params = useSearchParams()
   const hasOverrides = OVERRIDE_KEYS.some((key) => params.get(key))
+  const viewKey = params.get("k") ?? ""
+  const [blocked, setBlocked] = useState(false)
   const queryEvent = useMemo(
     () =>
       resolveEvent({
@@ -56,8 +58,15 @@ function StreamView() {
   useEffect(() => {
     let cancelled = false
     const load = () => {
-      void fetch("/api/event", { cache: "no-store" })
-        .then((response) => response.json())
+      void fetch(viewKey ? `/api/public/state?k=${encodeURIComponent(viewKey)}` : "/api/public/state", { cache: "no-store" })
+        .then((response) => {
+          if (response.status === 401) {
+            if (!cancelled) setBlocked(true)
+            throw new Error("view key required")
+          }
+          if (!cancelled) setBlocked(false)
+          return response.json()
+        })
         .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
@@ -100,7 +109,7 @@ function StreamView() {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [hasOverrides])
+  }, [hasOverrides, viewKey])
 
   const now = useNow()
   const event = hasOverrides ? queryEvent : serverEvent
@@ -133,6 +142,14 @@ function StreamView() {
 
   const clock = testClock ?? now
   const ended = stage.forceEnd || (!stage.holdCountdown && Boolean(clock && wallTimeInZone(event.date, stage.endAt || event.endTime, event.timeZone).getTime() <= clock.getTime()))
+
+  if (blocked) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-black p-8 text-center font-mono text-sm text-white/75">
+        View key required. Copy the OBS URL from the countdown desk.
+      </main>
+    )
+  }
 
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>

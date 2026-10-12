@@ -72,31 +72,28 @@ export function originAllowed(request: Request): boolean {
   const origin = request.headers.get("origin")
   if (!origin || origin === "null") return origin === null
   try {
-    return loopbackHost(new URL(origin).hostname) || process.env.ENCODER_ALLOW_REMOTE === "1"
+    const parsed = new URL(origin)
+    // Same-origin: the browser sets both Origin and Host, a cross-site page cannot fake either.
+    const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "").split(",")[0].trim()
+    if (host && parsed.host === host) return true
+    return loopbackHost(parsed.hostname) || process.env.ENCODER_ALLOW_REMOTE === "1"
   } catch {
     return false
   }
 }
 
-function tokensMatch(expected: string, provided: string): boolean {
+export function tokensMatch(expected: string, provided: string): boolean {
   const left = Buffer.from(expected)
   const right = Buffer.from(provided)
   if (left.length !== right.length) return false
   return timingSafeEqual(left, right)
 }
 
-export function authorizeMutation(request: Request): Response | null {
-  if (!isLoopbackRequest(request) && process.env.ENCODER_ALLOW_REMOTE !== "1") {
-    return Response.json({ error: "Encoder mutations are local only." }, { status: 403 })
-  }
-  if (!originAllowed(request)) {
-    return Response.json({ error: "Cross-origin encoder mutations are not allowed." }, { status: 403 })
-  }
+/** Machine credential for scripts/curl: `Authorization: Bearer <ENCODER_TOKEN>` (or x-encoder-token). Never sent to browsers. */
+export function bearerAuthorized(request: Request): boolean {
+  if (!isLoopbackRequest(request) && process.env.ENCODER_ALLOW_REMOTE !== "1") return false
   const header = request.headers.get("x-encoder-token")
   const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
   const provided = header || bearer || ""
-  if (!tokensMatch(getEncoderToken(), provided)) {
-    return Response.json({ error: "Missing or wrong encoder token." }, { status: 401 })
-  }
-  return null
+  return provided.length > 0 && tokensMatch(getEncoderToken(), provided)
 }
