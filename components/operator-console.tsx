@@ -351,10 +351,10 @@ export function OperatorConsole() {
             <span className="font-mono text-[10px] text-black/50 uppercase">
               Desk {syncState}
             </span>
-            <Button type="button" className="rounded-full bg-black text-white" onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
+            <Button type="button" className={pillClass()} onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
             </Button>
-            <Button nativeButton={false} render={<Link href={stableHref} target="_blank" rel="noreferrer" />} className="rounded-full bg-black text-white">
+            <Button nativeButton={false} render={<Link href={stableHref} target="_blank" rel="noreferrer" />} className={pillClass()}>
               Open /stream in new window
             </Button>
           </div>
@@ -434,13 +434,11 @@ export function OperatorConsole() {
                 [1800, "30min"],
                 [3600, "1 hour"],
               ].map(([seconds, label]) => (
-                <button key={label} type="button" className="rounded-full bg-black px-3 py-1.5 font-mono text-[11px] text-white" onClick={() => void jumpPreview(Number(seconds))}>
-                  {label} left
-                </button>
+                <Pill key={label} size="sm" onClick={() => void jumpPreview(Number(seconds))}>{label} left</Pill>
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" className="rounded-full bg-black text-white" onClick={() => {
+              <Pill onClick={() => {
                 if (pausedAt) {
                   setPausedAt(null)
                   return
@@ -448,25 +446,13 @@ export function OperatorConsole() {
                 if (previewNow) setPausedAt(previewNow)
               }}>
                 {pausedAt ? "Play" : "Pause"}
-              </Button>
-              <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition-colors hover:bg-black hover:text-white active:translate-y-px" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>
-                Reset clock
-              </button>
-              <Button type="button" className="rounded-full bg-[#ff3c00] text-white hover:bg-[#e03600]" onClick={goLiveNow}>
-                Go live now
-              </Button>
-              <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition-colors hover:bg-black hover:text-white active:translate-y-px" onClick={restoreFestival}>
-                Restore 4 Nov
-              </button>
-              <a href="/end" target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-8 items-center justify-center rounded-full bg-black text-sm font-medium text-white no-underline transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95">
-                Open end card
-              </a>
-              <button type="button" className="h-8 rounded-full bg-black text-sm font-medium text-white transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>
-                Show end card now
-              </button>
-              <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>
-                Back to countdown
-              </button>
+              </Pill>
+              <Pill tone="outline" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</Pill>
+              <Pill tone="danger" onClick={goLiveNow}>Go live now</Pill>
+              <Pill tone="outline" onClick={restoreFestival}>Restore 4 Nov</Pill>
+              <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
+              <Pill onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
+              <Pill tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
             </div>
             <p className="font-mono text-[10px] leading-5 text-black/55">
               Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
@@ -598,11 +584,7 @@ export function OperatorConsole() {
               <Input id="rtmp" type="password" autoComplete="off" placeholder="rtmp://uk.castr.io/static/…?password=…" value={rtmpUrl} onChange={(event) => setRtmpUrl(event.target.value)} />
             </Field>
             <div className="flex gap-2">
-              <button
-                type="button"
-                className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
-                disabled={!valid || rtmpUrl.trim().length === 0}
-                onClick={() => {
+              <Pill disabled={!valid || rtmpUrl.trim().length === 0} onClick={() => {
                   setRtmpState("idle")
                   setRtmpMessage("")
                   void fetch("/api/encoder", {
@@ -628,11 +610,8 @@ export function OperatorConsole() {
                 }}
               >
                 Start stream
-              </button>
-              <button
-                type="button"
-                className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black"
-                onClick={() => {
+              </Pill>
+              <Pill tone="outline" onClick={() => {
                   void fetch("/api/encoder?target=rtmp", { method: "DELETE", headers: { "x-encoder-token": token } }).then(() => {
                     setRtmpState("idle")
                     setRtmpLive(false)
@@ -641,7 +620,7 @@ export function OperatorConsole() {
                 }}
               >
                 Stop stream
-              </button>
+              </Pill>
             </div>
             {strayPids.length > 0 ? <p className="font-mono text-[11px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
             <p className="font-mono text-[11px] leading-5 text-black/60">
@@ -735,9 +714,9 @@ export function OperatorConsole() {
             <Field label="Show end card at" htmlFor="end-at"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} /></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</button>
-              <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm text-black transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</button>
-              <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full border border-black bg-white px-4 py-2 text-sm text-black no-underline transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95">Open end card</a>
+              <Pill onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
+              <Pill tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
+              <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
           <Panel title="Speaker gallery">
@@ -765,10 +744,10 @@ export function OperatorConsole() {
                 <Field label="Description" htmlFor={`speaker-desc-${index}`}>
                   <GrowingText id={`speaker-desc-${index}`} value={speaker.description} onChange={(value) => setSpeakers((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item))} />
                 </Field>
-                <button type="button" className="rounded-full border border-black px-3 py-1 text-xs" onClick={() => setSpeakers((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
+                <Pill tone="outline" size="sm" onClick={() => setSpeakers((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</Pill>
               </div>
             ))}
-            <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</button>
+            <Pill onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</Pill>
           </Panel>
         </section>
       </main>
@@ -776,6 +755,28 @@ export function OperatorConsole() {
   )
 }
 
+
+function pillClass(tone: "solid" | "outline" | "danger" = "solid", size: "sm" | "md" = "md") {
+  const tones = {
+    solid: "bg-black text-white hover:-translate-y-px hover:bg-[#222] hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)]",
+    outline: "border border-black bg-white text-black hover:-translate-y-px hover:bg-black hover:text-white",
+    danger: "bg-[#ff3c00] text-white hover:-translate-y-px hover:bg-[#e03600] hover:shadow-[0_4px_12px_rgba(255,60,0,0.3)]",
+  }
+  const sizes = {
+    sm: "h-8 px-3.5 font-mono text-[11px] tracking-wide",
+    md: "h-9 px-5 text-[13px]",
+  }
+  return `inline-flex items-center justify-center rounded-full font-medium transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 ${tones[tone]} ${sizes[size]}`
+}
+
+function Pill({
+  tone = "solid",
+  size = "md",
+  className = "",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "solid" | "outline" | "danger"; size?: "sm" | "md" }) {
+  return <button type="button" className={`${pillClass(tone, size)} ${className}`} {...props} />
+}
 
 function Panel({ title, pill, children }: { title: string; pill?: string; children: ReactNode }) {
   return (
@@ -841,7 +842,7 @@ function CommandBlock({
       <pre className="overflow-x-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[11px] leading-5 text-black/80 whitespace-pre-wrap">
         {value}
       </pre>
-      <Button variant="secondary" onClick={onCopy} className="w-full">
+      <Button variant="secondary" onClick={onCopy} className={`${pillClass("outline")} w-full`}>
         {copied ? "Copied" : "Copy command"}
       </Button>
     </div>
