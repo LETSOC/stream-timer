@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -495,7 +495,7 @@ export function OperatorConsole() {
             </p>
           </Panel>
 
-          <Panel title="Event core" pill="Editable">
+          <Panel id="event" title="Event" pill="Editable">
             <Field label="Session title" htmlFor="name">
               <GrowingText id="name" value={name} onChange={(value) => updateEvent({ name: value })} />
             </Field>
@@ -524,7 +524,7 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <Panel title="Call to action">
+          <Panel id="cta" title="Links & call to action">
             <Field label="RSVP URL" htmlFor="rsvp">
               <GrowingText id="rsvp" value={rsvpUrl} onChange={(value) => updateEvent({ rsvpUrl: value })} />
             </Field>
@@ -548,7 +548,7 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <Panel title="Stage options">
+          <Panel id="look" title="Look">
             <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={showMeta} onChange={(event) => setShowMeta(event.target.checked)} />
               Show date and timezone
@@ -595,20 +595,15 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <details className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-            <summary className="cursor-pointer list-none px-5 py-4 text-[13px] font-black tracking-[0.12em] uppercase">
-              Branding and socials
-            </summary>
-            <div className="space-y-4 border-t border-black/10 p-5">
+          <Panel id="socials" title="Socials" defaultOpen={false}>
               <Field label="X URL" htmlFor="x"><GrowingText id="x" value={xUrl} onChange={(value) => updateEvent({ xUrl: value })} /></Field>
               <Field label="Facebook URL" htmlFor="fb"><GrowingText id="fb" value={facebookUrl} onChange={(value) => updateEvent({ facebookUrl: value })} /></Field>
               <Field label="LinkedIn URL" htmlFor="li"><GrowingText id="li" value={linkedinUrl} onChange={(value) => updateEvent({ linkedinUrl: value })} /></Field>
               <Field label="Instagram URL" htmlFor="ig"><GrowingText id="ig" value={instagramUrl} onChange={(value) => updateEvent({ instagramUrl: value })} /></Field>
               <Field label="YouTube URL" htmlFor="yt"><GrowingText id="yt" value={youtubeUrl} onChange={(value) => updateEvent({ youtubeUrl: value })} /></Field>
-            </div>
-          </details>
+            </Panel>
 
-          <Panel title="FFmpeg">
+          <Panel id="encoder" title="Encoder (FFmpeg)">
             <div className="flex items-center justify-between gap-3">
               <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? (rtmpReconnecting ? "bg-[#b45309] text-white" : "bg-[#128a3e] text-white") : "bg-black/5 text-black/70"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
@@ -740,7 +735,7 @@ export function OperatorConsole() {
             {transparent ? " Transparent background is on: in OBS leave the browser source CSS empty so the page can show through." : ""}
           </p>
           <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
-          <Panel title="End card">
+          <Panel id="end-card" title="End card">
             <p className="font-mono text-[13px] leading-5 text-black/70">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
             <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
             <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
@@ -755,7 +750,7 @@ export function OperatorConsole() {
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
-          <Panel title="Speaker gallery">
+          <Panel id="speakers" title="Speakers">
             <p className="font-mono text-[13px] leading-5 text-black/70">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
             <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
               <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
@@ -814,14 +809,80 @@ function Pill({
   return <button type="button" className={`${pillClass(tone, size)} ${className}`} {...props} />
 }
 
-function Panel({ title, pill, children }: { title: string; pill?: string; children: ReactNode }) {
+const SECTIONS_KEY = "hyphen-countdown-sections"
+const sectionListeners = new Set<() => void>()
+
+function readSections(): string {
+  try {
+    return window.localStorage.getItem(SECTIONS_KEY) ?? "{}"
+  } catch {
+    return "{}"
+  }
+}
+
+function subscribeSections(listener: () => void) {
+  sectionListeners.add(listener)
+  return () => sectionListeners.delete(listener)
+}
+
+function setSectionOpen(id: string, open: boolean) {
+  let current: Record<string, boolean> = {}
+  try {
+    current = JSON.parse(readSections()) as Record<string, boolean>
+  } catch {
+    /* start fresh */
+  }
+  window.localStorage.setItem(SECTIONS_KEY, JSON.stringify({ ...current, [id]: open }))
+  sectionListeners.forEach((listener) => listener())
+}
+
+/** Open/closed state per section, remembered in localStorage. */
+function useSectionOpen(id: string | undefined, defaultOpen: boolean): [boolean, (open: boolean) => void] {
+  const raw = useSyncExternalStore(subscribeSections, readSections, () => "{}")
+  let open = defaultOpen
+  if (id) {
+    try {
+      const value = (JSON.parse(raw) as Record<string, unknown>)[id]
+      if (typeof value === "boolean") open = value
+    } catch {
+      /* keep default */
+    }
+  }
+  return [id ? open : true, (next) => { if (id) setSectionOpen(id, next) }]
+}
+
+function Panel({ id, title, pill, defaultOpen = true, children }: { id?: string; title: string; pill?: string; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useSectionOpen(id, defaultOpen)
+  const bodyId = id ? `section-${id}` : undefined
+  const heading = (
+    <>
+      <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
+      <span className="flex items-center gap-2">
+        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
+        {id ? (
+          <svg viewBox="0 0 24 24" className={`size-4 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        ) : null}
+      </span>
+    </>
+  )
   return (
     <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-      <div className="flex items-center justify-between border-b border-black/10 px-5 py-4">
-        <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
-        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
-      </div>
-      <div className="space-y-4 p-5">{children}</div>
+      {id ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen(!open)}
+          className={`flex w-full items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-inset ${open ? "border-b border-black/10" : ""}`}
+        >
+          {heading}
+        </button>
+      ) : (
+        <div className="flex items-center justify-between border-b border-black/10 px-5 py-4">{heading}</div>
+      )}
+      <div id={bodyId} hidden={!open} className="space-y-4 p-5">{children}</div>
     </section>
   )
 }
