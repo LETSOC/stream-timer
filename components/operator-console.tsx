@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
+import { EndStreamPage } from "@/app/end/page"
 import {
   formatClock,
   pad2,
@@ -424,7 +425,7 @@ export function OperatorConsole() {
               <button type="button" className="h-8 rounded-full border border-black bg-white text-sm font-medium text-black transition-colors hover:bg-black hover:text-white active:translate-y-px" onClick={restoreFestival}>
                 Restore 4 Nov
               </button>
-              <a href="/end" target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-8 items-center justify-center rounded-full bg-black text-sm font-medium text-white no-underline">
+              <a href="/end" target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-8 items-center justify-center rounded-full bg-black text-sm font-medium text-white no-underline transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95">
                 Open end card
               </a>
             </div>
@@ -640,12 +641,21 @@ export function OperatorConsole() {
               </span>
             ) : null}
             {forceEnd ? (
-              <div className="flex aspect-video items-center justify-center bg-[#070a16] text-white">
-                <div className="text-center">
-                  <p className="font-mono text-[11px] tracking-[0.16em] uppercase">End card is on /stream</p>
-                  <p className="mt-3 text-3xl font-bold">{endTitle}</p>
-                </div>
-              </div>
+              <EndStreamPage card={{
+                title: endTitle,
+                subtitle: endSubtitle,
+                date: endDate,
+                body: endBody,
+                qrUrl: endQrUrl,
+                button: endButton,
+                socials: [
+                  { label: "X", href: xUrl, icon: null },
+                  { label: "Facebook", href: facebookUrl, icon: null },
+                  { label: "LinkedIn", href: linkedinUrl, icon: null },
+                  { label: "Instagram", href: instagramUrl, icon: null },
+                  { label: "YouTube", href: youtubeUrl, icon: null },
+                ],
+              }} />
             ) : (
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
@@ -686,9 +696,9 @@ export function OperatorConsole() {
             <Field label="Show end card at" htmlFor="end-at"><Input id="end-at" type="time" value={endAt} onChange={(event) => setEndAt(event.target.value)} /></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white" onClick={() => setForceEnd(true)}>Show end card now</button>
-              <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm text-black" onClick={() => setForceEnd(false)}>Back to countdown</button>
-              <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full border border-black bg-white px-4 py-2 text-sm text-black no-underline">Open end card</a>
+              <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95" onClick={() => setForceEnd(true)}>Show end card now</button>
+              <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm text-black transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95" onClick={() => setForceEnd(false)}>Back to countdown</button>
+              <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full border border-black bg-white px-4 py-2 text-sm text-black no-underline transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95">Open end card</a>
             </div>
           </Panel>
           <Panel title="Speaker gallery">
