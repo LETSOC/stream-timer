@@ -136,7 +136,7 @@ function StreamView() {
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
       {ended ? (
-        <EndStreamPage card={{
+        <EndStreamPage className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
           subtitle: stage.endSubtitle,
           date: stage.endDate,

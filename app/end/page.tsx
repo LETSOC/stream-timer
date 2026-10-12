@@ -46,14 +46,14 @@ export default function EndPage() {
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-black">
-      <EndStreamPage card={card} />
+      <EndStreamPage card={card} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
     </main>
   )
 }
 
-export function EndStreamPage({ card }: { card: EndCard }) {
+export function EndStreamPage({ card, className }: { card: EndCard; className?: string }) {
   return (
-    <div className="relative flex aspect-video w-[min(100vw,177.78dvh)] flex-col items-center justify-center overflow-hidden bg-[#070a16] bg-cover bg-center px-[8%] text-center text-white" style={{ backgroundImage: "url('/brand/hero-bg.png')" }}>
+    <div className={`relative flex aspect-video w-full flex-col items-center justify-center overflow-hidden bg-[#070a16] bg-cover bg-center px-[8%] text-center text-white ${className ?? ""}`} style={{ backgroundImage: "url('/brand/hero-bg.png')" }}>
       <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: "repeating-linear-gradient(125deg, transparent 0 2px, rgba(255,255,255,0.08) 2px 4px)" }} />
       <div className="relative mb-[2cqi] rounded-full border border-white/20 px-[1.4cqi] py-[0.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.8cqi] tracking-[0.18em] uppercase">End of stream</div>
       <h1 className="relative m-0 font-[Arial,Helvetica,sans-serif] text-[5cqi] leading-none font-bold">{card.title}</h1>
