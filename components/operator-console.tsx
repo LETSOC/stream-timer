@@ -640,7 +640,7 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            {forceEnd ? (
+            {forceEnd || (previewNow ? wallTimeInZone(date, endAt || endTime, timeZone).getTime() <= previewNow.getTime() : false) ? (
               <EndStreamPage card={{
                 title: endTitle,
                 subtitle: endSubtitle,
