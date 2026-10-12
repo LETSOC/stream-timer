@@ -81,6 +81,7 @@ export function OperatorConsole() {
   const [safeZone, setSafeZone] = useSectionOpen("aid-safe-zone", false)
   const [thirds, setThirds] = useSectionOpen("aid-thirds", false)
   const [footage, setFootage] = useSectionOpen("aid-footage", false)
+  const [pinPreview, setPinPreview] = useSectionOpen("aid-pin-preview", false)
   const [showHelp, setShowHelp] = useState(false)
   const pauseRef = useRef<HTMLButtonElement>(null)
   const goLiveRef = useRef<HTMLButtonElement>(null)
@@ -725,15 +726,16 @@ export function OperatorConsole() {
           </div>
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Preview aids (preview only, not sent to OBS)">
             <span className="font-mono text-[12px] tracking-[0.12em] text-black/70 uppercase">Preview aids</span>
+            <Pill size="sm" tone={pinPreview ? "solid" : "outline"} aria-pressed={pinPreview} onClick={() => setPinPreview(!pinPreview)}>Pin preview</Pill>
             <Pill size="sm" tone={trueObs ? "solid" : "outline"} aria-pressed={trueObs} onClick={() => setTrueObs(!trueObs)}>True OBS frame</Pill>
             <Pill size="sm" tone={safeZone ? "solid" : "outline"} aria-pressed={safeZone} onClick={() => setSafeZone(!safeZone)}>Safe zone</Pill>
             <Pill size="sm" tone={thirds ? "solid" : "outline"} aria-pressed={thirds} onClick={() => setThirds(!thirds)}>3×3 grid</Pill>
             <Pill size="sm" tone={footage ? "solid" : "outline"} aria-pressed={footage} disabled={!transparent} title={transparent ? undefined : "Turn on transparent background to preview over footage"} onClick={() => setFootage(!footage)}>Game footage bg</Pill>
           </div>
-          <div className="lg:sticky lg:top-0 lg:z-10 lg:bg-[#F6F6F3] lg:pb-2">
+          <div data-testid="preview-pin" className={pinPreview ? "lg:sticky lg:top-0 lg:z-10 lg:-mx-1 lg:border-b lg:border-black/15 lg:bg-[#F6F6F3] lg:px-1 lg:pt-1 lg:pb-3 lg:shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)]" : ""}>
           <div
             data-testid="preview-frame"
-            className={`relative mx-auto overflow-hidden lg:max-w-[calc((100dvh-16rem)*16/9)] ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
+            className={`relative mx-auto overflow-hidden ${pinPreview ? "lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
             style={
               transparent && footage
                 ? { background: "#111" }
