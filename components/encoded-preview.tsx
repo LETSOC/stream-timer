@@ -144,13 +144,13 @@ export function EncodedPreview({
       </div>
       <div className="space-y-4 p-5">
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-40" disabled={busy || status.running || !valid || !status.ffmpeg} onClick={() => void start(false)}>
+          <button type="button" className={pill("solid")} disabled={busy || status.running || !valid || !status.ffmpeg} onClick={() => void start(false)}>
             Play encoded slate
           </button>
-          <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-40" disabled={busy || !status.running} onClick={() => void start(true)}>
+          <button type="button" className={pill("outline")} disabled={busy || !status.running} onClick={() => void start(true)}>
             Restart slate
           </button>
-          <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-40" disabled={busy || !status.running} onClick={() => void stop()}>
+          <button type="button" className={pill("outline")} disabled={busy || !status.running} onClick={() => void stop()}>
             Stop player
           </button>
         </div>
@@ -158,7 +158,7 @@ export function EncodedPreview({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded-full bg-black px-4 py-2 text-sm font-medium text-white"
+            className={pill("solid")}
             onClick={() => {
               void navigator.clipboard.writeText(playlistUrl).then(() => {
                 setCopied(true)
@@ -168,7 +168,7 @@ export function EncodedPreview({
           >
             {copied ? "Copied" : "Copy m3u8 link"}
           </button>
-          <a className="rounded-full border border-black bg-white px-4 py-2 text-sm font-medium text-black no-underline" href={playlistUrl} target="_blank" rel="noreferrer">
+          <a className={`${pill("outline")} no-underline`} href={playlistUrl} target="_blank" rel="noreferrer">
             Open m3u8 in new tab
           </a>
         </div>
@@ -202,4 +202,12 @@ export function EncodedPreview({
       </div>
     </section>
   )
+}
+
+function pill(tone: "solid" | "outline") {
+  const tones = {
+    solid: "bg-black text-white hover:-translate-y-px hover:bg-[#222] hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)]",
+    outline: "border border-black bg-white text-black hover:-translate-y-px hover:bg-black hover:text-white",
+  }
+  return `inline-flex h-9 items-center justify-center rounded-full px-5 text-[13px] font-medium whitespace-nowrap transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 ${tones[tone]}`
 }

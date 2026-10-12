@@ -451,8 +451,8 @@ export function OperatorConsole() {
               <Pill tone="danger" onClick={goLiveNow}>Go live now</Pill>
               <Pill tone="outline" onClick={restoreFestival}>Restore 4 Nov</Pill>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
-              <Pill onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
-              <Pill tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
+              <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
+              <Pill className="whitespace-nowrap" tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
             </div>
             <p className="font-mono text-[10px] leading-5 text-black/55">
               Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
@@ -632,7 +632,6 @@ export function OperatorConsole() {
         </section>
 
         <section className="space-y-4 lg:flex-1 lg:overflow-y-auto lg:pr-2 lg:pb-6 [scrollbar-width:thin]">
-          <div className="space-y-4 lg:sticky lg:top-0 lg:z-10 lg:bg-[#F6F6F3] lg:pb-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">
@@ -679,7 +678,6 @@ export function OperatorConsole() {
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
           </div>
-          </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[11px] leading-5 break-all">
               <span className="text-black/50">Stream params preview: </span>
@@ -716,8 +714,8 @@ export function OperatorConsole() {
             <Field label="Show end card at" htmlFor="end-at"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} /></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <Pill onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
-              <Pill tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
+              <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
+              <Pill className="whitespace-nowrap" tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
