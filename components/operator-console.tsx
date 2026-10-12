@@ -27,6 +27,7 @@ import { useNow } from "@/lib/use-now"
 import { TIME_ZONES, DEFAULT_EVENT } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { useEncoderToken } from "@/lib/use-encoder-token"
+import type { StageOptions } from "@/lib/event-server"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
@@ -158,7 +159,7 @@ export function OperatorConsole() {
     const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
     if (stageRaw) {
       try {
-        const stage = JSON.parse(stageRaw) as { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean; lineSpacing?: number; blockGap?: number; clockScale?: number; clockText?: number; logoUrl?: string }
+        const stage = JSON.parse(stageRaw) as Partial<StageOptions>
         if (stage.checker) setChecker(stage.checker)
         if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
         if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
@@ -200,7 +201,7 @@ export function OperatorConsole() {
     }
     void fetch("/api/event", { cache: "no-store" })
       .then((response) => response.json())
-      .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: { checker?: number; showMeta?: boolean; showLink?: boolean; transparent?: boolean } }) => {
+      .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions> }) => {
         const saved = asEventConfig(body.event)
         if (saved && !window.localStorage.getItem("hyphen-countdown-event")) updateEvent(saved)
         if (!clockRaw) {
@@ -440,6 +441,15 @@ export function OperatorConsole() {
             <div className="grid grid-cols-2 gap-2">
               <Pill onClick={() => {
                 if (pausedAt) {
+                  // Resume from the paused value: shift the test clock by the paused duration.
+                  const resumeNow = Date.now()
+                  if (valid) {
+                    const nextUntil = target.getTime() - pausedAt.getTime() + resumeNow
+                    setTestUntil(nextUntil)
+                    setSkewMs(target.getTime() - nextUntil)
+                  } else {
+                    setSkewMs(pausedAt.getTime() - resumeNow)
+                  }
                   setPausedAt(null)
                   return
                 }

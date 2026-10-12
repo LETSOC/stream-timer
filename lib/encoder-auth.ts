@@ -27,18 +27,22 @@ function loopbackHost(value: string | null): boolean {
   return host === "127.0.0.1" || host === "::1" || host === "localhost"
 }
 
+/**
+ * Route handlers cannot see the socket address, and the Host header is set by
+ * the client, so it is never trusted. A request counts as local only when the
+ * server itself is bound to loopback (HOST unset or 127.0.0.1/::1/localhost)
+ * and no proxy header names a non-loopback client. When HOST is a LAN or
+ * public address, every request is treated as remote: the token is never
+ * handed out and mutations need ENCODER_ALLOW_REMOTE=1 plus ENCODER_TOKEN.
+ */
 export function isLoopbackRequest(request: Request): boolean {
-  const host = request.headers.get("host")?.split(":")[0] ?? ""
-  if (loopbackHost(host)) return true
+  const bind = process.env.HOST?.trim()
+  if (bind && !loopbackHost(bind)) return false
   const forwarded = request.headers.get("x-forwarded-for")
   const realIp = request.headers.get("x-real-ip")
   if (forwarded && !loopbackHost(forwarded)) return false
   if (realIp && !loopbackHost(realIp)) return false
-  try {
-    return loopbackHost(new URL(request.url).hostname)
-  } catch {
-    return false
-  }
+  return true
 }
 
 function tokensMatch(expected: string, provided: string): boolean {
