@@ -552,9 +552,9 @@ export function OperatorConsole() {
             </Field>
             <Field label="Checker division" htmlFor="checker">
               <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" className="rounded-full" onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Button>
+                <Button type="button" variant="outline" className={pillClass("outline", "sm")} onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Button>
                 <span id="checker" className="min-w-16 text-center font-mono text-sm tabular-nums">{checker}×{checker}</span>
-                <Button type="button" variant="outline" className="rounded-full" onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Button>
+                <Button type="button" variant="outline" className={pillClass("outline", "sm")} onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Button>
               </div>
             </Field>
           </Panel>
