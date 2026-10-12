@@ -75,6 +75,16 @@ export function OperatorConsole() {
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  // Preview-only aids (never sent to /stream), remembered in localStorage.
+  const [trueObs, setTrueObs] = useSectionOpen("aid-true-obs", false)
+  const [safeZone, setSafeZone] = useSectionOpen("aid-safe-zone", false)
+  const [thirds, setThirds] = useSectionOpen("aid-thirds", false)
+  const [footage, setFootage] = useSectionOpen("aid-footage", false)
+  const [showHelp, setShowHelp] = useState(false)
+  const pauseRef = useRef<HTMLButtonElement>(null)
+  const goLiveRef = useRef<HTMLButtonElement>(null)
+  const resetRef = useRef<HTMLButtonElement>(null)
   const [hydrated, setHydrated] = useState(false)
   const previewReady = useRef(false)
   const now = useNow()
@@ -346,10 +356,46 @@ export function OperatorConsole() {
     sendSave({ ...savePayload, event: { ...event, ...restored }, testUntil: null, pausedAt: null })
   }
 
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+      if (event.key === "?") {
+        event.preventDefault()
+        setShowHelp((value) => !value)
+        return
+      }
+      if (event.key === "Escape") {
+        setShowHelp(false)
+        return
+      }
+      // Buttons handle Space themselves when focused; only take it when focus is elsewhere.
+      if (event.key === " " && target?.tagName !== "BUTTON" && target?.tagName !== "A") {
+        event.preventDefault()
+        pauseRef.current?.click()
+        return
+      }
+      const confirmTarget = event.key.toLowerCase() === "g" ? goLiveRef.current : event.key.toLowerCase() === "r" ? resetRef.current : null
+      if (confirmTarget) {
+        // Same two-step confirm as clicking: first press arms, second press within 3s runs it.
+        event.preventDefault()
+        confirmTarget.focus()
+        confirmTarget.click()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
     await navigator.clipboard.writeText(value)
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
+    if (kind === "link" || kind === "params") {
+      setToast(value)
+      window.setTimeout(() => setToast((current) => (current === value ? null : current)), 2500)
+    }
   }
 
   return (
@@ -371,6 +417,7 @@ export function OperatorConsole() {
               </span>
             </span>
             <SyncBadge state={syncState} hasToken={Boolean(token)} error={syncError} />
+            <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
             <Button type="button" className={pillClass()} onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
             </Button>
@@ -465,7 +512,7 @@ export function OperatorConsole() {
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Pill onClick={() => {
+              <Pill ref={pauseRef} aria-keyshortcuts="Space" onClick={() => {
                 if (pausedAt) {
                   // Resume from the paused value: shift the test clock by the paused duration.
                   const resumeNow = Date.now()
@@ -483,8 +530,8 @@ export function OperatorConsole() {
               }}>
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
-              <ConfirmButton className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
-              <ConfirmButton className={pillClass("danger")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
+              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
+              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("danger")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
               <ConfirmButton className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
               <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
@@ -588,14 +635,14 @@ export function OperatorConsole() {
             </Field>
             <Field label="Checker division" htmlFor="checker">
               <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" className={pillClass("outline", "sm")} onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Button>
+                <Pill tone="outline" size="sm" aria-label="Fewer checker divisions" onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Pill>
                 <span id="checker" className="min-w-16 text-center font-mono text-sm tabular-nums">{checker}×{checker}</span>
-                <Button type="button" variant="outline" className={pillClass("outline", "sm")} onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Button>
+                <Pill tone="outline" size="sm" aria-label="More checker divisions" onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Pill>
               </div>
             </Field>
           </Panel>
 
-          <Panel id="socials" title="Socials" defaultOpen={false}>
+          <Panel id="socials" title="Socials" pill={`${[xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl].filter((url) => url.trim()).length}/5 links set`} defaultOpen={false}>
               <Field label="X URL" htmlFor="x"><GrowingText id="x" value={xUrl} onChange={(value) => updateEvent({ xUrl: value })} /></Field>
               <Field label="Facebook URL" htmlFor="fb"><GrowingText id="fb" value={facebookUrl} onChange={(value) => updateEvent({ facebookUrl: value })} /></Field>
               <Field label="LinkedIn URL" htmlFor="li"><GrowingText id="li" value={linkedinUrl} onChange={(value) => updateEvent({ linkedinUrl: value })} /></Field>
@@ -676,14 +723,36 @@ export function OperatorConsole() {
               1920×1080 · official logo · {transparent ? "transparent bg" : "black bg"} · {transparent ? "no chrome" : "hero"}
             </span>
           </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Preview aids (preview only, not sent to OBS)">
+            <span className="font-mono text-[12px] tracking-[0.12em] text-black/70 uppercase">Preview aids</span>
+            <Pill size="sm" tone={trueObs ? "solid" : "outline"} aria-pressed={trueObs} onClick={() => setTrueObs(!trueObs)}>True OBS frame</Pill>
+            <Pill size="sm" tone={safeZone ? "solid" : "outline"} aria-pressed={safeZone} onClick={() => setSafeZone(!safeZone)}>Safe zone</Pill>
+            <Pill size="sm" tone={thirds ? "solid" : "outline"} aria-pressed={thirds} onClick={() => setThirds(!thirds)}>3×3 grid</Pill>
+            <Pill size="sm" tone={footage ? "solid" : "outline"} aria-pressed={footage} disabled={!transparent} title={transparent ? undefined : "Turn on transparent background to preview over footage"} onClick={() => setFootage(!footage)}>Game footage bg</Pill>
+          </div>
+          <div className="lg:sticky lg:top-0 lg:z-10 lg:bg-[#F6F6F3] lg:pb-2">
           <div
-            className={`relative overflow-hidden rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}
+            data-testid="preview-frame"
+            className={`relative mx-auto overflow-hidden lg:max-w-[calc((100dvh-16rem)*16/9)] ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
             style={
-              transparent
+              transparent && footage
+                ? { background: "#111" }
+                : transparent
                 ? { backgroundImage: "linear-gradient(45deg,#d9d9d4 25%,transparent 25%),linear-gradient(-45deg,#d9d9d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d9d9d4 75%),linear-gradient(-45deg,transparent 75%,#d9d9d4 75%)", backgroundSize: "24px 24px", backgroundPosition: "0 0,0 12px,12px -12px,-12px 0" }
                 : { background: "#000" }
             }
           >
+            {transparent && footage ? (
+              <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center blur-md brightness-75" style={{ backgroundImage: "url(/brand/hero-bg.png)" }} />
+            ) : null}
+            {safeZone ? (
+              <div aria-hidden data-testid="safe-zone" className="pointer-events-none absolute inset-[5%] z-20 border-2 border-dashed border-[#D9FF43]/80" />
+            ) : null}
+            {thirds ? (
+              <div aria-hidden data-testid="thirds" className="pointer-events-none absolute inset-0 z-20 grid grid-cols-3 grid-rows-3">
+                {Array.from({ length: 9 }, (_, index) => <div key={index} className="border border-white/35" />)}
+              </div>
+            ) : null}
             {previewFlash ? (
               <span className="absolute top-3 left-3 z-30 rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
                 Preview updated
@@ -708,6 +777,7 @@ export function OperatorConsole() {
             ) : (
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
+          </div>
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[13px] leading-5 break-all">
@@ -782,6 +852,30 @@ export function OperatorConsole() {
           </Panel>
         </section>
       </main>
+      {toast ? (
+        <div role="status" aria-live="polite" className="fixed right-4 bottom-4 z-50 flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
+          <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-[#D9FF43]" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d="m5 12 5 5 9-11" /></svg>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-bold">Copied to clipboard</span>
+            <span className="block truncate font-mono text-[12px] text-white/75">{toast}</span>
+          </span>
+        </div>
+      ) : null}
+      {showHelp ? (
+        <div role="dialog" aria-modal="false" aria-label="Keyboard shortcuts" className="fixed left-4 bottom-4 z-50 w-72 rounded-2xl border border-black/10 bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.2)]">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">Shortcuts</h2>
+            <button type="button" className="font-mono text-[12px] text-black/70" onClick={() => setShowHelp(false)}>Esc</button>
+          </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono text-[13px]">
+            <dt><kbd>Space</kbd></dt><dd>Pause / play preview clock</dd>
+            <dt><kbd>G</kbd> <kbd>G</kbd></dt><dd>Go live now (press twice)</dd>
+            <dt><kbd>R</kbd> <kbd>R</kbd></dt><dd>Reset clock (press twice)</dd>
+            <dt><kbd>?</kbd></dt><dd>Toggle this help</dd>
+          </dl>
+          <p className="mt-2 font-mono text-[12px] text-black/70">Ignored while typing in a field.</p>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -805,7 +899,7 @@ function Pill({
   size = "md",
   className = "",
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "solid" | "outline" | "danger"; size?: "sm" | "md" }) {
+}: React.ComponentProps<"button"> & { tone?: "solid" | "outline" | "danger"; size?: "sm" | "md" }) {
   return <button type="button" className={`${pillClass(tone, size)} ${className}`} {...props} />
 }
 
@@ -903,7 +997,7 @@ function GrowingText({ id, value, onChange }: { id: string; value: string; onCha
         node.style.height = "auto"
         node.style.height = `${node.scrollHeight}px`
       }}
-      className="w-full resize-none overflow-hidden rounded-xl border border-black/10 bg-[#F6F6F3] px-3 py-2 text-sm leading-5 break-all"
+      className="max-h-32 w-full resize-none overflow-y-auto rounded-xl border border-black/10 bg-[#F6F6F3] px-3 py-2 text-sm leading-5 break-all"
     />
   )
 }
