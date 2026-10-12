@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ConfirmButton } from "@/components/confirm-button";
 import { Button } from "@/components/ui/button";
 import type { EncoderStatus } from "@/lib/encoder-status";
 import { StreamPlayer } from "@/components/stream-player";
@@ -137,7 +138,7 @@ export function EncodedPreview({
     <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-5 py-4">
         <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">Encoded player</h2>
-        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${status.rtmpRunning ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/45"}`}>
+        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${status.rtmpRunning ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
           <span className={`size-1.5 rounded-full ${status.rtmpRunning ? "animate-pulse bg-white" : "bg-black/30"}`} />
           {status.rtmpRunning ? "Stream live" : "Stream off"}
         </span>
@@ -150,11 +151,11 @@ export function EncodedPreview({
           <button type="button" className={pill("outline")} disabled={busy || !status.running} onClick={() => void start(true)}>
             Restart slate
           </button>
-          <button type="button" className={pill("outline")} disabled={busy || !status.running} onClick={() => void stop()}>
+          <ConfirmButton className={pill("danger")} disabled={busy || !status.running} onConfirm={() => void stop()}>
             Stop player
-          </button>
+          </ConfirmButton>
         </div>
-        <p className="font-mono text-[11px] break-all text-black/70">{playlistUrl}</p>
+        <p className="font-mono text-[13px] break-all text-black/70">{playlistUrl}</p>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -180,34 +181,35 @@ export function EncodedPreview({
               <p className="font-mono text-[12px] text-white/80">
                 {status.running ? "Writing the first two-second segment." : "Play the encoded slate to preview it here."}
               </p>
-              <p className="max-w-sm font-mono text-[11px] leading-5 text-white/45">
+              <p className="max-w-sm font-mono text-[13px] leading-5 text-white/75">
                 1280×720 · 30 fps · H.264 2500 kbps · silent stereo. This player is local. Start stream sends the same picture to RTMP.
               </p>
             </div>
           )}
         </div>
-        <label className="flex items-center gap-2 font-mono text-[11px] text-black/60">
+        <label className="flex items-center gap-2 font-mono text-[13px] text-black/70">
           <input type="checkbox" checked={refreshSlate} onChange={(event) => setRefreshSlate(event.target.checked)} />
           Auto-refresh the burned-in clock every 10 minutes
         </label>
         {status.running && status.slateAgeSeconds !== null ? (
-          <p className="font-mono text-[11px] text-black/50">
+          <p className="font-mono text-[13px] text-black/70">
             Slate age {status.slateAgeSeconds}s.
             {status.refreshSeconds ? " Auto-refresh is on." : " Auto-refresh is off."}
           </p>
         ) : null}
-        {!status.ffmpeg ? <p className="font-mono text-[11px] text-red-600">ffmpeg is not on PATH. The browser preview still runs.</p> : null}
-        {stale ? <p className="font-mono text-[11px] text-black/50">The form changed after this encode started. Restart the slate to burn in the new title.</p> : null}
-        {error ? <pre className="max-h-36 overflow-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[11px] leading-5 whitespace-pre-wrap text-red-700">{error}</pre> : null}
+        {!status.ffmpeg ? <p className="font-mono text-[13px] text-red-600">ffmpeg is not on PATH. The browser preview still runs.</p> : null}
+        {stale ? <p className="font-mono text-[13px] text-black/70">The form changed after this encode started. Restart the slate to burn in the new title.</p> : null}
+        {error ? <pre className="max-h-36 overflow-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[13px] leading-5 whitespace-pre-wrap text-red-700">{error}</pre> : null}
       </div>
     </section>
   )
 }
 
-function pill(tone: "solid" | "outline") {
+function pill(tone: "solid" | "outline" | "danger") {
   const tones = {
     solid: "bg-black text-white hover:-translate-y-px hover:bg-[#222] hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)]",
     outline: "border border-black bg-white text-black hover:-translate-y-px hover:bg-black hover:text-white",
+    danger: "bg-[#ff3c00] text-white hover:-translate-y-px hover:bg-[#e03600] hover:shadow-[0_4px_12px_rgba(255,60,0,0.3)]",
   }
   return `inline-flex h-9 items-center justify-center rounded-full px-5 text-[13px] font-medium whitespace-nowrap transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 ${tones[tone]}`
 }

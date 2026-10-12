@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EndStreamPage } from "@/app/end/page"
-import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
+import { DEFAULT_EVENT, safeUrl, sanitizeSpeakers, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
@@ -74,8 +74,8 @@ function StreamView() {
               blockGap: Number(body.stage.blockGap) || 1.2,
               clockScale: clampSize(body.stage.clockScale, CLOCK_SCALE_RANGE),
               clockText: clampSize(body.stage.clockText, CLOCK_TEXT_RANGE),
-              logoUrl: typeof body.stage.logoUrl === "string" ? body.stage.logoUrl : "",
-              speakers: Array.isArray(body.stage.speakers) ? body.stage.speakers as { image: string; name: string; description: string }[] : [],
+              logoUrl: safeUrl(body.stage.logoUrl, "", { relative: true, dataImage: true }),
+              speakers: sanitizeSpeakers(body.stage.speakers),
               gallerySeconds: Number(body.stage.gallerySeconds) || 4,
               galleryPause: Number(body.stage.galleryPause) || 6,
               galleryOffset: Number.isFinite(Number(body.stage.galleryOffset)) ? Number(body.stage.galleryOffset) : -86,

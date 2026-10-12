@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { DEFAULT_EVENT, asEventConfig, type EventConfig } from "@/lib/event"
+import { safeUrl } from "@/lib/event"
 
 type EndCard = {
   title: string
@@ -36,7 +37,7 @@ export default function EndPage() {
           subtitle: text(stage.endSubtitle, DEFAULT_CARD.subtitle),
           date: text(stage.endDate, DEFAULT_CARD.date),
           body: text(stage.endBody, DEFAULT_CARD.body),
-          qrUrl: text(stage.endQrUrl, DEFAULT_CARD.qrUrl),
+          qrUrl: safeUrl(stage.endQrUrl, DEFAULT_CARD.qrUrl),
           button: text(stage.endButton, DEFAULT_CARD.button),
           socials: socials(event),
         })
@@ -61,7 +62,7 @@ export function EndStreamPage({ card, className }: { card: EndCard; className?: 
       <p className="relative mt-[2cqi] max-w-[46cqi] font-[Arial,Helvetica,sans-serif] text-[1.05cqi] leading-relaxed text-white/60">{card.body}</p>
       <img src="/brand/end-qr.png" alt="" className="relative mt-[2cqi] size-[8cqi] bg-white p-[0.4cqi]" />
       <p className="relative mt-[0.5cqi] font-[Arial,Helvetica,sans-serif] text-[0.75cqi] tracking-[0.14em] uppercase">Scan to stay connected</p>
-      <a href={card.qrUrl} className="relative mt-[1.6cqi] rounded-full bg-[#ff3c00] px-[2cqi] py-[0.8cqi] font-[Arial,Helvetica,sans-serif] text-[1cqi] font-bold tracking-[0.08em] text-white uppercase no-underline">{card.button}</a>
+      <a href={safeUrl(card.qrUrl, "#")} className="relative mt-[1.6cqi] rounded-full bg-[#ff3c00] px-[2cqi] py-[0.8cqi] font-[Arial,Helvetica,sans-serif] text-[1cqi] font-bold tracking-[0.08em] text-white uppercase no-underline">{card.button}</a>
       <div className="relative mt-[1.6cqi] flex gap-[0.7cqi]">
         {card.socials.map((item) => (
           <a key={item.label} href={item.href} target="_blank" rel="noreferrer" aria-label={item.label} className="inline-flex size-[2.99cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline">
