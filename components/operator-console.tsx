@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -75,6 +75,17 @@ export function OperatorConsole() {
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  // Preview-only aids (never sent to /stream), remembered in localStorage.
+  const [trueObs, setTrueObs] = useSectionOpen("aid-true-obs", false)
+  const [safeZone, setSafeZone] = useSectionOpen("aid-safe-zone", false)
+  const [thirds, setThirds] = useSectionOpen("aid-thirds", false)
+  const [footage, setFootage] = useSectionOpen("aid-footage", false)
+  const [pinPreview, setPinPreview] = useSectionOpen("aid-pin-preview", false)
+  const [showHelp, setShowHelp] = useState(false)
+  const pauseRef = useRef<HTMLButtonElement>(null)
+  const goLiveRef = useRef<HTMLButtonElement>(null)
+  const resetRef = useRef<HTMLButtonElement>(null)
   const [hydrated, setHydrated] = useState(false)
   const previewReady = useRef(false)
   const now = useNow()
@@ -346,10 +357,46 @@ export function OperatorConsole() {
     sendSave({ ...savePayload, event: { ...event, ...restored }, testUntil: null, pausedAt: null })
   }
 
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+      if (event.key === "?") {
+        event.preventDefault()
+        setShowHelp((value) => !value)
+        return
+      }
+      if (event.key === "Escape") {
+        setShowHelp(false)
+        return
+      }
+      // Buttons handle Space themselves when focused; only take it when focus is elsewhere.
+      if (event.key === " " && target?.tagName !== "BUTTON" && target?.tagName !== "A") {
+        event.preventDefault()
+        pauseRef.current?.click()
+        return
+      }
+      const confirmTarget = event.key.toLowerCase() === "g" ? goLiveRef.current : event.key.toLowerCase() === "r" ? resetRef.current : null
+      if (confirmTarget) {
+        // Same two-step confirm as clicking: first press arms, second press within 3s runs it.
+        event.preventDefault()
+        confirmTarget.focus()
+        confirmTarget.click()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
     await navigator.clipboard.writeText(value)
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
+    if (kind === "link" || kind === "params") {
+      setToast(value)
+      window.setTimeout(() => setToast((current) => (current === value ? null : current)), 2500)
+    }
   }
 
   return (
@@ -371,6 +418,7 @@ export function OperatorConsole() {
               </span>
             </span>
             <SyncBadge state={syncState} hasToken={Boolean(token)} error={syncError} />
+            <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
             <Button type="button" className={pillClass()} onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
             </Button>
@@ -465,7 +513,7 @@ export function OperatorConsole() {
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Pill onClick={() => {
+              <Pill ref={pauseRef} aria-keyshortcuts="Space" onClick={() => {
                 if (pausedAt) {
                   // Resume from the paused value: shift the test clock by the paused duration.
                   const resumeNow = Date.now()
@@ -483,8 +531,8 @@ export function OperatorConsole() {
               }}>
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
-              <ConfirmButton className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
-              <ConfirmButton className={pillClass("danger")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
+              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
+              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("danger")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
               <ConfirmButton className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
               <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
@@ -495,7 +543,7 @@ export function OperatorConsole() {
             </p>
           </Panel>
 
-          <Panel title="Event core" pill="Editable">
+          <Panel id="event" title="Event" pill="Editable">
             <Field label="Session title" htmlFor="name">
               <GrowingText id="name" value={name} onChange={(value) => updateEvent({ name: value })} />
             </Field>
@@ -524,7 +572,7 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <Panel title="Call to action">
+          <Panel id="cta" title="Links & call to action">
             <Field label="RSVP URL" htmlFor="rsvp">
               <GrowingText id="rsvp" value={rsvpUrl} onChange={(value) => updateEvent({ rsvpUrl: value })} />
             </Field>
@@ -548,7 +596,7 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <Panel title="Stage options">
+          <Panel id="look" title="Look">
             <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={showMeta} onChange={(event) => setShowMeta(event.target.checked)} />
               Show date and timezone
@@ -588,27 +636,22 @@ export function OperatorConsole() {
             </Field>
             <Field label="Checker division" htmlFor="checker">
               <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" className={pillClass("outline", "sm")} onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Button>
+                <Pill tone="outline" size="sm" aria-label="Fewer checker divisions" onClick={() => setChecker((value) => Math.max(4, value - 1))}>−</Pill>
                 <span id="checker" className="min-w-16 text-center font-mono text-sm tabular-nums">{checker}×{checker}</span>
-                <Button type="button" variant="outline" className={pillClass("outline", "sm")} onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Button>
+                <Pill tone="outline" size="sm" aria-label="More checker divisions" onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Pill>
               </div>
             </Field>
           </Panel>
 
-          <details className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-            <summary className="cursor-pointer list-none px-5 py-4 text-[13px] font-black tracking-[0.12em] uppercase">
-              Branding and socials
-            </summary>
-            <div className="space-y-4 border-t border-black/10 p-5">
+          <Panel id="socials" title="Socials" pill={`${[xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl].filter((url) => url.trim()).length}/5 links set`} defaultOpen={false}>
               <Field label="X URL" htmlFor="x"><GrowingText id="x" value={xUrl} onChange={(value) => updateEvent({ xUrl: value })} /></Field>
               <Field label="Facebook URL" htmlFor="fb"><GrowingText id="fb" value={facebookUrl} onChange={(value) => updateEvent({ facebookUrl: value })} /></Field>
               <Field label="LinkedIn URL" htmlFor="li"><GrowingText id="li" value={linkedinUrl} onChange={(value) => updateEvent({ linkedinUrl: value })} /></Field>
               <Field label="Instagram URL" htmlFor="ig"><GrowingText id="ig" value={instagramUrl} onChange={(value) => updateEvent({ instagramUrl: value })} /></Field>
               <Field label="YouTube URL" htmlFor="yt"><GrowingText id="yt" value={youtubeUrl} onChange={(value) => updateEvent({ youtubeUrl: value })} /></Field>
-            </div>
-          </details>
+            </Panel>
 
-          <Panel title="FFmpeg">
+          <Panel id="encoder" title="Encoder (FFmpeg)">
             <div className="flex items-center justify-between gap-3">
               <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? (rtmpReconnecting ? "bg-[#b45309] text-white" : "bg-[#128a3e] text-white") : "bg-black/5 text-black/70"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
@@ -681,14 +724,37 @@ export function OperatorConsole() {
               1920×1080 · official logo · {transparent ? "transparent bg" : "black bg"} · {transparent ? "no chrome" : "hero"}
             </span>
           </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Preview aids (preview only, not sent to OBS)">
+            <span className="font-mono text-[12px] tracking-[0.12em] text-black/70 uppercase">Preview aids</span>
+            <Pill size="sm" tone={pinPreview ? "solid" : "outline"} aria-pressed={pinPreview} onClick={() => setPinPreview(!pinPreview)}>Pin preview</Pill>
+            <Pill size="sm" tone={trueObs ? "solid" : "outline"} aria-pressed={trueObs} onClick={() => setTrueObs(!trueObs)}>True OBS frame</Pill>
+            <Pill size="sm" tone={safeZone ? "solid" : "outline"} aria-pressed={safeZone} onClick={() => setSafeZone(!safeZone)}>Safe zone</Pill>
+            <Pill size="sm" tone={thirds ? "solid" : "outline"} aria-pressed={thirds} onClick={() => setThirds(!thirds)}>3×3 grid</Pill>
+            <Pill size="sm" tone={footage ? "solid" : "outline"} aria-pressed={footage} disabled={!transparent} title={transparent ? undefined : "Turn on transparent background to preview over footage"} onClick={() => setFootage(!footage)}>Game footage bg</Pill>
+          </div>
+          <div data-testid="preview-pin" className={pinPreview ? "lg:sticky lg:top-0 lg:z-10 lg:-mx-1 lg:border-b lg:border-black/15 lg:bg-[#F6F6F3] lg:px-1 lg:pt-1 lg:pb-3 lg:shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)]" : ""}>
           <div
-            className={`relative overflow-hidden rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}
+            data-testid="preview-frame"
+            className={`relative mx-auto overflow-hidden ${pinPreview ? "lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
             style={
-              transparent
+              transparent && footage
+                ? { background: "#111" }
+                : transparent
                 ? { backgroundImage: "linear-gradient(45deg,#d9d9d4 25%,transparent 25%),linear-gradient(-45deg,#d9d9d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d9d9d4 75%),linear-gradient(-45deg,transparent 75%,#d9d9d4 75%)", backgroundSize: "24px 24px", backgroundPosition: "0 0,0 12px,12px -12px,-12px 0" }
                 : { background: "#000" }
             }
           >
+            {transparent && footage ? (
+              <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center blur-md brightness-75" style={{ backgroundImage: "url(/brand/hero-bg.png)" }} />
+            ) : null}
+            {safeZone ? (
+              <div aria-hidden data-testid="safe-zone" className="pointer-events-none absolute inset-[5%] z-20 border-2 border-dashed border-[#D9FF43]/80" />
+            ) : null}
+            {thirds ? (
+              <div aria-hidden data-testid="thirds" className="pointer-events-none absolute inset-0 z-20 grid grid-cols-3 grid-rows-3">
+                {Array.from({ length: 9 }, (_, index) => <div key={index} className="border border-white/35" />)}
+              </div>
+            ) : null}
             {previewFlash ? (
               <span className="absolute top-3 left-3 z-30 rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
                 Preview updated
@@ -713,6 +779,7 @@ export function OperatorConsole() {
             ) : (
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
+          </div>
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
             <p className="font-mono text-[13px] leading-5 break-all">
@@ -740,7 +807,7 @@ export function OperatorConsole() {
             {transparent ? " Transparent background is on: in OBS leave the browser source CSS empty so the page can show through." : ""}
           </p>
           <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
-          <Panel title="End card">
+          <Panel id="end-card" title="End card">
             <p className="font-mono text-[13px] leading-5 text-black/70">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
             <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
             <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
@@ -755,7 +822,7 @@ export function OperatorConsole() {
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
-          <Panel title="Speaker gallery">
+          <Panel id="speakers" title="Speakers">
             <p className="font-mono text-[13px] leading-5 text-black/70">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
             <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
               <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
@@ -787,6 +854,30 @@ export function OperatorConsole() {
           </Panel>
         </section>
       </main>
+      {toast ? (
+        <div role="status" aria-live="polite" className="fixed right-4 bottom-4 z-50 flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
+          <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-[#D9FF43]" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d="m5 12 5 5 9-11" /></svg>
+          <span className="min-w-0">
+            <span className="block text-[13px] font-bold">Copied to clipboard</span>
+            <span className="block truncate font-mono text-[12px] text-white/75">{toast}</span>
+          </span>
+        </div>
+      ) : null}
+      {showHelp ? (
+        <div role="dialog" aria-modal="false" aria-label="Keyboard shortcuts" className="fixed left-4 bottom-4 z-50 w-72 rounded-2xl border border-black/10 bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.2)]">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">Shortcuts</h2>
+            <button type="button" className="font-mono text-[12px] text-black/70" onClick={() => setShowHelp(false)}>Esc</button>
+          </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 font-mono text-[13px]">
+            <dt><kbd>Space</kbd></dt><dd>Pause / play preview clock</dd>
+            <dt><kbd>G</kbd> <kbd>G</kbd></dt><dd>Go live now (press twice)</dd>
+            <dt><kbd>R</kbd> <kbd>R</kbd></dt><dd>Reset clock (press twice)</dd>
+            <dt><kbd>?</kbd></dt><dd>Toggle this help</dd>
+          </dl>
+          <p className="mt-2 font-mono text-[12px] text-black/70">Ignored while typing in a field.</p>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -810,18 +901,84 @@ function Pill({
   size = "md",
   className = "",
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "solid" | "outline" | "danger"; size?: "sm" | "md" }) {
+}: React.ComponentProps<"button"> & { tone?: "solid" | "outline" | "danger"; size?: "sm" | "md" }) {
   return <button type="button" className={`${pillClass(tone, size)} ${className}`} {...props} />
 }
 
-function Panel({ title, pill, children }: { title: string; pill?: string; children: ReactNode }) {
+const SECTIONS_KEY = "hyphen-countdown-sections"
+const sectionListeners = new Set<() => void>()
+
+function readSections(): string {
+  try {
+    return window.localStorage.getItem(SECTIONS_KEY) ?? "{}"
+  } catch {
+    return "{}"
+  }
+}
+
+function subscribeSections(listener: () => void) {
+  sectionListeners.add(listener)
+  return () => sectionListeners.delete(listener)
+}
+
+function setSectionOpen(id: string, open: boolean) {
+  let current: Record<string, boolean> = {}
+  try {
+    current = JSON.parse(readSections()) as Record<string, boolean>
+  } catch {
+    /* start fresh */
+  }
+  window.localStorage.setItem(SECTIONS_KEY, JSON.stringify({ ...current, [id]: open }))
+  sectionListeners.forEach((listener) => listener())
+}
+
+/** Open/closed state per section, remembered in localStorage. */
+function useSectionOpen(id: string | undefined, defaultOpen: boolean): [boolean, (open: boolean) => void] {
+  const raw = useSyncExternalStore(subscribeSections, readSections, () => "{}")
+  let open = defaultOpen
+  if (id) {
+    try {
+      const value = (JSON.parse(raw) as Record<string, unknown>)[id]
+      if (typeof value === "boolean") open = value
+    } catch {
+      /* keep default */
+    }
+  }
+  return [id ? open : true, (next) => { if (id) setSectionOpen(id, next) }]
+}
+
+function Panel({ id, title, pill, defaultOpen = true, children }: { id?: string; title: string; pill?: string; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useSectionOpen(id, defaultOpen)
+  const bodyId = id ? `section-${id}` : undefined
+  const heading = (
+    <>
+      <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
+      <span className="flex items-center gap-2">
+        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
+        {id ? (
+          <svg viewBox="0 0 24 24" className={`size-4 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        ) : null}
+      </span>
+    </>
+  )
   return (
     <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-      <div className="flex items-center justify-between border-b border-black/10 px-5 py-4">
-        <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
-        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
-      </div>
-      <div className="space-y-4 p-5">{children}</div>
+      {id ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen(!open)}
+          className={`flex w-full items-center justify-between px-5 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-inset ${open ? "border-b border-black/10" : ""}`}
+        >
+          {heading}
+        </button>
+      ) : (
+        <div className="flex items-center justify-between border-b border-black/10 px-5 py-4">{heading}</div>
+      )}
+      <div id={bodyId} hidden={!open} className="space-y-4 p-5">{children}</div>
     </section>
   )
 }
@@ -842,7 +999,7 @@ function GrowingText({ id, value, onChange }: { id: string; value: string; onCha
         node.style.height = "auto"
         node.style.height = `${node.scrollHeight}px`
       }}
-      className="w-full resize-none overflow-hidden rounded-xl border border-black/10 bg-[#F6F6F3] px-3 py-2 text-sm leading-5 break-all"
+      className="max-h-32 w-full resize-none overflow-y-auto rounded-xl border border-black/10 bg-[#F6F6F3] px-3 py-2 text-sm leading-5 break-all"
     />
   )
 }

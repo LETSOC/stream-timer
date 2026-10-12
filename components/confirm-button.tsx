@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ButtonHTMLAttributes } from "react"
+import { useEffect, useState, type ComponentProps } from "react"
 
 /** Two-step button: first click arms it ("Confirm?"), second click within 3s runs the action. */
 export function ConfirmButton({
@@ -9,7 +9,7 @@ export function ConfirmButton({
   children,
   className = "",
   ...props
-}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & { onConfirm: () => void; confirmLabel?: string }) {
+}: Omit<ComponentProps<"button">, "onClick"> & { onConfirm: () => void; confirmLabel?: string }) {
   const [armed, setArmed] = useState(false)
 
   useEffect(() => {
