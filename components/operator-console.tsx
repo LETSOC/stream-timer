@@ -28,6 +28,7 @@ import { TIME_ZONES, DEFAULT_EVENT } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { useEncoderToken } from "@/lib/use-encoder-token"
 import type { StageOptions } from "@/lib/event-server"
+import { ConfirmButton } from "@/components/confirm-button"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
@@ -336,22 +337,20 @@ export function OperatorConsole() {
       <header className="sticky top-0 z-20 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="font-mono text-[10px] tracking-[0.16em] text-black/50 uppercase">
+            <p className="font-mono text-[12px] tracking-[0.16em] text-black/70 uppercase">
               Hyphen Festival 2026
             </p>
             <h1 className="text-xl font-black tracking-tight uppercase">Countdown desk</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[11px] md:inline-flex">
-              <span className="text-black/50">Target</span>
+            <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[13px] md:inline-flex">
+              <span className="text-black/70">Target</span>
               <span>{valid ? formatClock(target, timeZone) : "—"}</span>
-              <span className={`rounded px-1.5 py-0.5 text-[10px] ${previewRemaining?.done ? "bg-[#ff3c00] text-white" : "bg-[#D9FF43]"}`}>
+              <span className={`rounded px-1.5 py-0.5 text-[12px] ${previewRemaining?.done ? "bg-[#ff3c00] text-white" : "bg-[#D9FF43]"}`}>
                 {previewRemaining?.done ? "LIVE" : "Armed"}
               </span>
             </span>
-            <span className="font-mono text-[10px] text-black/50 uppercase">
-              Desk {syncState}
-            </span>
+            <SyncBadge state={syncState} hasToken={Boolean(token)} />
             <Button type="button" className={pillClass()} onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
             </Button>
@@ -367,16 +366,16 @@ export function OperatorConsole() {
           <div className="rounded-[20px] bg-black p-5 text-white">
             {previewRemaining?.done ? (
               <div>
-                <p className="font-mono text-[11px] tracking-[0.14em] text-[#ff3c00] uppercase">Live</p>
+                <p className="font-mono text-[13px] tracking-[0.14em] text-[#ff3c00] uppercase">Live</p>
                 <p className="mt-2 text-2xl font-black">Doors are open</p>
               </div>
             ) : (
               <>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-mono text-[11px] tracking-[0.14em] text-white/60 uppercase">
+              <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 uppercase">
                 Live countdown · {timeZone}
               </h2>
-              <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase">
+              <span className="inline-flex items-center gap-1.5 font-mono text-[12px] uppercase">
                 <span className="size-2 rounded-full bg-[#D9FF43]" />
                 Ticking
               </span>
@@ -390,7 +389,7 @@ export function OperatorConsole() {
               ].map((unit) => (
                 <div key={unit.label} className="rounded-[14px] border border-white/10 bg-white/10 px-2 py-3 text-center">
                   <div className="font-mono text-[28px] leading-none font-black tabular-nums">{unit.value}</div>
-                  <div className="mt-1 font-mono text-[10px] tracking-[0.12em] text-white/50 uppercase">{unit.label}</div>
+                  <div className="mt-1 font-mono text-[12px] tracking-[0.12em] text-white/75 uppercase">{unit.label}</div>
                 </div>
               ))}
             </div>
@@ -401,14 +400,14 @@ export function OperatorConsole() {
           <div className="rounded-[20px] bg-black p-5 text-white">
             {forceEnd || (!holdCountdown && endRemaining?.done) ? (
               <div>
-                <p className="font-mono text-[11px] tracking-[0.14em] text-[#ff3c00] uppercase">End card</p>
+                <p className="font-mono text-[13px] tracking-[0.14em] text-[#ff3c00] uppercase">End card</p>
                 <p className="mt-2 text-2xl font-black">End card is on</p>
               </div>
             ) : (
               <>
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="font-mono text-[11px] tracking-[0.14em] text-white/60 uppercase">End card in</h2>
-                  <span className="font-mono text-[10px] text-white/50 uppercase">{endAt}</span>
+                  <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 uppercase">End card in</h2>
+                  <span className="font-mono text-[12px] text-white/75 uppercase">{endAt}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   {[
@@ -419,7 +418,7 @@ export function OperatorConsole() {
                   ].map((unit) => (
                     <div key={unit.label} className="rounded-[14px] border border-white/10 bg-white/10 px-2 py-3 text-center">
                       <div className="font-mono text-[28px] leading-none font-black tabular-nums">{unit.value}</div>
-                      <div className="mt-1 font-mono text-[10px] tracking-[0.12em] text-white/50 uppercase">{unit.label}</div>
+                      <div className="mt-1 font-mono text-[12px] tracking-[0.12em] text-white/75 uppercase">{unit.label}</div>
                     </div>
                   ))}
                 </div>
@@ -457,14 +456,14 @@ export function OperatorConsole() {
               }}>
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
-              <Pill tone="outline" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</Pill>
-              <Pill tone="danger" onClick={goLiveNow}>Go live now</Pill>
-              <Pill tone="outline" onClick={restoreFestival}>Restore 4 Nov</Pill>
+              <ConfirmButton className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
+              <ConfirmButton className={pillClass("danger")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
+              <ConfirmButton className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
               <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
               <Pill className="whitespace-nowrap" tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
             </div>
-            <p className="font-mono text-[10px] leading-5 text-black/55">
+            <p className="font-mono text-[12px] leading-5 text-black/70">
               Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
             </p>
           </Panel>
@@ -523,29 +522,29 @@ export function OperatorConsole() {
           </Panel>
 
           <Panel title="Stage options">
-            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+            <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={showMeta} onChange={(event) => setShowMeta(event.target.checked)} />
               Show date and timezone
             </label>
-            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+            <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={showLink} onChange={(event) => setShowLink(event.target.checked)} />
               Show event link
             </label>
-            <label className="flex items-center gap-2 font-mono text-[11px] tracking-[0.08em] text-black/70 uppercase">
+            <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={transparent} onChange={(event) => setTransparent(event.target.checked)} />
               Transparent background
             </label>
             <Field label="Title line spacing" htmlFor="spacing">
               <input id="spacing" type="range" min="0.8" max="2.2" step="0.05" value={lineSpacing} onChange={(event) => setLineSpacing(Number(event.target.value))} className="w-full accent-black" />
-              <span className="font-mono text-[11px] text-black/50">{lineSpacing.toFixed(2)}</span>
+              <span className="font-mono text-[13px] text-black/70">{lineSpacing.toFixed(2)}</span>
             </Field>
             <Field label="Gap below address" htmlFor="blockGap">
               <input id="blockGap" type="range" min="0" max="8" step="0.1" value={blockGap} onChange={(event) => setBlockGap(Number(event.target.value))} className="w-full accent-black" />
-              <span className="font-mono text-[11px] text-black/50">{blockGap.toFixed(1)}</span>
+              <span className="font-mono text-[13px] text-black/70">{blockGap.toFixed(1)}</span>
             </Field>
             <Field label="Countdown size (boxes and text)" htmlFor="clockScale">
               <input id="clockScale" type="range" min={CLOCK_SCALE_RANGE.min} max={CLOCK_SCALE_RANGE.max} step="0.05" value={clockScale} onChange={(event) => setClockScale(Number(event.target.value))} className="w-full accent-black" />
-              <span className="font-mono text-[11px] text-black/50">
+              <span className="font-mono text-[13px] text-black/70">
                 {clockScale.toFixed(2)}×
                 {fitClockScale(clockScale, clockText) < clockScale - 0.005
                   ? ` · shown at ${fitClockScale(clockScale, clockText).toFixed(2)}× so it fits beside the logo`
@@ -554,11 +553,11 @@ export function OperatorConsole() {
             </Field>
             <Field label="Text size inside boxes" htmlFor="clockText">
               <input id="clockText" type="range" min={CLOCK_TEXT_RANGE.min} max={CLOCK_TEXT_RANGE.max} step="0.05" value={clockText} onChange={(event) => setClockText(Number(event.target.value))} className="w-full accent-black" />
-              <span className="font-mono text-[11px] text-black/50">{clockText.toFixed(2)}× of the countdown size</span>
+              <span className="font-mono text-[13px] text-black/70">{clockText.toFixed(2)}× of the countdown size</span>
             </Field>
             <Field label="Logo source" htmlFor="logo">
               <GrowingText id="logo" value={logoUrl} onChange={setLogoUrl} />
-              <p className="font-mono text-[10px] text-black/45">Leave blank for the Hyphen PNG. Paste an image URL to replace it.</p>
+              <p className="font-mono text-[12px] text-black/70">Leave blank for the Hyphen PNG. Paste an image URL to replace it.</p>
             </Field>
             <Field label="Checker division" htmlFor="checker">
               <div className="flex items-center gap-2">
@@ -584,7 +583,7 @@ export function OperatorConsole() {
 
           <Panel title="FFmpeg">
             <div className="flex items-center justify-between gap-3">
-              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[10px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? (rtmpReconnecting ? "bg-[#b45309] text-white" : "bg-[#128a3e] text-white") : "bg-black/5 text-black/45"}`}>
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? (rtmpReconnecting ? "bg-[#b45309] text-white" : "bg-[#128a3e] text-white") : "bg-black/5 text-black/70"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
                 {rtmpLive ? (rtmpReconnecting ? "Reconnecting" : "Stream live") : "Stream off"}
                 {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
@@ -621,7 +620,7 @@ export function OperatorConsole() {
               >
                 Start stream
               </Pill>
-              <Pill tone="outline" onClick={() => {
+              <ConfirmButton className={pillClass("danger")} onConfirm={() => {
                   void fetch("/api/encoder?target=rtmp", { method: "DELETE", headers: { "x-encoder-token": token } }).then(() => {
                     setRtmpState("idle")
                     setRtmpLive(false)
@@ -630,10 +629,10 @@ export function OperatorConsole() {
                 }}
               >
                 Stop stream
-              </Pill>
+              </ConfirmButton>
             </div>
-            {strayPids.length > 0 ? <p className="font-mono text-[11px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
-            <p className="font-mono text-[11px] leading-5 text-black/60">
+            {strayPids.length > 0 ? <p className="font-mono text-[13px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
+            <p className="font-mono text-[13px] leading-5 text-black/70">
               Start stream sends 1280×720, 30 fps, H.264 2500 kbps, yuv420p, AAC stereo 128 kbps, silent audio, FLV over RTMP. The local player is the same picture as 2-second HLS segments.
             </p>
             <CommandBlock value={streamCommand} copied={copied === "stream"} onCopy={() => copy("stream", streamCommand)} />
@@ -647,11 +646,11 @@ export function OperatorConsole() {
               <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">
                 Preview · 16:9 hero · {transparent ? "clear edition" : "black edition"}
               </h2>
-              <span className="rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.12em] text-white uppercase">
+              <span className="rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
                 Live update
               </span>
             </div>
-            <span className="rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[10px] text-black/50">
+            <span className="rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[12px] text-black/70">
               1920×1080 · official logo · {transparent ? "transparent bg" : "black bg"} · {transparent ? "no chrome" : "hero"}
             </span>
           </div>
@@ -664,7 +663,7 @@ export function OperatorConsole() {
             }
           >
             {previewFlash ? (
-              <span className="absolute top-3 left-3 z-30 rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.12em] text-white uppercase">
+              <span className="absolute top-3 left-3 z-30 rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
                 Preview updated
               </span>
             ) : null}
@@ -689,8 +688,8 @@ export function OperatorConsole() {
             )}
           </div>
           <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
-            <p className="font-mono text-[11px] leading-5 break-all">
-              <span className="text-black/50">Stream params preview: </span>
+            <p className="font-mono text-[13px] leading-5 break-all">
+              <span className="text-black/70">Stream params preview: </span>
               {streamHref}
             </p>
             <Button
@@ -709,13 +708,13 @@ export function OperatorConsole() {
               {copied === "params" ? "Copied" : "Copy full param URL"}
             </Button>
           </div>
-          <p className="font-mono text-[11px] leading-5 text-black/55">
+          <p className="font-mono text-[13px] leading-5 text-black/70">
             — This is a local draft preview. No data leaves the browser. For OBS, add a Browser Source at 1920×1080 and paste the copied link. Countdown runs off this computer’s clock.
             {transparent ? " Transparent background is on: in OBS leave the browser source CSS empty so the page can show through." : ""}
           </p>
           <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
           <Panel title="End card">
-            <p className="font-mono text-[11px] leading-5 text-black/55">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
+            <p className="font-mono text-[13px] leading-5 text-black/70">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
             <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
             <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
@@ -730,7 +729,7 @@ export function OperatorConsole() {
             </div>
           </Panel>
           <Panel title="Speaker gallery">
-            <p className="font-mono text-[11px] leading-5 text-black/55">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
+            <p className="font-mono text-[13px] leading-5 text-black/70">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
             <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
               <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
             </Field>
@@ -773,7 +772,7 @@ function pillClass(tone: "solid" | "outline" | "danger" = "solid", size: "sm" | 
     danger: "bg-[#ff3c00] text-white hover:-translate-y-px hover:bg-[#e03600] hover:shadow-[0_4px_12px_rgba(255,60,0,0.3)]",
   }
   const sizes = {
-    sm: "h-8 px-3.5 font-mono text-[11px] tracking-wide",
+    sm: "h-8 px-3.5 font-mono text-[13px] tracking-wide",
     md: "h-9 px-5 text-[13px]",
   }
   return `inline-flex items-center justify-center rounded-full font-medium transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 ${tones[tone]} ${sizes[size]}`
@@ -793,7 +792,7 @@ function Panel({ title, pill, children }: { title: string; pill?: string; childr
     <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
       <div className="flex items-center justify-between border-b border-black/10 px-5 py-4">
         <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
-        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[10px] text-white">{pill}</span> : null}
+        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
       </div>
       <div className="space-y-4 p-5">{children}</div>
     </section>
@@ -832,7 +831,7 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={htmlFor} className="font-mono text-[10px] tracking-[0.14em] text-black/60 uppercase">{label}</Label>
+      <Label htmlFor={htmlFor} className="font-mono text-[12px] tracking-[0.14em] text-black/70 uppercase">{label}</Label>
       {children}
     </div>
   )
@@ -849,12 +848,28 @@ function CommandBlock({
 }) {
   return (
     <div className="space-y-2">
-      <pre className="overflow-x-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[11px] leading-5 text-black/80 whitespace-pre-wrap">
+      <pre className="overflow-x-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[13px] leading-5 text-black/80 whitespace-pre-wrap">
         {value}
       </pre>
       <Button variant="secondary" onClick={onCopy} className={`${pillClass("outline")} w-full`}>
         {copied ? "Copied" : "Copy command"}
       </Button>
     </div>
+  )
+}
+
+function SyncBadge({ state, hasToken }: { state: "idle" | "saved" | "local" | "error"; hasToken: boolean }) {
+  const view = !hasToken
+    ? { label: "Out of sync · no encoder token", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+    : state === "saved"
+      ? { label: "Saved · /stream in sync", tone: "border-[#128a3e]/30 bg-[#128a3e]/10 text-[#0b5e2a]", dot: "bg-[#128a3e]" }
+      : state === "idle"
+        ? { label: "Syncing…", tone: "border-black/15 bg-black/5 text-black/75", dot: "bg-black/40" }
+        : { label: "Local only · /stream not updated", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+  return (
+    <span role="status" aria-live="polite" className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[12px] font-bold tracking-[0.08em] uppercase ${view.tone}`}>
+      <span className={`size-2 rounded-full ${view.dot}`} aria-hidden />
+      {view.label}
+    </span>
   )
 }
