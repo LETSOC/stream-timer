@@ -9,6 +9,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Runtime output (HLS .ts segments are video, not TypeScript).
+    "data/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

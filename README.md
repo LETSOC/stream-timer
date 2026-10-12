@@ -94,3 +94,17 @@ npm run stream:test
 ```
 
 `stream:test` encodes a short local MP4 with the same filtergraph the live command uses.
+
+## Start automatically (macOS)
+
+`deploy/com.letsoc.stream-timer.plist` is a LaunchAgent that runs `npm run start` at login and restarts it if it exits. Edit the paths at the top of the file, run `npm run build`, then:
+
+```bash
+cp deploy/com.letsoc.stream-timer.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.letsoc.stream-timer.plist
+# stop: launchctl bootout gui/$(id -u)/com.letsoc.stream-timer
+```
+
+It brings the desk back after a reboot, not the RTMP stream: press Start stream again. On Linux use `deploy/stream-timer.service` (systemd) instead.
+
+Encoder hardening: requests that arrive through a proxy or tunnel, or with a non-local `Host`/`Origin`, are never treated as local. Set `RTMP_ALLOWED_HOSTS=castr.io` to refuse any other ingest host. `data/rtmp.log` is owner-only (it holds the raw ingest URL) and is trimmed past 5 MB.
