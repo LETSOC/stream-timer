@@ -280,6 +280,8 @@ export function OperatorConsole() {
 
   const previewNow = pausedAt ?? (now ? new Date(now.getTime() + skewMs) : null)
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
+  const endTarget = wallTimeInZone(date, endAt || endTime, timeZone)
+  const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
 
   async function jumpPreview(seconds: number) {
     if (!valid) return
@@ -389,6 +391,35 @@ export function OperatorConsole() {
                 </div>
               ))}
             </div>
+              </>
+            )}
+          </div>
+
+          <div className="rounded-[20px] bg-black p-5 text-white">
+            {forceEnd || endRemaining?.done ? (
+              <div>
+                <p className="font-mono text-[11px] tracking-[0.14em] text-[#ff3c00] uppercase">End card</p>
+                <p className="mt-2 text-2xl font-black">End card is on</p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="font-mono text-[11px] tracking-[0.14em] text-white/60 uppercase">End card in</h2>
+                  <span className="font-mono text-[10px] text-white/50 uppercase">{endAt}</span>
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { value: endRemaining ? String(endRemaining.days) : "--", label: "Days" },
+                    { value: endRemaining ? pad2(endRemaining.hours) : "--", label: "Hours" },
+                    { value: endRemaining ? pad2(endRemaining.minutes) : "--", label: "Mins" },
+                    { value: endRemaining ? pad2(endRemaining.seconds) : "--", label: "Secs" },
+                  ].map((unit) => (
+                    <div key={unit.label} className="rounded-[14px] border border-white/10 bg-white/10 px-2 py-3 text-center">
+                      <div className="font-mono text-[28px] leading-none font-black tabular-nums">{unit.value}</div>
+                      <div className="mt-1 font-mono text-[10px] tracking-[0.12em] text-white/50 uppercase">{unit.label}</div>
+                    </div>
+                  ))}
+                </div>
               </>
             )}
           </div>
