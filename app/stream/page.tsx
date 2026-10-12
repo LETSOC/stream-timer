@@ -50,7 +50,7 @@ function StreamView() {
   const [serverEvent, setServerEvent] = useState<EventConfig>(DEFAULT_EVENT)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
-  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, clockText: 1, logoUrl: "", speakers: [] as { image: string; name: string; description: string }[], gallerySeconds: 4, galleryPause: 6, galleryOffset: -86, galleryScale: 80, endTitle: "Thank you for joining", endSubtitle: "Hyphen Festival 2026", endDate: "Wed, 04 Nov, 2026", endBody: "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.", endQrUrl: "https://linktr.ee/onlinehyphen", endButton: "Watch replay — coming soon", endAt: "16:15", forceEnd: false })
+  const [stage, setStage] = useState({ checker: 6, showMeta: true, showLink: true, transparent: false, lineSpacing: 1.14, blockGap: 1.2, clockScale: 1, clockText: 1, logoUrl: "", speakers: [] as { image: string; name: string; description: string }[], gallerySeconds: 4, galleryPause: 6, galleryOffset: -86, galleryScale: 80, endTitle: "Thank you for joining", endSubtitle: "Hyphen Festival 2026", endDate: "Wed, 04 Nov, 2026", endBody: "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.", endQrUrl: "https://linktr.ee/onlinehyphen", endButton: "Watch replay — coming soon", endAt: "16:15", forceEnd: false, holdCountdown: false })
 
   useEffect(() => {
     let cancelled = false
@@ -87,6 +87,7 @@ function StreamView() {
               endButton: typeof body.stage.endButton === "string" ? body.stage.endButton : "Watch replay — coming soon",
               endAt: typeof body.stage.endAt === "string" ? body.stage.endAt : "16:15",
               forceEnd: body.stage.forceEnd === true,
+              holdCountdown: body.stage.holdCountdown === true,
             })
           }
         })
@@ -130,7 +131,7 @@ function StreamView() {
   }, [transparent])
 
   const clock = testClock ?? now
-  const ended = stage.forceEnd || Boolean(clock && wallTimeInZone(event.date, stage.endAt || event.endTime, event.timeZone).getTime() <= clock.getTime())
+  const ended = stage.forceEnd || (!stage.holdCountdown && Boolean(clock && wallTimeInZone(event.date, stage.endAt || event.endTime, event.timeZone).getTime() <= clock.getTime()))
 
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>

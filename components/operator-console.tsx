@@ -65,6 +65,7 @@ export function OperatorConsole() {
   const [endButton, setEndButton] = useState("Watch replay — coming soon")
   const [endAt, setEndAt] = useState("16:15")
   const [forceEnd, setForceEnd] = useState(false)
+  const [holdCountdown, setHoldCountdown] = useState(false)
   const token = useEncoderToken()
   const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
@@ -129,7 +130,7 @@ export function OperatorConsole() {
   })
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
-  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${endTitle}:${endSubtitle}:${endDate}:${endBody}:${endQrUrl}:${endButton}:${endAt}:${forceEnd}:${JSON.stringify(speakers)}`
+  const syncKey = `${pausedMs}:${checker}:${showMeta}:${showLink}:${transparent}:${lineSpacing}:${blockGap}:${clockScale}:${clockText}:${logoUrl}:${gallerySeconds}:${galleryPause}:${galleryOffset}:${galleryScale}:${endTitle}:${endSubtitle}:${endDate}:${endBody}:${endQrUrl}:${endButton}:${endAt}:${forceEnd}:${holdCountdown}:${JSON.stringify(speakers)}`
 
   useEffect(() => {
     let cancelled = false
@@ -180,6 +181,7 @@ export function OperatorConsole() {
         if (typeof stage.endButton === "string") setEndButton(stage.endButton)
         if (typeof stage.endAt === "string") setEndAt(stage.endAt)
         if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
+        if (typeof stage.holdCountdown === "boolean") setHoldCountdown(stage.holdCountdown)
       } catch {
         /* ignore a bad local draft */
       }
@@ -217,8 +219,8 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown }))
+  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -241,7 +243,7 @@ export function OperatorConsole() {
           event,
           testUntil,
           pausedAt: pausedMs || null,
-          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd },
+          stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown },
         }),
       })
         .then(async (response) => {
@@ -396,7 +398,7 @@ export function OperatorConsole() {
           </div>
 
           <div className="rounded-[20px] bg-black p-5 text-white">
-            {forceEnd || endRemaining?.done ? (
+            {forceEnd || (!holdCountdown && endRemaining?.done) ? (
               <div>
                 <p className="font-mono text-[11px] tracking-[0.14em] text-[#ff3c00] uppercase">End card</p>
                 <p className="mt-2 text-2xl font-black">End card is on</p>
@@ -671,7 +673,7 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            {forceEnd || (previewNow ? wallTimeInZone(date, endAt || endTime, timeZone).getTime() <= previewNow.getTime() : false) ? (
+            {forceEnd || (!holdCountdown && previewNow ? wallTimeInZone(date, endAt || endTime, timeZone).getTime() <= previewNow.getTime() : false) ? (
               <EndStreamPage card={{
                 title: endTitle,
                 subtitle: endSubtitle,
@@ -724,11 +726,11 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="Show end card at" htmlFor="end-at"><Input id="end-at" type="time" value={endAt} onChange={(event) => setEndAt(event.target.value)} /></Field>
+            <Field label="Show end card at" htmlFor="end-at"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} /></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95" onClick={() => setForceEnd(true)}>Show end card now</button>
-              <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm text-black transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95" onClick={() => setForceEnd(false)}>Back to countdown</button>
+              <button type="button" className="rounded-full bg-black px-4 py-2 text-sm text-white transition duration-200 hover:scale-[1.04] hover:bg-[#222] active:scale-95" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</button>
+              <button type="button" className="rounded-full border border-black bg-white px-4 py-2 text-sm text-black transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</button>
               <a href="/end" target="_blank" rel="noreferrer" className="inline-flex rounded-full border border-black bg-white px-4 py-2 text-sm text-black no-underline transition duration-200 hover:scale-[1.04] hover:bg-black hover:text-white active:scale-95">Open end card</a>
             </div>
           </Panel>

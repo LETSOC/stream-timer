@@ -35,6 +35,7 @@ export type StageOptions = {
   endButton: string
   endAt: string
   forceEnd: boolean
+  holdCountdown: boolean
 }
 
 const DEFAULT_STAGE: StageOptions = {
@@ -60,6 +61,7 @@ const DEFAULT_STAGE: StageOptions = {
   endButton: "Watch replay — coming soon",
   endAt: "16:15",
   forceEnd: false,
+  holdCountdown: false,
 }
 
 function readStage(value: unknown): StageOptions {
@@ -89,6 +91,7 @@ function readStage(value: unknown): StageOptions {
     endButton: textOr(record.endButton, "Watch replay — coming soon"),
     endAt: textOr(record.endAt, "16:15"),
     forceEnd: record.forceEnd === true,
+    holdCountdown: record.holdCountdown === true,
   }
 }
 
