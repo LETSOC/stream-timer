@@ -59,11 +59,16 @@ export function OperatorConsole() {
   useEffect(() => {
     const el = headerRef.current
     if (!el) return
-    const update = () => document.documentElement.style.setProperty("--desk-header-h", `${el.offsetHeight}px`)
+    const update = () => {
+      document.documentElement.style.setProperty("--desk-header-h", `${el.offsetHeight}px`)
+      // Sticky header (lg+): keep anchors / scrollIntoView targets below it instead of under it.
+      document.documentElement.style.scrollPaddingTop = getComputedStyle(el).position === "sticky" ? `${el.offsetHeight + 12}px` : ""
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
-    return () => observer.disconnect()
+    window.addEventListener("resize", update)
+    return () => { observer.disconnect(); window.removeEventListener("resize", update); document.documentElement.style.scrollPaddingTop = "" }
   }, [])
   const [strayPids, setStrayPids] = useState<number[]>([])
   const [rtmpChannels, setRtmpChannels] = useState<Record<RtmpChannelId, RtmpChannelView>>({ slate: STOPPED_CHANNEL, capture: STOPPED_CHANNEL })
@@ -1848,7 +1853,7 @@ type RelayForwardView = { destId: string; name: string; host: string; state: "bl
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type RelayView = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
-const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Off (forwards stopped)", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
+const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
@@ -1916,15 +1921,18 @@ function RelayCard({ dests }: { dests: Dest[] }) {
                 const fwd = enabled.get(dest.id)
                 const on = Boolean(fwd)
                 return (
-                  <li key={dest.id} className="flex flex-wrap items-center gap-2 font-mono text-[12px]">
-                    <label className="flex min-w-0 flex-1 items-center gap-2">
-                      <input type="checkbox" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked })} />
-                      <span className="truncate">{dest.name} · {dest.host}</span>
+                  <li key={dest.id} className="space-y-1 font-mono text-[12px]">
+                    {/* Always stacked: name on its own line (wraps), status + stats below, so a narrow column never truncates names. */}
+                    <label className="flex min-w-0 items-start gap-2">
+                      <input type="checkbox" className="mt-0.5 shrink-0" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked })} />
+                      <span data-testid={`relay-fwd-name-${name}-${dest.name}`} className="min-w-0 break-words [overflow-wrap:anywhere]"><span className="font-bold">{dest.name}</span> <span className="text-black/60">· {dest.host}</span></span>
                     </label>
+                    {fwd ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6">
                     {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}</span> : null}
                     {fwd && fwd.reconnects > 0 ? <span data-testid={`relay-fwd-reconnects-${name}-${dest.name}`} title={`A working connection to ${dest.name} dropped and was re-made ${fwd.reconnects}×. Total relaunches incl. quick retries: ${fwd.restarts}.`} className="font-mono text-[11px] text-[#8a4b06]">{fwd.reconnects} {fwd.reconnects === 1 ? "reconnect" : "reconnects"}</span> : fwd && fwd.restarts > 0 && fwd.state !== "forwarding" ? <span title="Quick retries: the forward could not connect (or the source was not publishing) and was started again." className="font-mono text-[11px] text-black/60">{fwd.restarts} {fwd.restarts === 1 ? "retry" : "retries"}</span> : null}
                     {fwd && fwd.state === "forwarding" ? <HealthChip testid={`relay-fwd-health-${name}-${dest.name}`} health={fwd.health} /> : null}
                     {fwd?.error && fwd.state !== "waiting" ? <span className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
+                    </div> : null}
                   </li>
                 )
               })}
@@ -1952,8 +1960,8 @@ function HealthChip({ health, testid }: { health: HealthStats; testid?: string }
   const parts = [health.fps !== null ? `${health.fps.toFixed(1)} fps` : null, health.kbps !== null ? `${health.kbps}k` : null, health.speed !== null ? `${health.speed.toFixed(2)}x` : null].filter(Boolean)
   const extra = [health.dup ? `dup ${health.dup}` : null, health.drop ? `drop ${health.drop}` : null, health.bytes ? `${(health.bytes / 1e6).toFixed(0)} MB sent` : null, health.ageMs !== null ? `updated ${Math.round(health.ageMs / 1000)}s ago` : null].filter(Boolean).join(" · ")
   return (
-    <span data-testid={testid} data-level={health.level} title={[...health.warnings, extra].filter(Boolean).join("\n")} className={`inline-flex items-center gap-1 font-mono text-[11px] ${LEVEL_TEXT[health.level]}`}>
-      <span className={`size-2 rounded-full ${LEVEL_DOT[health.level]}`} />
+    <span data-testid={testid} data-level={health.level} title={[...health.warnings, extra].filter(Boolean).join("\n")} className={`inline-flex min-w-0 flex-wrap items-center gap-x-1 font-mono text-[11px] ${LEVEL_TEXT[health.level]}`}>
+      <span className={`size-2 shrink-0 rounded-full ${LEVEL_DOT[health.level]}`} />
       {parts.length ? parts.join(" · ") : "measuring…"}
       {health.warnings.length ? <span className="font-bold"> · {health.warnings[0]}</span> : null}
     </span>
