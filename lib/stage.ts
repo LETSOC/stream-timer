@@ -143,3 +143,8 @@ export const TEST_CLOCK_TTL_MS = 2 * 60 * 60 * 1000
 export function testClockStale(testSetAt: number | null, now = Date.now()): boolean {
   return testSetAt !== null && now - testSetAt > TEST_CLOCK_TTL_MS
 }
+
+/** Same speakers in the same order (used to tell a desk draft from the published list). */
+export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[]): boolean {
+  return a.length === b.length && a.every((item, i) => item.image === b[i].image && item.name === b[i].name && item.description === b[i].description)
+}

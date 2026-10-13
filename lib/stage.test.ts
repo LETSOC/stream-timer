@@ -48,3 +48,13 @@ test("test clock goes stale after 2 hours (A)", () => {
   assert.equal(testClockStale(now - TEST_CLOCK_TTL_MS + 1000, now), false)
   assert.equal(testClockStale(now - TEST_CLOCK_TTL_MS - 1000, now), true)
 })
+
+test("sameSpeakers: order and fields matter (speaker draft)", async () => {
+  const { sameSpeakers } = await import("@/lib/stage")
+  const a = { image: "a.png", name: "A", description: "" }
+  const b = { image: "b.png", name: "B", description: "" }
+  assert.equal(sameSpeakers([a, b], [a, b]), true)
+  assert.equal(sameSpeakers([a, b], [b, a]), false)
+  assert.equal(sameSpeakers([a], [{ ...a, name: "A2" }]), false)
+  assert.equal(sameSpeakers([], []), true)
+})

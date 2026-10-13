@@ -77,3 +77,10 @@ test("clock range (Q)", () => {
   assert.equal(validClockValue(0, now), false)
   assert.equal(validClockValue(now + 1000 * 24 * 3600_000, now), false)
 })
+
+test("stage without speakers keeps the published speakers (draft not sent)", () => {
+  const speakers = [{ image: "/s.png", name: "Sam", description: "" }]
+  writeServerEvent(DEFAULT_EVENT, undefined, undefined, { speakers })
+  writeServerEvent(DEFAULT_EVENT, undefined, undefined, { checker: 8 })
+  assert.deepEqual(readServerState().stage.speakers, speakers)
+})

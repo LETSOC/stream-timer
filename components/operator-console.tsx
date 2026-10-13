@@ -27,7 +27,8 @@ import { useNow } from "@/lib/use-now"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
-import type { StageOptions } from "@/lib/stage"
+import { sameSpeakers, type StageOptions } from "@/lib/stage"
+import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
 import {
   buildLocalTestCommand,
@@ -55,7 +56,10 @@ export function OperatorConsole() {
   const [clockScale, setClockScale] = useState(1)
   const [clockText, setClockText] = useState(1)
   const [logoUrl, setLogoUrl] = useState("")
-  const [speakers, setSpeakers] = useState<{ image: string; name: string; description: string }[]>([])
+  // Speakers are edited as a local draft (`speakers`) and only published with "Save speakers" (`savedSpeakers`).
+  const [speakers, setSpeakers] = useState<SpeakerCard[]>([])
+  const [savedSpeakers, setSavedSpeakers] = useState<SpeakerCard[]>([])
+  const speakersDirty = !sameSpeakers(speakers, savedSpeakers)
   const [gallerySeconds, setGallerySeconds] = useState(4)
   const [galleryPause, setGalleryPause] = useState(6)
   const [galleryOffset, setGalleryOffset] = useState(-86)
@@ -196,7 +200,10 @@ export function OperatorConsole() {
       if (typeof stage.clockScale === "number") setClockScale(clampSize(stage.clockScale, CLOCK_SCALE_RANGE))
       if (typeof stage.clockText === "number") setClockText(clampSize(stage.clockText, CLOCK_TEXT_RANGE))
       if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
-      if (Array.isArray(stage.speakers)) setSpeakers(stage.speakers)
+      if (Array.isArray(stage.speakers)) {
+        setSpeakers(stage.speakers)
+        setSavedSpeakers(stage.speakers)
+      }
       if (typeof stage.gallerySeconds === "number") setGallerySeconds(stage.gallerySeconds)
       if (typeof stage.galleryPause === "number") setGalleryPause(stage.galleryPause)
       if (typeof stage.galleryOffset === "number") setGalleryOffset(stage.galleryOffset)
@@ -245,14 +252,21 @@ export function OperatorConsole() {
           setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
         }
         if ((serverWins || !stageRaw) && body.stage) applyStage(body.stage)
+        // An unsaved speaker draft from before a reload stays a draft on top of the saved list.
+        try {
+          const draft = JSON.parse(window.localStorage.getItem(SPEAKER_DRAFT_KEY) ?? "null") as unknown
+          if (Array.isArray(draft)) setSpeakers(draft as SpeakerCard[])
+        } catch {
+          /* ignore a bad draft */
+        }
       })
       .finally(() => setHydrated(true))
   }, [updateEvent])
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers: savedSpeakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown }))
+  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, savedSpeakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -265,11 +279,28 @@ export function OperatorConsole() {
     window.localStorage.setItem("hyphen-countdown-rtmp", rtmpUrl)
   }, [hydrated, rtmpUrl])
 
+  useEffect(() => {
+    if (!hydrated) return
+    // Keep the draft through a 409 too, so "Reload latest" doesn't throw away an unpublished speaker list.
+    if (speakersDirty || syncState === "conflict") window.localStorage.setItem(SPEAKER_DRAFT_KEY, JSON.stringify(speakers))
+    else window.localStorage.removeItem(SPEAKER_DRAFT_KEY)
+  }, [hydrated, speakers, speakersDirty, syncState])
+
+  useEffect(() => {
+    if (!speakersDirty) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [speakersDirty])
+
   const savePayload = {
       event,
       testUntil,
       pausedAt: pausedMs || null,
-      stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown },
+      stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers: savedSpeakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown },
   }
   const payloadJson = JSON.stringify(savePayload)
   const saveTimer = useRef<number | null>(null)
@@ -323,6 +354,13 @@ export function OperatorConsole() {
       }
     })
   }
+  function publishSpeakers() {
+    const next = speakers.filter((item) => item.image || item.name || item.description)
+    setSpeakers(next)
+    setSavedSpeakers(next)
+    sendSave({ ...savePayload, stage: { ...savePayload.stage, speakers: next } })
+  }
+
   const sendSaveRef = useRef(sendSave)
   useEffect(() => {
     sendSaveRef.current = sendSave
@@ -854,6 +892,11 @@ export function OperatorConsole() {
                 {Array.from({ length: 9 }, (_, index) => <div key={index} className="border border-white/35" />)}
               </div>
             ) : null}
+            {speakersDirty && speakers.length > 0 ? (
+              <span data-testid="speaker-draft-label" className="absolute right-3 bottom-3 z-30 rounded-full bg-[#b45309] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
+                Speakers: draft
+              </span>
+            ) : null}
             {previewFlash ? (
               <span className="absolute top-3 left-3 z-30 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
                 Preview updated
@@ -922,7 +965,7 @@ export function OperatorConsole() {
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
-          <Panel id="speakers" title="Speakers">
+          <Panel id="speakers" title="Speakers" pill={speakersDirty ? "Unsaved changes" : `${savedSpeakers.length} live`}>
             <p className="font-mono text-[13px] leading-5 text-black/70">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
             <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
               <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
@@ -951,6 +994,13 @@ export function OperatorConsole() {
               </div>
             ))}
             <Pill onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</Pill>
+            <div data-testid="speaker-actions" className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-[#F6F6F3] p-3">
+              <span className={`font-mono text-[12px] ${speakersDirty ? "font-bold text-[#b45309]" : "text-black/70"}`}>
+                {speakersDirty ? "Draft: not on /stream until you save." : "Saved: /stream shows this list."}
+              </span>
+              <Pill size="sm" tone="live" disabled={!speakersDirty || !token} onClick={publishSpeakers}>Save speakers</Pill>
+              <Pill size="sm" tone="outline" disabled={!speakersDirty} onClick={() => setSpeakers(savedSpeakers)}>Discard</Pill>
+            </div>
           </Panel>
         </section>
       </main>
@@ -1184,3 +1234,5 @@ function useMediaQuery(query: string) {
     () => false,
   )
 }
+
+const SPEAKER_DRAFT_KEY = "hyphen-countdown-speakers-draft"
