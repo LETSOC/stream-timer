@@ -140,7 +140,7 @@ if [[ -f "$LIVE_SLATE" ]]; then
   common_input=(
     -hide_banner
     -loglevel info
-    -stats_period 10
+    -stats_period 5
     -re
     -loop 1 -framerate "$FPS" -i "$SLATE"
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
@@ -148,23 +148,23 @@ if [[ -f "$LIVE_SLATE" ]]; then
     -filter_complex "[0:v]${VF}[counted];[counted][2:v]overlay=enable='gte(t,${remaining})'[v]"
     -map "[v]"
     -map 1:a:0
-    -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k
-    -g 60 -pix_fmt yuv420p
+    -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -nal-hrd cbr
+    -g $((FPS * 2)) -keyint_min $((FPS * 2)) -sc_threshold 0 -pix_fmt yuv420p
     -c:a aac -b:a 128k -ar 44100
   )
 else
   common_input=(
     -hide_banner
     -loglevel info
-    -stats_period 10
+    -stats_period 5
     -re
     -loop 1 -framerate "$FPS" -i "$SLATE"
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
     -vf "$VF"
     -map 0:v:0
     -map 1:a:0
-    -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k
-    -g 60 -pix_fmt yuv420p
+    -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -nal-hrd cbr
+    -g $((FPS * 2)) -keyint_min $((FPS * 2)) -sc_threshold 0 -pix_fmt yuv420p
     -c:a aac -b:a 128k -ar 44100
   )
 fi

@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
   if (denied) return denied
-  const body = (await request.json().catch(() => null)) as { action?: unknown; id?: unknown; name?: unknown; url?: unknown } | null
+  const body = (await request.json().catch(() => null)) as { action?: unknown; id?: unknown; name?: unknown; url?: unknown; channel?: unknown } | null
   if (!body || typeof body.action !== "string") return Response.json({ error: "Expected { action }." }, { status: 400 })
   const respond = (result: { ok: true; value: unknown } | { ok: false; error: string; status: number }) =>
     result.ok ? Response.json({ ...listDestinations(), item: result.value }, { headers: NO_STORE }) : Response.json({ error: result.error }, { status: result.status, headers: NO_STORE })
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     case "delete":
       return respond(deleteDestination(body.id))
     case "select":
-      return respond(selectDestination(body.id ?? null))
+      return respond(selectDestination(body.id ?? null, body.channel === "capture" ? "capture" : "slate"))
     case "reveal": {
       const item = resolveDestination(body.id)
       if (!item) return Response.json({ error: "No such destination." }, { status: 404, headers: NO_STORE })

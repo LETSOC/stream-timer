@@ -12,9 +12,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { NumberField } from "@/components/number-field"
 import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
+import { StreamPlayer } from "@/components/stream-player"
+import { diagnose, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
+import { CAPTURE_BITRATES } from "@/lib/capture-options"
 import { EndStreamPage } from "@/app/end/page"
 import {
   formatClock,
@@ -42,37 +46,37 @@ export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   // Named RTMP destinations live on the server (data/rtmp-destinations.json); the desk only sees masked values.
-  const [dests, setDests] = useState<{ selectedId: string | null; items: Dest[] }>({ selectedId: null, items: [] })
+  const [dests, setDests] = useState<{ selectedId: string | null; selectedCaptureId: string | null; items: Dest[] }>({ selectedId: null, selectedCaptureId: null, items: [] })
+  // Destination shown in the "Saved destinations" manager (rename/reveal/copy/delete); separate from what each channel streams to.
+  const [manageId, setManageId] = useState<string | null>(null)
   const [destForm, setDestForm] = useState<{ mode: "add" | "rename" | null; name: string; url: string }>({ mode: null, name: "", url: "" })
   const [destError, setDestError] = useState("")
   const [revealed, setRevealed] = useState<{ id: string; url: string } | null>(null)
   const [legacyRtmp, setLegacyRtmp] = useState<string | null>(null)
-  const selectedDest = dests.items.find((item) => item.id === dests.selectedId) ?? null
-  const rtmpUrl = selectedDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
-  const [rtmpLive, setRtmpLive] = useState(false)
-  const [rtmpPhase, setRtmpPhase] = useState<"stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed">("stopped")
-  const [rtmpAdopted, setRtmpAdopted] = useState(false)
+  // Per-device choice: what Start stream publishes. Remembered in this browser only.
   const [rtmpOwnCount, setRtmpOwnCount] = useState(0)
-  const [rtmpReconnecting, setRtmpReconnecting] = useState(false)
-  const [rtmpRestarts, setRtmpRestarts] = useState(0)
-  // In-flight Start/Stop request: buttons are locked and clicks ignored until the server answers.
-  const [rtmpBusy, setRtmpBusy] = useState<"starting" | "stopping" | null>(null)
-  const rtmpBusyRef = useRef<"starting" | "stopping" | null>(null)
-  const [rtmpConnectError, setRtmpConnectError] = useState<string | null>(null)
-  const [rtmpFailure, setRtmpFailure] = useState<string | null>(null)
   const headerRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
     const el = headerRef.current
     if (!el) return
-    const update = () => document.documentElement.style.setProperty("--desk-header-h", `${el.offsetHeight}px`)
+    const update = () => {
+      document.documentElement.style.setProperty("--desk-header-h", `${el.offsetHeight}px`)
+      // Sticky header (lg+): keep anchors / scrollIntoView targets below it instead of under it.
+      document.documentElement.style.scrollPaddingTop = getComputedStyle(el).position === "sticky" ? `${el.offsetHeight + 12}px` : ""
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
-    return () => observer.disconnect()
+    window.addEventListener("resize", update)
+    return () => { observer.disconnect(); window.removeEventListener("resize", update); document.documentElement.style.scrollPaddingTop = "" }
   }, [])
   const [strayPids, setStrayPids] = useState<number[]>([])
-  const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
-  const [rtmpMessage, setRtmpMessage] = useState("")
+  const [rtmpChannels, setRtmpChannels] = useState<Record<RtmpChannelId, RtmpChannelView>>({ slate: STOPPED_CHANNEL, capture: STOPPED_CHANNEL })
+  const [rtmpNote, setRtmpNote] = useState("")
+  const rtmpLive = rtmpChannels.slate.running || rtmpChannels.capture.running
+  const selectedDest = dests.items.find((item) => item.id === (manageId ?? dests.selectedId)) ?? dests.items[0] ?? null
+  const slateDest = dests.items.find((item) => item.id === dests.selectedId) ?? null
+  const rtmpUrl = slateDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
   const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
@@ -238,16 +242,11 @@ export function OperatorConsole() {
     const load = () => {
       void fetch("/api/encoder", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[]; rtmpConnectError?: string | null; rtmpFailure?: string | null; rtmpAdopted?: boolean; rtmpOwnProcesses?: number }) => {
+        .then((body: { strayPublishers?: { pid: number }[]; rtmpOwnProcesses?: number; rtmpChannels?: Partial<Record<RtmpChannelId, RtmpChannelView>> }) => {
           if (cancelled) return
-          setRtmpAdopted(body.rtmpAdopted === true)
           setRtmpOwnCount(typeof body.rtmpOwnProcesses === "number" ? body.rtmpOwnProcesses : 0)
-          setRtmpConnectError(typeof body.rtmpConnectError === "string" ? body.rtmpConnectError : null)
-          setRtmpFailure(typeof body.rtmpFailure === "string" ? body.rtmpFailure : null)
-          if (body.rtmpState) setRtmpPhase(body.rtmpState)
-          setRtmpLive(body.rtmpRunning === true)
-          setRtmpReconnecting(body.rtmpReconnecting === true)
-          setRtmpRestarts(typeof body.rtmpRestarts === "number" ? body.rtmpRestarts : 0)
+          // Every desk polls the same server status, so both channels' state stays in sync across devices.
+          setRtmpChannels({ slate: body.rtmpChannels?.slate ?? STOPPED_CHANNEL, capture: body.rtmpChannels?.capture ?? STOPPED_CHANNEL })
           setStrayPids(Array.isArray(body.strayPublishers) ? body.strayPublishers.map((item) => item.pid) : [])
         })
         .catch(() => undefined)
@@ -364,8 +363,8 @@ export function OperatorConsole() {
   const loadDests = useCallback(async () => {
     const response = await fetch("/api/rtmp-destinations", { cache: "no-store" }).catch(() => null)
     if (!response?.ok) return
-    const body = (await response.json().catch(() => null)) as { selectedId?: string | null; items?: Dest[] } | null
-    if (body && Array.isArray(body.items)) setDests({ selectedId: body.selectedId ?? null, items: body.items })
+    const body = (await response.json().catch(() => null)) as { selectedId?: string | null; selectedCaptureId?: string | null; items?: Dest[] } | null
+    if (body && Array.isArray(body.items)) setDests({ selectedId: body.selectedId ?? null, selectedCaptureId: body.selectedCaptureId ?? null, items: body.items })
   }, [])
   useEffect(() => {
     if (!hydrated) return
@@ -385,12 +384,12 @@ export function OperatorConsole() {
       return false
     }
     if (handleUnauthorized(response)) return false
-    const body = (await response.json().catch(() => null)) as { error?: string; selectedId?: string | null; items?: Dest[] } | null
+    const body = (await response.json().catch(() => null)) as { error?: string; selectedId?: string | null; selectedCaptureId?: string | null; items?: Dest[] } | null
     if (!response.ok) {
       setDestError(body?.error ?? `Server returned ${response.status}.`)
       return false
     }
-    if (body && Array.isArray(body.items)) setDests({ selectedId: body.selectedId ?? null, items: body.items })
+    if (body && Array.isArray(body.items)) setDests({ selectedId: body.selectedId ?? null, selectedCaptureId: body.selectedCaptureId ?? null, items: body.items })
     return true
   }
   async function revealDest(id: string) {
@@ -1038,26 +1037,33 @@ export function OperatorConsole() {
               <Field label="YouTube URL" htmlFor="yt"><GrowingText id="yt" value={youtubeUrl} onChange={(value) => updateEvent({ youtubeUrl: value })} /></Field>
             </Panel>
 
-          <Panel id="encoder" title="Encoder (FFmpeg)">
-            <div className="flex items-center justify-between gap-3">
-              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpPhase === "connected" ? "bg-[#128a3e] text-white" : rtmpPhase === "reconnecting" || rtmpPhase === "starting" ? "bg-[#b45309] text-white" : rtmpPhase === "failed" || rtmpPhase === "stalled" ? "bg-[#d93200] text-white" : rtmpLive && !rtmpReconnecting ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
-                <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
-                {rtmpBusy === "starting" ? "Starting…" : rtmpBusy === "stopping" ? "Stopping…" : rtmpConnectError && rtmpLive && rtmpPhase !== "connected" ? "Can't connect" : { stopped: rtmpLive ? "Stream live" : "Stream off", starting: "Connecting…", connected: rtmpAdopted ? "Live (found running stream)" : "Stream live", reconnecting: "Reconnecting", stalled: "Stalled · no frames", failed: "Failed" }[rtmpPhase]}
-                {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
-              </span>
+          <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
+            <p className="font-mono text-[12px] text-black/70">Slate and Browser capture are separate outputs. Run either, or both at once to different destinations.</p>
+            <div className="grid gap-3">
+              {(["slate", "capture"] as const).map((ch) => {
+                const other = ch === "slate" ? "capture" : "slate"
+                const pick = (c: RtmpChannelId) => (c === "slate" ? dests.selectedId : dests.selectedCaptureId)
+                return (
+                  <RtmpChannelCard key={ch} channel={ch} status={rtmpChannels[ch]} dests={dests.items} selectedId={pick(ch)} otherSelectedId={pick(other)} otherRunning={rtmpChannels[other].running} canStart={valid} pubLine={pubLine}
+                    onSelect={(id) => {
+                      setDests((current) => (ch === "slate" ? { ...current, selectedId: id } : { ...current, selectedCaptureId: id }))
+                      void destAction({ action: "select", id, channel: ch })
+                    }} />
+                )
+              })}
+              <RelayCard dests={dests.items} />
             </div>
-            <Field label="Destination" htmlFor="rtmp">
+            <Field label="Saved destinations" htmlFor="rtmp">
               <div className="space-y-2">
                 {dests.items.length ? (
                   <select
                     id="rtmp"
-                    data-testid="rtmp-destination"
+                    data-testid="dest-manage"
                     className="h-9 w-full px-3 text-sm"
-                    value={dests.selectedId ?? ""}
+                    value={selectedDest?.id ?? ""}
                     onChange={(event) => {
                       setRevealed(null)
-                      setDests((current) => ({ ...current, selectedId: event.target.value || null }))
-                      void destAction({ action: "select", id: event.target.value || null })
+                      setManageId(event.target.value || null)
                     }}
                   >
                     {dests.items.map((item) => (
@@ -1077,7 +1083,7 @@ export function OperatorConsole() {
                       <Pill size="sm" tone="outline" data-testid="dest-rename" onClick={() => setDestForm({ mode: destForm.mode === "rename" ? null : "rename", name: selectedDest.name, url: "" })}>Rename</Pill>
                       <Pill size="sm" tone="outline" data-testid="dest-reveal" aria-pressed={revealed?.id === selectedDest.id} onClick={() => void revealDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? "Hide" : "Reveal"}</Pill>
                       <Pill size="sm" tone="outline" data-testid="dest-copy" onClick={() => void copyDest(selectedDest.id)}>Copy</Pill>
-                      <ConfirmButton data-testid="dest-delete" className={pillClass("danger", "sm")} disabled={rtmpLive} confirmLabel={`Delete ${selectedDest.name}? · confirm`} onConfirm={() => void destAction({ action: "delete", id: selectedDest.id })}>Delete</ConfirmButton>
+                      <ConfirmButton data-testid="dest-delete" className={pillClass("danger", "sm")} disabled={[dests.selectedId, dests.selectedCaptureId].includes(selectedDest.id) && rtmpLive} confirmLabel={`Delete ${selectedDest.name}? · confirm`} onConfirm={() => void destAction({ action: "delete", id: selectedDest.id })}>Delete</ConfirmButton>
                     </>
                   ) : null}
                 </div>
@@ -1117,105 +1123,18 @@ export function OperatorConsole() {
                 ) : null}
               </div>
             </Field>
-            <div className="flex gap-2">
-              <Pill data-testid="rtmp-start" disabled={!valid || !selectedDest || rtmpBusy !== null || rtmpLive} aria-busy={rtmpBusy === "starting"} onClick={() => {
-                  if (rtmpBusyRef.current) return // ignore clicks while a request is in flight
-                  rtmpBusyRef.current = "starting"
-                  setRtmpBusy("starting")
-                  setRtmpState("idle")
-                  setRtmpMessage("Connecting to the ingest server…")
-                  void fetch("/api/encoder", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ mode: "rtmp", destinationId: selectedDest?.id, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
-                  })
-                    .then(async (response) => {
-                      if (handleUnauthorized(response)) return
-                      const body = (await response.json().catch(() => null)) as { error?: string; note?: string | null; rtmpRunning?: boolean; rtmpState?: typeof rtmpPhase } | null
-                      if (body?.rtmpState) setRtmpPhase(body.rtmpState)
-                      setRtmpLive(body?.rtmpRunning === true)
-                      if (!response.ok) {
-                        setRtmpState("error")
-                        setRtmpMessage(body?.error || "The stream did not start.")
-                        return
-                      }
-                      setRtmpState("live")
-                      setRtmpMessage(body?.note || (body?.rtmpState === "connected" ? `Connected. Sending to ${selectedDest?.name ?? "the destination"}.` : "Started; still connecting. Watch the status above."))
-                    })
-                    .catch(() => {
-                      setRtmpState("error")
-                      setRtmpMessage("The desk could not reach the encoder.")
-                    })
-                    .finally(() => {
-                      rtmpBusyRef.current = null
-                      setRtmpBusy(null)
-                    })
-                }}
-              >
-                {rtmpBusy === "starting" ? "Starting…" : "Start stream"}
-              </Pill>
-              <ConfirmButton data-testid="rtmp-stop" className={pillClass("danger")} disabled={rtmpBusy !== null || !rtmpLive} confirmLabel="Stop the live stream? · confirm" onConfirm={() => {
-                  if (rtmpBusyRef.current) return
-                  rtmpBusyRef.current = "stopping"
-                  setRtmpBusy("stopping")
-                  setRtmpMessage("Stopping…")
-                  void fetch("/api/encoder?target=rtmp", { method: "DELETE" })
-                    .then(async (response) => {
-                      if (handleUnauthorized(response)) return
-                      if (!response.ok) {
-                        const body = (await response.json().catch(() => null)) as { error?: string } | null
-                        setRtmpState("error")
-                        setRtmpMessage(body?.error || `Stop failed (server returned ${response.status}). The stream may still be live.`)
-                        return
-                      }
-                      const body = (await response.json().catch(() => null)) as { note?: string | null; rtmpRunning?: boolean } | null
-                      setRtmpState("idle")
-                      setRtmpLive(body?.rtmpRunning === true)
-                      setRtmpPhase("stopped")
-                      setRtmpMessage(body?.note || "Stream stopped.")
-                    })
-                    .catch(() => {
-                      setRtmpState("error")
-                      setRtmpMessage("Could not reach the encoder to stop. The stream may still be live.")
-                    })
-                    .finally(() => {
-                      rtmpBusyRef.current = null
-                      setRtmpBusy(null)
-                    })
-                }}
-              >
-                {rtmpBusy === "stopping" ? "Stopping…" : "Stop stream"}
-              </ConfirmButton>
-            </div>
-            {rtmpConnectError && rtmpLive && rtmpPhase !== "connected" ? (
-              <p role="alert" data-testid="rtmp-connect-error" className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">
-                {rtmpConnectError}{rtmpRestarts > 0 ? ` · retrying (${rtmpRestarts})` : ""}. Not live yet.
-              </p>
-            ) : null}
-            {rtmpPhase === "stalled" && rtmpLive ? (
-              <p role="alert" data-testid="rtmp-stalled" className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">
-                ffmpeg is running but hasn&apos;t reported sending video recently. Check the ingest dashboard; Stop and Start again if it&apos;s not live.
-              </p>
-            ) : null}
-            {rtmpAdopted && rtmpLive ? <p data-testid="rtmp-adopted" className="font-mono text-[13px] text-black/70">Found a stream that was already running (started before this server restarted). Stop works on it.</p> : null}
-            {rtmpOwnCount > 1 || (rtmpLive && strayPids.length > 0) || (!rtmpLive && rtmpOwnCount + strayPids.length > 1) ? (
+            {rtmpOwnCount > Math.max(1, Number(rtmpChannels.slate.running) + Number(rtmpChannels.capture.running)) || (rtmpLive && strayPids.length > 0) || (!rtmpLive && rtmpOwnCount + strayPids.length > 1) ? (
               <div role="alert" data-testid="rtmp-multiple" className="flex flex-wrap items-center gap-2 rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">
                 <span>More than one stream process is running ({rtmpOwnCount} desk supervisor{rtmpOwnCount === 1 ? "" : "s"}, {strayPids.length} other ffmpeg). Viewers may see the wrong picture.</span>
                 <ConfirmButton data-testid="rtmp-stop-all" className={pillClass("danger")} confirmLabel="Stop ALL streams? · confirm" onConfirm={async () => {
                   const response = await fetch("/api/encoder?target=rtmp-all", { method: "DELETE" })
                   if (handleUnauthorized(response)) return
                   const body = (await response.json().catch(() => null)) as { note?: string } | null
-                  setRtmpMessage(body?.note ?? "Stopped all.")
-                  setRtmpLive(false)
+                  setRtmpNote(body?.note ?? "Stopped all.")
                 }}>Stop all</ConfirmButton>
               </div>
             ) : null}
-            {rtmpFailure && !rtmpLive ? (
-              <p role="alert" data-testid="rtmp-failure" className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">
-                Stream failed: {rtmpFailure.split("\n").filter(Boolean).slice(-3).join(" · ").slice(0, 400)}
-              </p>
-            ) : null}
-            {rtmpMessage ? <p role="status" data-testid="rtmp-message" className={`font-mono text-[13px] ${rtmpState === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{rtmpMessage}</p> : null}
+            {rtmpNote ? <p role="status" data-testid="rtmp-message" className="font-mono text-[13px] text-black/70">{rtmpNote}</p> : null}
             {strayPids.length > 0 ? <p className="font-mono text-[13px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
             <p className="font-mono text-[13px] leading-5 text-black/70">
               Start stream sends 1280×720, 30 fps, H.264 2500 kbps, yuv420p, AAC stereo 128 kbps, silent audio, FLV over RTMP. The local player is the same picture as 2-second HLS segments.
@@ -1431,16 +1350,16 @@ export function OperatorConsole() {
             {draftBar("speakers")}
             <p className="font-mono text-[13px] leading-5 text-black/70">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
             <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
-              <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
+              <NumberField id="gallery-seconds" value={gallerySeconds} onChange={setGallerySeconds} rule={{ min: 2, max: 30, integer: true }} unit="s" />
             </Field>
             <Field label="Pause before it returns" htmlFor="gallery-pause">
-              <Input id="gallery-pause" type="number" min={2} max={30} value={galleryPause} onChange={(event) => setGalleryPause(Math.min(30, Math.max(2, Number(event.target.value) || 6)))} />
+              <NumberField id="gallery-pause" value={galleryPause} onChange={setGalleryPause} rule={{ min: 2, max: 30, integer: true }} unit="s" />
             </Field>
             <Field label="Vertical position (px, higher moves it down)" htmlFor="gallery-offset">
-              <Input id="gallery-offset" type="number" min={-600} max={400} value={galleryOffset} onChange={(event) => setGalleryOffset(Math.min(400, Math.max(-600, Number(event.target.value) || 0)))} />
+              <NumberField id="gallery-offset" value={galleryOffset} onChange={setGalleryOffset} rule={{ min: -600, max: 400, integer: true }} unit="px" />
             </Field>
             <Field label="Portrait size (%)" htmlFor="gallery-scale">
-              <Input id="gallery-scale" type="number" min={40} max={200} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(200, Math.max(40, Number(event.target.value) || 80)))} />
+              <NumberField id="gallery-scale" value={galleryScale} onChange={setGalleryScale} rule={{ min: 40, max: 200, integer: true }} unit="%" />
             </Field>
             {speakers.length > 0 ? <div><Pill data-testid="add-speaker-top" tone="outline" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>+ Add speaker</Pill></div> : null}
             {speakers.map((speaker, index) => (
@@ -1776,4 +1695,299 @@ function hostOf(url: string, fallback: string): string {
   } catch {
     return fallback
   }
+}
+
+type RtmpChannelId = "slate" | "capture"
+type RtmpPhase = "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
+type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; connectError: string | null; failure: string | null }
+const STOPPED_CHANNEL: RtmpChannelView = { running: false, state: "stopped", reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null }
+
+/** One independent RTMP output (Slate or Browser capture): its own destination, Start/Stop, status and messages. */
+function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, otherRunning, canStart, pubLine, onSelect }: {
+  channel: RtmpChannelId
+  status: RtmpChannelView
+  dests: Dest[]
+  selectedId: string | null
+  otherSelectedId: string | null
+  otherRunning: boolean
+  canStart: boolean
+  pubLine: { name: string; dateLine: string; targetUnix: number }
+  onSelect: (id: string | null) => void
+}) {
+  const [busy, setBusy] = useState<"starting" | "stopping" | null>(null)
+  const busyRef = useRef<"starting" | "stopping" | null>(null)
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
+  // Optimistic override until the next status poll lands.
+  const [override, setOverride] = useState<{ running: boolean; state: RtmpPhase } | null>(null)
+  const [captureSize, setCaptureSizeState] = useState<"1280x720" | "1920x1080">("1280x720")
+  const [bitrates, setBitrates] = useState<Record<"1280x720" | "1920x1080", number>>({ "1280x720": 2500, "1920x1080": 4500 })
+  const [captureEncoder, setCaptureEncoderState] = useState<"auto" | "libx264" | "videotoolbox">("auto")
+  const captureBitrate = bitrates[captureSize]
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      if (window.localStorage.getItem("rtmp-capture-size") === "1920x1080") setCaptureSizeState("1920x1080")
+      const saved = (size: "1280x720" | "1920x1080") => {
+        const value = Number(window.localStorage.getItem(`rtmp-capture-bitrate-${size}`))
+        return (CAPTURE_BITRATES[size] as readonly number[]).includes(value) ? value : CAPTURE_BITRATES[size][1]
+      }
+      setBitrates({ "1280x720": saved("1280x720"), "1920x1080": saved("1920x1080") })
+      const enc = window.localStorage.getItem("rtmp-capture-encoder")
+      if (enc === "libx264" || enc === "videotoolbox") setCaptureEncoderState(enc)
+    }, 0)
+    return () => window.clearTimeout(id)
+  }, [])
+  useEffect(() => {
+    const id = window.setTimeout(() => setOverride(null), 0)
+    return () => window.clearTimeout(id)
+  }, [status])
+  const live = override ? override.running : status.running
+  const phase = override ? override.state : status.state
+  const viaRelay = selectedId === "relay"
+  const selected = viaRelay ? { id: "relay", name: `relay /${channel}` } : (dests.find((item) => item.id === selectedId) ?? null)
+  const sameAsOther = Boolean(selected && !viaRelay && otherRunning && otherSelectedId === selected.id)
+  const label = channel === "slate" ? "Slate" : "Browser capture"
+  const tid = (name: string) => `rtmp-${name}-${channel}`
+
+  function start() {
+    if (busyRef.current || !selected) return
+    busyRef.current = "starting"
+    setBusy("starting")
+    setMessage({ tone: "info", text: "Connecting to the ingest server…" })
+    void fetch("/api/encoder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "rtmp", source: channel, destinationId: selected.id, captureSize, captureBitrate, captureEncoder, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
+    })
+      .then(async (response) => {
+        if (handleUnauthorized(response)) return
+        const body = (await response.json().catch(() => null)) as { error?: string; note?: string | null; rtmpChannels?: Record<RtmpChannelId, RtmpChannelView> } | null
+        const mine = body?.rtmpChannels?.[channel]
+        if (mine) setOverride({ running: mine.running, state: mine.state })
+        if (!response.ok) return setMessage({ tone: "error", text: body?.error || "The stream did not start." })
+        setMessage({ tone: "info", text: body?.note || (mine?.state === "connected" ? `Connected. Sending to ${selected.name}.` : "Started; still connecting. Watch the status above.") })
+      })
+      .catch(() => setMessage({ tone: "error", text: "The desk could not reach the encoder." }))
+      .finally(() => { busyRef.current = null; setBusy(null) })
+  }
+  function stop() {
+    if (busyRef.current) return
+    busyRef.current = "stopping"
+    setBusy("stopping")
+    setMessage({ tone: "info", text: "Stopping…" })
+    void fetch(`/api/encoder?target=rtmp&source=${channel}`, { method: "DELETE" })
+      .then(async (response) => {
+        if (handleUnauthorized(response)) return
+        const body = (await response.json().catch(() => null)) as { error?: string; note?: string | null } | null
+        if (!response.ok) return setMessage({ tone: "error", text: body?.error || `Stop failed (server returned ${response.status}). The stream may still be live.` })
+        setOverride({ running: false, state: "stopped" })
+        setMessage({ tone: "info", text: body?.note || `${label} stopped.` })
+      })
+      .catch(() => setMessage({ tone: "error", text: "Could not reach the encoder to stop. The stream may still be live." }))
+      .finally(() => { busyRef.current = null; setBusy(null) })
+  }
+
+  const pillText = busy === "starting" ? "Starting…" : busy === "stopping" ? "Stopping…" : status.connectError && live && phase !== "connected" ? "Can't connect" : { stopped: live ? "Live" : "Off", starting: "Connecting…", connected: status.adopted ? "Live (found running)" : "Live", reconnecting: "Reconnecting", stalled: "Stalled · no frames", failed: "Failed" }[phase]
+  return (
+    <div data-testid={`rtmp-card-${channel}`} className="space-y-2 rounded-2xl border border-black/10 bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">{label}</p>
+        <span data-testid={tid("status")} data-state={live ? phase : "stopped"} className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${phase === "connected" || (live && phase === "stopped") ? "bg-[#128a3e] text-white" : phase === "reconnecting" || phase === "starting" ? "bg-[#b45309] text-white" : phase === "failed" || phase === "stalled" ? "bg-[#d93200] text-white" : "bg-black/5 text-black/70"}`}>
+          <span className={`size-1.5 rounded-full ${live ? "animate-pulse bg-white" : "bg-black/30"}`} />
+          {pillText}{status.restarts > 0 ? <span title="Times the supervisor restarted the encoder after it exited (dropped connection, crash, or failed connect)"> · {status.restarts} {status.restarts === 1 ? "restart" : "restarts"}</span> : ""}
+        </span>
+      </div>
+      <p className="font-mono text-[12px] text-black/70">{channel === "slate" ? "ffmpeg drawtext: light on CPU, countdown text only (no break/hold/welcome/end cards)." : "Headless Chromium streams exactly what /stream shows, cards included. More CPU."}</p>
+      <div className="flex flex-wrap items-center gap-2 font-mono text-[12px] text-black/70">
+        <label htmlFor={tid("destination")}>Destination</label>
+        {dests.length ? (
+          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
+            <option value="">Choose…</option>
+            <option value="relay">Relay (MediaMTX) → /{channel}</option>
+            {dests.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.host}</option>)}
+          </select>
+        ) : (
+          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
+            <option value="">Add a destination below, or…</option>
+            <option value="relay">Relay (MediaMTX) → /{channel}</option>
+          </select>
+        )}
+        {channel === "capture" ? (
+          <>
+            <label htmlFor="capture-size">Size</label>
+            <select id="capture-size" data-testid="capture-size" disabled={live} value={captureSize} onChange={(event) => { const v = event.target.value === "1920x1080" ? "1920x1080" : "1280x720"; setCaptureSizeState(v); window.localStorage.setItem("rtmp-capture-size", v) }} className="h-8 border px-2">
+              <option value="1280x720">1280×720</option>
+              <option value="1920x1080">1920×1080</option>
+            </select>
+            <label htmlFor="capture-bitrate">Bitrate</label>
+            <select id="capture-bitrate" data-testid="capture-bitrate" disabled={live} value={captureBitrate} onChange={(event) => { const v = Number(event.target.value); setBitrates((b) => ({ ...b, [captureSize]: v })); window.localStorage.setItem(`rtmp-capture-bitrate-${captureSize}`, String(v)) }} className="h-8 border px-2">
+              {CAPTURE_BITRATES[captureSize].map((value) => <option key={value} value={value}>{value}k</option>)}
+            </select>
+            <label htmlFor="capture-encoder">Encoder</label>
+            <select id="capture-encoder" data-testid="capture-encoder" disabled={live} value={captureEncoder} onChange={(event) => { const v = event.target.value === "libx264" || event.target.value === "videotoolbox" ? event.target.value : "auto"; setCaptureEncoderState(v); window.localStorage.setItem("rtmp-capture-encoder", v) }} className="h-8 border px-2">
+              <option value="auto">Auto (VideoToolbox on Mac)</option>
+              <option value="libx264">libx264 (CPU)</option>
+              <option value="videotoolbox">VideoToolbox</option>
+            </select>
+            <span className="basis-full">Keyframe every 2s, constant bitrate (maxrate = bitrate, 2s buffer), + 128k audio.</span>
+          </>
+        ) : null}
+      </div>
+      {live && status.relay ? <p data-testid={tid("via-relay")} className="font-mono text-[12px] text-black/70">Publishing to relay /{channel}{status.size ? ` · ${status.size}` : ""}. Forwards are set in the Relay card.</p> : live && status.host ? <p className="font-mono text-[12px] text-black/70">Sending to {status.host}{status.size ? ` · ${status.size}` : ""}</p> : null}
+      {live && status.health ? <SourceHealthLine channel={channel} health={status.health} /> : null}
+      {live && status.health && !status.relay ? <DiagnosisLine testid={tid("diagnosis")} value={diagnose({ source: { label: label, health: status.health }, forwards: [], totalKbps: status.health.kbps })} /> : null}
+      {sameAsOther && !live ? <p role="alert" data-testid={tid("same-dest")} className="font-mono text-[12px] font-bold text-[#b42318]">The other channel is already live on this destination. One stream key takes one publisher; choose a different destination.</p> : null}
+      <div className="flex gap-2">
+        <Pill data-testid={tid("start")} disabled={!canStart || !selected || busy !== null || live} aria-busy={busy === "starting"} onClick={start}>{busy === "starting" ? "Starting…" : `Start ${label.toLowerCase()}`}</Pill>
+        <ConfirmButton data-testid={tid("stop")} className={pillClass("danger")} disabled={busy !== null || !live} confirmLabel={`Stop ${label.toLowerCase()}? · confirm`} onConfirm={stop}>{busy === "stopping" ? "Stopping…" : "Stop"}</ConfirmButton>
+      </div>
+      {status.connectError && live && phase !== "connected" ? <p role="alert" data-testid={tid("connect-error")} className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">{status.connectError}{status.restarts > 0 ? ` · retrying (${status.restarts})` : ""}. Not live yet.</p> : null}
+      {phase === "stalled" && live ? <p role="alert" data-testid={tid("stalled")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">ffmpeg is running but hasn&apos;t reported sending video recently. Check the ingest dashboard; Stop and Start again if it&apos;s not live.</p> : null}
+      {status.adopted && live ? <p data-testid={tid("adopted")} className="font-mono text-[13px] text-black/70">Found this stream already running (started before the server restarted). Stop works on it.</p> : null}
+      {status.failure && !live ? <p role="alert" data-testid={tid("failure")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">Failed: {status.failure.split("\n").filter(Boolean).slice(-3).join(" · ").slice(0, 400)}</p> : null}
+      {message ? <p role="status" data-testid={tid("message")} className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
+    </div>
+  )
+}
+
+type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
+type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
+type RelayView = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+
+const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
+const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
+
+/** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
+function RelayCard({ dests }: { dests: Dest[] }) {
+  const [relay, setRelay] = useState<RelayView | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
+  const [preview, setPreview] = useState<RtmpChannelId | null>(null)
+  const load = useCallback(async () => {
+    const response = await fetch("/api/relay", { cache: "no-store" }).catch(() => null)
+    if (!response || !response.ok) return
+    const body = (await response.json().catch(() => null)) as RelayView | null
+    if (body?.paths) setRelay(body)
+  }, [])
+  useEffect(() => {
+    const first = window.setTimeout(() => void load(), 0)
+    const id = window.setInterval(() => void load(), 2000)
+    return () => { window.clearTimeout(first); window.clearInterval(id) }
+  }, [load])
+  async function act(payload: Record<string, unknown>, okText?: string) {
+    setBusy(true)
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
+    setBusy(false)
+    if (!response) return setMessage({ tone: "error", text: "Could not reach the server." })
+    if (handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as (RelayView & { error?: string }) | null
+    if (body?.paths) setRelay(body)
+    if (!response.ok) return setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` })
+    setMessage(okText ? { tone: "info", text: okText } : null)
+  }
+  const running = relay?.running === true
+  return (
+    <div data-testid="relay-card" className="space-y-3 rounded-2xl border border-black/10 bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Relay (MediaMTX)</p>
+        {running && relay?.totalOutKbps ? <span data-testid="relay-total-out" title="Sum of all forwards plus direct channels: roughly your upload use" className="font-mono text-[12px] text-black/70">↑ {(relay.totalOutKbps / 1000).toFixed(1)} Mbps out</span> : null}
+        <span className="flex flex-wrap items-center gap-1">
+          <span data-testid="relay-status" data-state={!relay ? "loading" : !relay.installed ? "missing" : running ? (relay.apiUp ? "running" : "starting") : "off"} title="The MediaMTX server. It runs while a channel publishes to it or forwards are on." className={`rounded-full px-2 py-1 font-mono text-[11px] font-bold tracking-[0.1em] uppercase ${running && relay?.apiUp ? "bg-[#128a3e] text-white" : running ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>
+            {!relay ? "…" : !relay.installed ? "Not installed" : running ? (relay.apiUp ? (relay.adopted ? "Server on (found running)" : "Server on") : "Server starting…") : "Server off"}
+          </span>
+          <span data-testid="relay-forwards-status" data-state={relay?.enabled ? "on" : "off"} className={`rounded-full px-2 py-1 font-mono text-[11px] font-bold tracking-[0.1em] uppercase ${relay?.enabled ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
+            Forwards {relay?.enabled ? "on" : "off"}
+          </span>
+        </span>
+      </div>
+      <p className="font-mono text-[12px] text-black/70">Optional. Pick “Relay” as a channel’s destination and start it: it publishes to the relay server (preview works) without going anywhere else. Tick destinations per path, then Start forwards to fan out (one ffmpeg -c copy each, restarted on failure). Stop forwards ends the fan-out only; channels keep publishing. The server stops by itself when nothing uses it.{relay?.version ? ` MediaMTX ${relay.version}.` : ""}</p>
+      {relay && !relay.installed ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">MediaMTX not found. On the Mac: brew install mediamtx, or run scripts/install-mediamtx.sh, or set MEDIAMTX_BIN.</p> : null}
+      {relay?.error ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">{relay.error}</p> : null}
+      <div className="flex gap-2">
+        <Pill size="sm" data-testid="relay-start" disabled={busy || relay?.enabled === true || !relay?.installed} onClick={() => void act({ action: "start" }, "Forwards started.")}>Start forwards</Pill>
+        <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !relay?.enabled} confirmLabel="Stop all forwards? Channels keep publishing · confirm" onConfirm={() => void act({ action: "stop" }, "Forwards stopped. Channels keep publishing to the relay.")}>Stop forwards</ConfirmButton>
+      </div>
+      {(["slate", "capture"] as const).map((name) => {
+        const info = relay?.paths[name]
+        const enabled = new Map((info?.forwards ?? []).map((item) => [item.destId, item]))
+        return (
+          <div key={name} data-testid={`relay-path-${name}`} className="space-y-2 rounded-xl border border-black/10 p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[12px]">
+              <span className="font-bold">/{name}</span>
+              <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (set ${name === "slate" ? "Slate" : "Browser capture"} → Relay)`}</span>
+            </div>
+            {dests.length === 0 ? <p className="font-mono text-[12px] text-black/60">Add a destination below to forward to.</p> : null}
+            <ul className="space-y-1">
+              {dests.map((dest) => {
+                const fwd = enabled.get(dest.id)
+                const on = Boolean(fwd)
+                return (
+                  <li key={dest.id} className="space-y-1 font-mono text-[12px]">
+                    {/* Always stacked: name on its own line (wraps), status + stats below, so a narrow column never truncates names. */}
+                    <label className="flex min-w-0 items-start gap-2">
+                      <input type="checkbox" className="mt-0.5 shrink-0" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked })} />
+                      <span data-testid={`relay-fwd-name-${name}-${dest.name}`} className="min-w-0 break-words [overflow-wrap:anywhere]"><span className="font-bold">{dest.name}</span> <span className="text-black/60">· {dest.host}</span></span>
+                    </label>
+                    {fwd ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6">
+                    {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}</span> : null}
+                    {fwd && fwd.reconnects > 0 ? <span data-testid={`relay-fwd-reconnects-${name}-${dest.name}`} title={`A working connection to ${dest.name} dropped and was re-made ${fwd.reconnects}×. Total relaunches incl. quick retries: ${fwd.restarts}.`} className="font-mono text-[11px] text-[#8a4b06]">{fwd.reconnects} {fwd.reconnects === 1 ? "reconnect" : "reconnects"}</span> : fwd && fwd.restarts > 0 && fwd.state !== "forwarding" ? <span title="Quick retries: the forward could not connect (or the source was not publishing) and was started again." className="font-mono text-[11px] text-black/60">{fwd.restarts} {fwd.restarts === 1 ? "retry" : "retries"}</span> : null}
+                    {fwd && fwd.state === "forwarding" ? <HealthChip testid={`relay-fwd-health-${name}-${dest.name}`} health={fwd.health} /> : null}
+                    {fwd?.error && fwd.state !== "waiting" ? <span className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
+                    </div> : null}
+                  </li>
+                )
+              })}
+            </ul>
+            {info && (info.forwards.length > 0 || info.source) && info.ready ? <DiagnosisLine testid={`relay-diagnosis-${name}`} value={info.diagnosis} /> : null}
+            <Pill size="sm" tone="outline" data-testid={`relay-preview-${name}`} aria-pressed={preview === name} disabled={!info?.ready} onClick={() => setPreview(preview === name ? null : name)}>{preview === name ? "Hide preview" : "Preview what the relay receives"}</Pill>
+            {preview === name && info?.ready ? (
+              <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
+                <StreamPlayer src={`/api/relay/hls/${name}/index.m3u8`} />
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {message ? <p role="status" data-testid="relay-message" className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
+    </div>
+  )
+}
+
+const LEVEL_DOT: Record<Level, string> = { ok: "bg-[#128a3e]", warn: "bg-[#d97706]", bad: "bg-[#d93200]", idle: "bg-black/25" }
+const LEVEL_TEXT: Record<Level, string> = { ok: "text-[#0f6b31]", warn: "text-[#8a4b06]", bad: "text-[#a32600]", idle: "text-black/60" }
+
+/** "30.0 fps · 2510k · 1.00x" with a green/amber/red dot; warnings and counters on hover. */
+function HealthChip({ health, testid }: { health: HealthStats; testid?: string }) {
+  const parts = [health.fps !== null ? `${health.fps.toFixed(1)} fps` : null, health.kbps !== null ? `${health.kbps}k` : null, health.speed !== null ? `${health.speed.toFixed(2)}x` : null].filter(Boolean)
+  const extra = [health.dup ? `dup ${health.dup}` : null, health.drop ? `drop ${health.drop}` : null, health.bytes ? `${(health.bytes / 1e6).toFixed(0)} MB sent` : null, health.ageMs !== null ? `updated ${Math.round(health.ageMs / 1000)}s ago` : null].filter(Boolean).join(" · ")
+  return (
+    <span data-testid={testid} data-level={health.level} title={[...health.warnings, extra].filter(Boolean).join("\n")} className={`inline-flex min-w-0 flex-wrap items-center gap-x-1 font-mono text-[11px] ${LEVEL_TEXT[health.level]}`}>
+      <span className={`size-2 shrink-0 rounded-full ${LEVEL_DOT[health.level]}`} />
+      {parts.length ? parts.join(" · ") : "measuring…"}
+      {health.warnings.length ? <span className="font-bold"> · {health.warnings[0]}</span> : null}
+    </span>
+  )
+}
+
+function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health: SourceHealth | HealthStats }) {
+  const cap = "capture" in health ? health.capture : null
+  return (
+    <div data-testid={`rtmp-health-${channel}`} data-level={health.level} className="space-y-0.5 rounded-lg bg-black/[0.03] px-2 py-1">
+      <p className="font-mono text-[11px] text-black/60">Encoder {cap ? (cap.encoder === "h264_videotoolbox" ? "VideoToolbox" : "libx264") : "libx264"}</p>
+      <HealthChip health={health} />
+      {cap ? (
+        <p className="font-mono text-[11px] text-black/60" title="Chrome only sends a frame when /stream repaints (≥1/s for the countdown); the writer repeats the last one to keep a constant frame rate. Backlog = frames skipped because the encoder fell behind.">
+          Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function DiagnosisLine({ value, testid }: { value: { level: Level; text: string }; testid: string }) {
+  return (
+    <p data-testid={testid} data-level={value.level} className={`flex items-start gap-1.5 font-mono text-[12px] ${LEVEL_TEXT[value.level]}`}>
+      <span className={`mt-1 size-2 shrink-0 rounded-full ${LEVEL_DOT[value.level]}`} />
+      <span>{value.text}</span>
+    </p>
+  )
 }

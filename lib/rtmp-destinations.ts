@@ -8,9 +8,13 @@ import { allowedRtmpHost, DATA_DIR, validateRtmpUrl } from "@/lib/encoder"
  * The full URL (server + key) never leaves this module except via reveal()/resolve():
  * not in public state, /stream, logs or event.json.
  */
+/** Pseudo-destination a channel can select: publish to the local MediaMTX relay path instead. */
+export const RELAY_TARGET = "relay"
+
 export type Destination = { id: string; name: string; url: string; createdAt: number }
 export type MaskedDestination = { id: string; name: string; host: string; masked: string; createdAt: number }
-type Store = { selectedId: string | null; items: Destination[] }
+/** selectedId = Slate channel (kept for compatibility), selectedCaptureId = Browser capture channel. */
+type Store = { selectedId: string | null; selectedCaptureId: string | null; items: Destination[] }
 
 const NAME_MAX = 60
 
@@ -24,10 +28,10 @@ function read(): Store {
     const items = Array.isArray(parsed.items)
       ? parsed.items.filter((item): item is Destination => Boolean(item && typeof item.id === "string" && typeof item.name === "string" && typeof item.url === "string"))
       : []
-    const selectedId = typeof parsed.selectedId === "string" && items.some((item) => item.id === parsed.selectedId) ? parsed.selectedId : null
-    return { selectedId, items }
+    const valid = (id: unknown) => (typeof id === "string" && (id === RELAY_TARGET || items.some((item) => item.id === id)) ? id : null)
+    return { selectedId: valid(parsed.selectedId), selectedCaptureId: valid(parsed.selectedCaptureId), items }
   } catch {
-    return { selectedId: null, items: [] }
+    return { selectedId: null, selectedCaptureId: null, items: [] }
   }
 }
 
@@ -56,9 +60,9 @@ function mask(item: Destination): MaskedDestination {
   return { id: item.id, name: item.name, createdAt: item.createdAt, ...maskRtmpUrl(item.url) }
 }
 
-export function listDestinations(): { selectedId: string | null; items: MaskedDestination[] } {
+export function listDestinations(): { selectedId: string | null; selectedCaptureId: string | null; items: MaskedDestination[] } {
   const store = read()
-  return { selectedId: store.selectedId, items: store.items.map(mask) }
+  return { selectedId: store.selectedId, selectedCaptureId: store.selectedCaptureId, items: store.items.map(mask) }
 }
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string; status: number }
@@ -100,14 +104,16 @@ export function deleteDestination(id: unknown): Result<null> {
   store.items = store.items.filter((entry) => entry.id !== id)
   if (store.items.length === before) return { ok: false, error: "No such destination.", status: 404 }
   if (store.selectedId === id) store.selectedId = store.items[0]?.id ?? null
+  if (store.selectedCaptureId === id) store.selectedCaptureId = null
   write(store)
   return { ok: true, value: null }
 }
 
-export function selectDestination(id: unknown): Result<null> {
+export function selectDestination(id: unknown, channel: "slate" | "capture" = "slate"): Result<null> {
   const store = read()
-  if (id !== null && !store.items.some((entry) => entry.id === id)) return { ok: false, error: "No such destination.", status: 404 }
-  store.selectedId = id as string | null
+  if (id !== null && id !== RELAY_TARGET && !store.items.some((entry) => entry.id === id)) return { ok: false, error: "No such destination.", status: 404 }
+  if (channel === "capture") store.selectedCaptureId = id as string | null
+  else store.selectedId = id as string | null
   write(store)
   return { ok: true, value: null }
 }

@@ -23,6 +23,8 @@ export type EncoderStatus = {
   rtmpRestarts: number
   /** True when this server re-attached to a stream it found running (e.g. after a restart). */
   rtmpAdopted: boolean
+  /** What the running RTMP stream is publishing: the drawtext slate or a browser capture of /stream. */
+  rtmpSource: "slate" | "capture" | null
   /** How many of this project's supervisors are running; more than 1 needs "Stop all". */
   rtmpOwnProcesses: number
   /** Why the latest run failed to connect, e.g. "Can't connect to ingest (host): End of file". */
@@ -30,6 +32,24 @@ export type EncoderStatus = {
   /** Last give-up reason after the stream stopped (bad URL, too many quick failures). */
   rtmpFailure: string | null
   rtmpLogTail: string
+  /** Both RTMP channels, independent: Slate (drawtext) and Browser capture (/stream). */
+  rtmpChannels: Record<"slate" | "capture", {
+    running: boolean
+    state: "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
+    reconnecting: boolean
+    restarts: number
+    adopted: boolean
+    host: string | null
+    size: string | null
+    /** Publishing to the local MediaMTX relay, not straight to a destination. */
+    relay: boolean
+    bitrateK?: number | null
+    encoder?: string | null
+    health?: import("@/lib/stream-health").SourceHealth | import("@/lib/stream-health").HealthStats
+    connectError: string | null
+    failure: string | null
+    logTail: string
+  }>
   /** Other ffmpeg processes publishing over RTMP that this app did not start. */
   strayPublishers: { pid: number; command: string }[]
 }

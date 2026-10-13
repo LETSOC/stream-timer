@@ -1,7 +1,10 @@
+import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { EncoderStatus } from "@/lib/encoder-status";
+import { relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
+import { captureSourceHealth, EMPTY_HEALTH, healthFromSamples, parseStatsLines, type CaptureSourceStats, type HealthStats, type SourceHealth } from "@/lib/stream-health";
 
 export const ROOT = process.cwd();
 // Overridable so the lifecycle tests can use a temp dir and fake scripts.
@@ -48,6 +51,10 @@ export function redact(text: string): string {
 }
 
 /** Child processes never need the encoder token. */
+export function relayChildEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+  return childEnv(extra)
+}
+
 function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
   delete env.ENCODER_TOKEN;
@@ -69,7 +76,7 @@ export function pidRunsScript(pid: number, scriptPath: string): boolean {
 export type StopResult = { forced: boolean; survived: boolean }
 
 /** SIGTERM the process group, wait up to `graceMs`, then SIGKILL whatever is left. */
-async function killGroup(pid: number, graceMs = STOP_GRACE_MS): Promise<StopResult> {
+export async function killGroup(pid: number, graceMs = STOP_GRACE_MS): Promise<StopResult> {
   const signal = (sig: NodeJS.Signals) => {
     try { process.kill(-pid, sig) } catch { try { process.kill(pid, sig) } catch { /* already gone */ } }
   };
@@ -111,7 +118,7 @@ function noteStop(kind: string, result: StopResult): StopResult {
   return result
 }
 
-function groupAlive(pgid: number): boolean {
+export function groupAlive(pgid: number): boolean {
   try {
     process.kill(-pgid, 0);
     return true;
@@ -125,12 +132,6 @@ let encoderLock: Promise<unknown> = Promise.resolve();
 function withEncoderLock<T>(task: () => Promise<T>): Promise<T> {
   const run = encoderLock.then(task, task);
   encoderLock = run.catch(() => undefined);
-  return run;
-}
-let rtmpLock: Promise<unknown> = Promise.resolve();
-function withRtmpLock<T>(task: () => Promise<T>): Promise<T> {
-  const run = rtmpLock.then(task, task);
-  rtmpLock = run.catch(() => undefined);
   return run;
 }
 
@@ -227,9 +228,8 @@ export function validateRtmpUrl(raw: string): RtmpUrlCheck {
 
 export function readStatus(): EncoderStatus {
   const meta = readMeta();
-  adoptRunningSupervisor();
-  const rtmpRunning = rtmpAlive();
-  const supervisor = rtmpRunning ? readSupervisorState() : { state: null, restarts: 0, updatedAt: null };
+  const slate = readChannelStatus("slate");
+  const capture = readChannelStatus("capture");
   const running = meta ? pidRunsScript(meta.pid, SCRIPT) : false;
   const hls = hlsHealth(running, meta?.startedAt ?? null);
   if (meta && !running) {
@@ -255,16 +255,19 @@ export function readStatus(): EncoderStatus {
     burnedRemainingAtStart: running && meta ? meta.burnedRemainingAtStart : null,
     refreshSeconds: running && meta ? meta.refreshSeconds : null,
     encoderState: hls,
-    rtmpState: deriveRtmpState(rtmpRunning, supervisor.state, readTail(RTMP_LOG_FILE, 32768), readFailure(), { logAgeMs: fileAgeMs(RTMP_LOG_FILE), runAgeMs: supervisor.updatedAt ? Date.now() - supervisor.updatedAt : null }),
-    rtmpAdopted: rtmpRunning && readRtmpMeta()?.adopted === true,
+    // Top-level rtmp* fields describe the Slate channel (as before); rtmpChannels has both.
+    rtmpState: slate.state,
+    rtmpAdopted: slate.adopted,
+    rtmpSource: slate.running ? "slate" : capture.running ? "capture" : null,
     rtmpOwnProcesses: ownSupervisorCount(),
     stopNote: lastStopNote,
-    rtmpRunning,
-    rtmpReconnecting: rtmpRunning && supervisor.state === "waiting",
-    rtmpRestarts: supervisor.restarts,
-    rtmpConnectError: rtmpRunning ? parseConnectError(readTail(RTMP_LOG_FILE, 32768), readRtmpHost()) : null,
-    rtmpFailure: rtmpRunning ? null : readFailure(),
-    rtmpLogTail: redact(readTail(RTMP_LOG_FILE).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
+    rtmpRunning: slate.running,
+    rtmpReconnecting: slate.reconnecting,
+    rtmpRestarts: slate.restarts,
+    rtmpConnectError: slate.connectError,
+    rtmpFailure: slate.failure,
+    rtmpLogTail: slate.logTail,
+    rtmpChannels: { slate, capture },
     strayPublishers: findStrayPublishers(),
   };
 }
@@ -335,53 +338,102 @@ export function parseConnectError(log: string, host: string | null): string | nu
   return `Can't connect to ingest${host ? ` (${host})` : ""}: ${reason}`
 }
 
-function readRtmpHost(): string | null {
+// ---------- RTMP channels: Slate and Browser capture run independently ----------
+
+export type RtmpChannel = "slate" | "capture"
+export const RTMP_CHANNELS: RtmpChannel[] = ["slate", "capture"]
+
+/** Per-channel files. Slate keeps the original names so an older running stream is still found. */
+export function rtmpFiles(ch: RtmpChannel) {
+  if (ch === "slate") return { meta: RTMP_META_FILE, log: RTMP_LOG_FILE, state: RTMP_STATE_FILE, fail: RTMP_FAIL_FILE }
+  return {
+    meta: path.join(DATA_DIR, "rtmp-capture.json"),
+    log: path.join(DATA_DIR, "rtmp-capture.log"),
+    state: path.join(DATA_DIR, "rtmp-capture-supervisor.json"),
+    fail: path.join(DATA_DIR, "rtmp-capture-failed.json"),
+    stats: path.join(DATA_DIR, "rtmp-capture-stats.json"),
+  }
+}
+
+type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean; bitrateK?: number; encoder?: string }
+
+function readRtmpMeta(ch: RtmpChannel = "slate"): RtmpMeta | null {
   try {
-    const meta = JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { host?: unknown }
-    return typeof meta.host === "string" ? meta.host : null
+    return JSON.parse(fs.readFileSync(rtmpFiles(ch).meta, "utf8")) as RtmpMeta
   } catch {
     return null
   }
 }
 
-function readFailure(): string | null {
+function readRtmpHost(ch: RtmpChannel = "slate"): string | null {
+  const host = readRtmpMeta(ch)?.host
+  return typeof host === "string" ? host : null
+}
+
+function readFailure(ch: RtmpChannel = "slate"): string | null {
   try {
-    const parsed = JSON.parse(fs.readFileSync(RTMP_FAIL_FILE, "utf8")) as { error?: unknown }
+    const parsed = JSON.parse(fs.readFileSync(rtmpFiles(ch).fail, "utf8")) as { error?: unknown }
     return typeof parsed.error === "string" ? parsed.error : "failed"
   } catch {
     return null
   }
 }
 
-function writeFailure(error: string) {
+function writeFailure(error: string, ch: RtmpChannel = "slate") {
   try {
-    fs.writeFileSync(RTMP_FAIL_FILE, JSON.stringify({ error: redact(error).slice(0, 500), at: Date.now() }), { mode: 0o600 })
+    fs.writeFileSync(rtmpFiles(ch).fail, JSON.stringify({ error: redact(error).slice(0, 500), at: Date.now() }), { mode: 0o600 })
   } catch {
     /* best effort */
   }
 }
 
-function clearFailure() {
-  try { fs.unlinkSync(RTMP_FAIL_FILE) } catch { /* already gone */ }
+function clearFailure(ch: RtmpChannel = "slate") {
+  try { fs.unlinkSync(rtmpFiles(ch).fail) } catch { /* already gone */ }
 }
 
-function readRtmpPid(): number | null {
-  try {
-    const meta = JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number }
-    return typeof meta.pid === "number" ? meta.pid : null
-  } catch {
-    return null
-  }
+/** Slate: 2500k video + 128k audio (stream-countdown.sh). Capture: its chosen bitrate + 128k. */
+const SLATE_KBPS = 2628
+/** Live encoder health for a channel (slate: its ffmpeg stats lines; capture: the capture process's stats file). */
+function channelHealth(ch: RtmpChannel, running: boolean, meta: RtmpMeta | null): SourceHealth | HealthStats {
+  if (!running) return EMPTY_HEALTH
+  const files = rtmpFiles(ch)
+  if (ch === "slate") return healthFromSamples(parseStatsLines(readTail(files.log, 32768)), 5, fileAgeMs(files.log), { fps: 30, kbps: SLATE_KBPS })
+  let stats: (CaptureSourceStats & { enc?: { fps: number; kbps: number; speed: number; dup: number; drop: number; bytes: number } }) | null = null
+  try { stats = JSON.parse(fs.readFileSync((files as { stats: string }).stats, "utf8")) } catch { /* not yet */ }
+  if (!stats) return EMPTY_HEALTH
+  const enc = stats.enc
+  const expectKbps = (meta?.bitrateK ?? stats.bitrateK) + 128
+  const encoder: HealthStats = enc
+    ? (() => {
+        const warnings: string[] = []
+        let level: HealthStats["level"] = "ok"
+        const flag = (bad: boolean, text: string) => { warnings.push(text); if (bad) level = "bad"; else if (level === "ok") level = "warn" }
+        if (enc.speed < 0.97) flag(enc.speed < 0.9, `encoder speed ${enc.speed.toFixed(2)}x`)
+        if (enc.fps < stats!.fps - 2) flag(enc.fps < stats!.fps * 0.8, `${enc.fps.toFixed(1)} fps (want ${stats!.fps})`)
+        if (enc.kbps < expectKbps * 0.6) flag(enc.kbps < expectKbps * 0.4, `bitrate ${enc.kbps}k (set ${expectKbps}k)`)
+        return { fps: enc.fps, kbps: enc.kbps, speed: enc.speed, dup: enc.dup, drop: enc.drop, bytes: enc.bytes, ageMs: Math.round(Date.now() - stats!.at), level, warnings }
+      })()
+    : { ...EMPTY_HEALTH, ageMs: Date.now() - stats.at }
+  return captureSourceHealth(encoder, stats)
 }
 
-function rtmpAlive(): boolean {
-  const pid = readRtmpPid()
+function forgetChannel(ch: RtmpChannel) {
+  try { fs.unlinkSync(rtmpFiles(ch).meta) } catch { /* already gone */ }
+  try { fs.unlinkSync(rtmpFiles(ch).state) } catch { /* already gone */ }
+}
+
+function readRtmpPid(ch: RtmpChannel = "slate"): number | null {
+  const pid = readRtmpMeta(ch)?.pid
+  return typeof pid === "number" ? pid : null
+}
+
+function rtmpAlive(ch: RtmpChannel = "slate"): boolean {
+  const pid = readRtmpPid(ch)
   if (pid === null) return false
   if (pidRunsScript(pid, SUPERVISOR)) return true
   if (ownsGroup(pid, SUPERVISOR)) void killGroup(pid)
   // Stale pidfile (crash, reboot, pid reused): forget it.
-  try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
-  try { fs.unlinkSync(RTMP_STATE_FILE) } catch { /* already gone */ }
+  forgetChannel(ch)
   return false
 }
 
@@ -397,9 +449,9 @@ export function allowedRtmpHost(url: string): boolean {
   return list.some((allowed) => host === allowed || host.endsWith(`.${allowed}`))
 }
 
-function readSupervisorState(): { state: "running" | "waiting" | null; restarts: number; updatedAt: number | null } {
+function readSupervisorState(ch: RtmpChannel = "slate"): { state: "running" | "waiting" | null; restarts: number; updatedAt: number | null } {
   try {
-    const parsed = JSON.parse(fs.readFileSync(RTMP_STATE_FILE, "utf8")) as { state?: unknown; restarts?: unknown; updatedAt?: unknown }
+    const parsed = JSON.parse(fs.readFileSync(rtmpFiles(ch).state, "utf8")) as { state?: unknown; restarts?: unknown; updatedAt?: unknown }
     return {
       state: parsed.state === "running" || parsed.state === "waiting" ? parsed.state : null,
       restarts: typeof parsed.restarts === "number" ? parsed.restarts : 0,
@@ -419,22 +471,63 @@ function fileAgeMs(file: string): number | null {
   }
 }
 
-function readRtmpMeta(): { pid?: number; adopted?: boolean; host?: string } | null {
-  try {
-    return JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number; adopted?: boolean; host?: string }
-  } catch {
-    return null
+/** Fingerprint of an ingest URL (server + key) so two channels can't publish to one key; never the key itself. */
+export function destinationFingerprint(url: string): string {
+  return crypto.createHash("sha256").update(url.trim()).digest("hex").slice(0, 16)
+}
+
+export type RtmpChannelStatus = {
+  running: boolean
+  state: EncoderStatus["rtmpState"]
+  reconnecting: boolean
+  restarts: number
+  adopted: boolean
+  host: string | null
+  size: string | null
+  relay: boolean
+  bitrateK: number | null
+  encoder: string | null
+  health: SourceHealth | HealthStats
+  connectError: string | null
+  failure: string | null
+  logTail: string
+}
+
+export function readChannelStatus(ch: RtmpChannel): RtmpChannelStatus {
+  adoptRunningSupervisor(ch)
+  const running = rtmpAlive(ch)
+  const supervisor = running ? readSupervisorState(ch) : { state: null, restarts: 0, updatedAt: null }
+  const files = rtmpFiles(ch)
+  const meta = running ? readRtmpMeta(ch) : null
+  return {
+    running,
+    state: deriveRtmpState(running, supervisor.state, readTail(files.log, 32768), readFailure(ch), { logAgeMs: fileAgeMs(files.log), runAgeMs: supervisor.updatedAt ? Date.now() - supervisor.updatedAt : null }),
+    reconnecting: running && supervisor.state === "waiting",
+    restarts: supervisor.restarts,
+    adopted: running && meta?.adopted === true,
+    host: meta?.host ?? null,
+    size: typeof meta?.size === "string" ? meta.size : null,
+    relay: running && meta?.relay === true,
+    bitrateK: running ? (meta?.bitrateK ?? (ch === "slate" ? 2500 : null)) : null,
+    encoder: running ? (meta?.encoder ?? (ch === "slate" ? "libx264" : null)) : null,
+    health: channelHealth(ch, running, meta),
+    connectError: running ? parseConnectError(readTail(files.log, 32768), readRtmpHost(ch)) : null,
+    failure: running ? null : readFailure(ch),
+    logTail: redact(readTail(files.log).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
   }
 }
 
 // ---------- re-attaching to a stream that outlived the server (restart, rebuild, crash) ----------
 
+export type OwnSupervisor = { pid: number; channel: RtmpChannel; dest?: string; relay?: boolean }
+
 /**
- * Supervisor processes of THIS project: `bash <absolute path to our rtmp-supervisor.sh>`,
+ * Supervisor processes of THIS project: `bash <absolute path to our rtmp-supervisor.sh> [channel]`,
  * and process-group leaders (spawned detached), so another checkout's stream never matches.
+ * No channel argument = slate (streams started before channels existed).
  */
-export function parseOwnSupervisors(psOutput: string, supervisorPath: string): number[] {
-  const pids: number[] = []
+export function parseOwnSupervisorList(psOutput: string, supervisorPath: string): OwnSupervisor[] {
+  const found: OwnSupervisor[] = []
   for (const line of psOutput.split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
     if (!match) continue
@@ -442,41 +535,57 @@ export function parseOwnSupervisors(psOutput: string, supervisorPath: string): n
     const pgid = Number(match[2])
     const command = match[3].trim()
     if (pid !== pgid) continue
-    if (/^(\S*\/)?bash\s+/.test(command) && command.split(/\s+/).includes(supervisorPath)) pids.push(pid)
+    if (!/^(\S*\/)?bash\s+/.test(command)) continue
+    const parts = command.split(/\s+/)
+    const at = parts.indexOf(supervisorPath)
+    if (at < 0) continue
+    // argv: SUPERVISOR <channel> dest=<fingerprint>. The fingerprint is a hash, never the key; it lets an
+    // adopted stream (pidfile gone after a restart) still block a second publisher on the same destination.
+    const destArg = parts.slice(at + 1).find((part) => /^dest=[0-9a-f]{16}$/.test(part))
+    const relay = parts.slice(at + 1).includes("via=relay")
+    found.push({ pid, channel: parts[at + 1] === "capture" ? "capture" : "slate", ...(destArg ? { dest: destArg.slice(5) } : {}), ...(relay ? { relay: true } : {}) })
   }
-  return pids
+  return found
 }
 
-let ownCache: { at: number; value: number[] } = { at: 0, value: [] }
-export function findOwnSupervisors(): number[] {
+/** Back-compat: pids only. */
+export function parseOwnSupervisors(psOutput: string, supervisorPath: string): number[] {
+  return parseOwnSupervisorList(psOutput, supervisorPath).map((item) => item.pid)
+}
+
+let ownCache: { at: number; value: OwnSupervisor[] } = { at: 0, value: [] }
+export function findOwnSupervisorList(): OwnSupervisor[] {
   if (Date.now() - ownCache.at < 3000) return ownCache.value
   const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
-  const value = result.status === 0 ? parseOwnSupervisors(result.stdout, SUPERVISOR) : []
+  const value = result.status === 0 ? parseOwnSupervisorList(result.stdout, SUPERVISOR) : []
   ownCache = { at: Date.now(), value }
   return value
 }
+export function findOwnSupervisors(): number[] {
+  return findOwnSupervisorList().map((item) => item.pid)
+}
 
-function ownSupervisorCount(): number {
-  return findOwnSupervisors().length
+function ownSupervisorCount(ch?: RtmpChannel): number {
+  return findOwnSupervisorList().filter((item) => !ch || item.channel === ch).length
 }
 
 /**
- * No pidfile (or a stale one) but exactly one of our supervisors is running: take it back,
- * so the desk shows it and Stop works. Several running is a mess the operator must see ("Stop all").
+ * No pidfile (or a stale one) but exactly one of our supervisors for this channel is running:
+ * take it back, so the desk shows it and Stop works. Several is a mess the operator must see ("Stop all").
  */
-function adoptRunningSupervisor() {
-  const current = readRtmpPid()
+function adoptRunningSupervisor(ch: RtmpChannel = "slate") {
+  const current = readRtmpPid(ch)
   if (current !== null && pidRunsScript(current, SUPERVISOR)) return
-  const found = findOwnSupervisors()
+  const found = findOwnSupervisorList().filter((item) => item.channel === ch)
   if (found.length !== 1) return
   fs.mkdirSync(DATA_DIR, { recursive: true })
-  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: found[0], startedAt: Date.now(), adopted: true }))
+  fs.writeFileSync(rtmpFiles(ch).meta, JSON.stringify({ pid: found[0].pid, startedAt: Date.now(), adopted: true, source: ch, ...(found[0].dest ? { dest: found[0].dest } : {}), ...(found[0].relay ? { relay: true } : {}) }))
   strayCache = { at: 0, value: [] }
 }
 
-/** Stop every supervisor of this project plus stray RTMP ffmpeg publishers (explicit "Stop all"). */
+/** Stop every supervisor of this project (both channels) plus stray RTMP ffmpeg publishers (explicit "Stop all"). */
 export function stopAllRtmp(): Promise<{ stopped: number[]; strays: number[] }> {
-  return withRtmpLock(async () => {
+  return withRtmpLock("slate", () => withRtmpLock("capture", async () => {
     ownCache = { at: 0, value: [] }
     strayCache = { at: 0, value: [] }
     const supervisors = findOwnSupervisors()
@@ -486,25 +595,27 @@ export function stopAllRtmp(): Promise<{ stopped: number[]; strays: number[] }> 
     for (const pid of strays) {
       try { process.kill(pid, "SIGTERM") } catch { /* gone */ }
     }
-    try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
-    try { fs.unlinkSync(RTMP_STATE_FILE) } catch { /* already gone */ }
-    clearFailure()
+    for (const ch of RTMP_CHANNELS) {
+      forgetChannel(ch)
+      clearFailure(ch)
+      gates[ch].last = { kind: "stop", at: Date.now() }
+    }
     ownCache = { at: 0, value: [] }
     strayCache = { at: 0, value: [] }
-    lastRtmpCommand = { kind: "stop", at: Date.now() }
     return { stopped: supervisors, strays }
-  })
+  }))
 }
 
 export type StrayPublisher = { pid: number; command: string }
 
 /**
  * Finds ffmpeg processes that publish over RTMP but do not belong to this app's
- * supervisor (for example one left running in a Terminal tab). Two publishers on
+ * supervisors (for example one left running in a Terminal tab). Two publishers on
  * one Castr key is a common reason an old picture stays on air.
  * Input is `ps -axo pid=,pgid=,command=` output so it can be tested without ps.
  */
-export function parseStrayPublishers(psOutput: string, ownPgid: number | null, selfPid: number): StrayPublisher[] {
+export function parseStrayPublishers(psOutput: string, ownPgid: number | null | number[], selfPid: number): StrayPublisher[] {
+  const own = new Set((Array.isArray(ownPgid) ? ownPgid : [ownPgid]).filter((item): item is number => typeof item === "number"))
   const strays: StrayPublisher[] = []
   for (const line of psOutput.split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
@@ -513,7 +624,7 @@ export function parseStrayPublishers(psOutput: string, ownPgid: number | null, s
     const pgid = Number(match[2])
     const command = match[3]
     if (pid === selfPid) continue
-    if (ownPgid !== null && pgid === ownPgid) continue
+    if (own.has(pgid)) continue
     const isFfmpeg = /^(\S*\/)?ffmpeg(\s|$)/.test(command)
     if (!isFfmpeg || !/\s-f\s+flv\s/.test(command) || !/rtmps?:\/\//.test(command)) continue
     strays.push({ pid, command: redact(command).slice(0, 160) })
@@ -527,18 +638,15 @@ let strayCache: { at: number; value: StrayPublisher[] } = { at: 0, value: [] }
 export function findStrayPublishers(): StrayPublisher[] {
   if (Date.now() - strayCache.at < 5000) return strayCache.value
   const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
-  const value = result.status === 0 ? parseStrayPublishers(result.stdout, readRtmpPid(), process.pid) : []
+  const own = [...RTMP_CHANNELS.map((ch) => readRtmpPid(ch)), ...findOwnSupervisors(), ...relayProcessGroups()].filter((item): item is number => item !== null)
+  const value = result.status === 0 ? parseStrayPublishers(result.stdout, own, process.pid) : []
   strayCache = { at: Date.now(), value }
   return value
 }
 
 const SUPERVISOR_EXIT = /\[supervisor [^\]]*\] ffmpeg exited/
 
-/**
- * Starts the RTMP stream under scripts/rtmp-supervisor.sh, which relaunches
- * ffmpeg whenever it exits. Replaces any stream this app started earlier.
- */
-// ---------- RTMP command gate (spam-click / opposing-command protection) ----------
+// ---------- RTMP command gate (spam-click / opposing-command protection), one per channel ----------
 
 export type RtmpCommand = "start" | "stop"
 export type RtmpGateInput = {
@@ -569,49 +677,98 @@ export function decideRtmpCommand({ kind, inFlight, running, last, now }: RtmpGa
   return { action: "run" }
 }
 
-let rtmpInFlight: RtmpCommand | null = null
-let lastRtmpCommand: { kind: RtmpCommand; at: number } | null = null
+const gates: Record<RtmpChannel, { inFlight: RtmpCommand | null; last: { kind: RtmpCommand; at: number } | null; lock: Promise<unknown> }> = {
+  slate: { inFlight: null, last: null, lock: Promise.resolve() },
+  capture: { inFlight: null, last: null, lock: Promise.resolve() },
+}
 
-export function rtmpInFlightCommand(): RtmpCommand | null {
-  return rtmpInFlight
+function withRtmpLock<T>(ch: RtmpChannel, task: () => Promise<T>): Promise<T> {
+  const run = gates[ch].lock.then(task, task)
+  gates[ch].lock = run.catch(() => undefined)
+  return run
+}
+
+export function rtmpInFlightCommand(ch: RtmpChannel = "slate"): RtmpCommand | null {
+  return gates[ch].inFlight
 }
 
 type RtmpStartResult = { ok: true; note?: string } | { ok: false; error: string; status: number }
 type RtmpStopResult = (StopResult & { ok: true; note?: string }) | { ok: false; error: string; status: number }
 
-export function startRtmpStream(input: StartInput, rtmpUrl: string, now = Date.now()): Promise<RtmpStartResult> {
-  const gate = decideRtmpCommand({ kind: "start", inFlight: rtmpInFlight, running: rtmpAlive(), last: lastRtmpCommand, now })
-  if (gate.action === "reject") return Promise.resolve({ ok: false, error: gate.error, status: gate.status })
-  if (gate.action === "noop") return Promise.resolve({ ok: true, note: gate.note })
-  rtmpInFlight = "start"
-  return withRtmpLock(() => startRtmpStreamUnlocked(input, rtmpUrl)).finally(() => {
-    rtmpInFlight = null
-    lastRtmpCommand = { kind: "start", at: Date.now() }
+/** Slate = ffmpeg drawtext countdown; capture = headless Chromium rendering the real /stream page. */
+/** `relay: true` = publishing to the local MediaMTX relay path (lib/relay.ts) instead of a destination. */
+export type CaptureEncoder = "auto" | "libx264" | "videotoolbox"
+export type RtmpSource = ({ kind: "slate" } | { kind: "capture"; pageUrl: string; size: "1280x720" | "1920x1080"; bitrateK?: number; encoder?: CaptureEncoder }) & { relay?: boolean }
+
+/** What each channel publishes to right now (fingerprints only), for the relay's same-destination guard. */
+export function directChannelDests(): { channel: RtmpChannel; running: boolean; dest?: string; relay?: boolean }[] {
+  return RTMP_CHANNELS.map((channel) => {
+    const running = rtmpAlive(channel)
+    const meta = running ? readRtmpMeta(channel) : null
+    return { channel, running, dest: meta?.dest, relay: meta?.relay === true }
   })
 }
 
-async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+/** Pure: may this channel start to `fingerprint`? Castr (and most ingests) take one publisher per key. */
+const pendingDest: Record<RtmpChannel, string | null> = { slate: null, capture: null }
+
+export function sameDestinationConflict(fingerprint: string, others: { channel: RtmpChannel; running: boolean; dest?: string }[]): RtmpChannel | null {
+  return others.find((other) => other.running && other.dest === fingerprint)?.channel ?? null
+}
+
+export function startRtmpStream(input: StartInput, rtmpUrl: string, now = Date.now(), source: RtmpSource = { kind: "slate" }): Promise<RtmpStartResult> {
+  const ch: RtmpChannel = source.kind
+  const gate = decideRtmpCommand({ kind: "start", inFlight: gates[ch].inFlight, running: rtmpAlive(ch), last: gates[ch].last, now })
+  if (gate.action === "reject") return Promise.resolve({ ok: false, error: gate.error, status: gate.status })
+  if (gate.action === "noop") return Promise.resolve({ ok: true, note: gate.note })
+  const other: RtmpChannel = ch === "slate" ? "capture" : "slate"
+  const fingerprint = destinationFingerprint(rtmpUrl)
+  // A start still in flight on the other channel counts too (its pidfile isn't written yet).
+  const clash = sameDestinationConflict(fingerprint, [
+    { channel: other, running: rtmpAlive(other), dest: readRtmpMeta(other)?.dest },
+    { channel: other, running: pendingDest[other] !== null, dest: pendingDest[other] ?? undefined },
+  ])
+  const relayClash = source.relay ? undefined : relayForwardFingerprints().find((item) => item.dest === fingerprint)
+  if (relayClash) {
+    return Promise.resolve({ ok: false, status: 409, error: `The relay (/${relayClash.path}) is forwarding to this destination. One stream key takes one publisher: turn that forward off or pick another destination.` })
+  }
+  if (clash) {
+    return Promise.resolve({ ok: false, status: 409, error: `The ${clash === "capture" ? "Browser capture" : "Slate"} stream is already publishing to this destination. One stream key takes one publisher: pick another destination or stop that stream first.` })
+  }
+  gates[ch].inFlight = "start"
+  pendingDest[ch] = fingerprint
+  return withRtmpLock(ch, () => startRtmpStreamUnlocked(input, rtmpUrl, source)).finally(() => {
+    pendingDest[ch] = null
+    gates[ch].inFlight = null
+    gates[ch].last = { kind: "start", at: Date.now() }
+  })
+}
+
+async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, source: RtmpSource = { kind: "slate" }): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const ch: RtmpChannel = source.kind
+  const files = rtmpFiles(ch)
   const checked = validateRtmpUrl(rtmpUrl)
   if (!checked.ok) return { ok: false, error: checked.error, status: 400 }
   const url = checked.url
-  if (!allowedRtmpHost(url)) {
+  if (!source.relay && !allowedRtmpHost(url)) {
     return { ok: false, error: "That RTMP host is not in RTMP_ALLOWED_HOSTS.", status: 400 }
   }
   if (!ffmpegAvailable({ fresh: true })) return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 }
   if (!fs.existsSync(/* turbopackIgnore: true */ SCRIPT) || !fs.existsSync(/* turbopackIgnore: true */ SUPERVISOR)) {
     return { ok: false, error: "The countdown script is missing.", status: 500 }
   }
-  // Wait for the old publisher to be fully gone before connecting again, so two
+  // Wait for this channel's old publisher to be fully gone before connecting again, so two
   // ffmpegs never push to the same stream key at once.
-  await stopRtmpStreamUnlocked()
-  clearFailure()
+  await stopRtmpStreamUnlocked(ch)
+  clearFailure(ch)
+  if (ch === "capture") fs.rmSync((files as { stats: string }).stats, { force: true })
   strayCache = { at: 0, value: [] }
   fs.mkdirSync(DATA_DIR, { recursive: true })
-  // The raw log holds the ingest URL (key + password): owner-only.
-  fs.writeFileSync(RTMP_LOG_FILE, "", { mode: 0o600 })
-  fs.chmodSync(RTMP_LOG_FILE, 0o600)
-  const logFd = fs.openSync(RTMP_LOG_FILE, "a")
-  const child = spawn("bash", [SUPERVISOR], {
+  // The raw log may hold the ingest URL (key + password): owner-only.
+  fs.writeFileSync(files.log, "", { mode: 0o600 })
+  fs.chmodSync(files.log, 0o600)
+  const logFd = fs.openSync(files.log, "a")
+  const child = spawn("bash", [SUPERVISOR, ch, `dest=${destinationFingerprint(url)}`, ...(source.relay ? ["via=relay"] : [])], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
     cwd: ROOT,
@@ -620,9 +777,12 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Prom
       EVENT_LINE: input.dateLine,
       TARGET_UNIX: String(input.targetUnix),
       RTMP_URL: url,
-      RTMP_STATE_FILE,
-      RTMP_LOG_FILE,
-      RTMP_FAIL_FILE,
+      RTMP_STATE_FILE: files.state,
+      RTMP_LOG_FILE: files.log,
+      RTMP_FAIL_FILE: files.fail,
+      ...(source.kind === "capture"
+        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
+        : {}),
     }),
   })
   child.unref()
@@ -630,63 +790,65 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Prom
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
   let host = ""
   try { host = new URL(url).hostname } catch { /* validated above */ }
-  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host }))
+  fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, ...(source.kind === "capture" ? { bitrateK: source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500), encoder: source.encoder ?? "auto" } : {}), dest: destinationFingerprint(url), ...(source.relay ? { relay: true } : {}) }))
 
   // Wait for the first connection. "Output #0" means ffmpeg opened the RTMP output.
   // A supervisor "exited" line this early means the URL or script is wrong, so stop
   // retrying and show the error instead of looping silently.
-  const deadline = Date.now() + 8000
+  // Browser capture needs a few extra seconds to launch Chromium and load /stream.
+  const deadline = Date.now() + (ch === "capture" ? 15000 : 8000)
   while (Date.now() < deadline) {
     await delay(400)
     if (!alive(child.pid)) break
-    const log = readTail(RTMP_LOG_FILE, 32768)
+    const log = readTail(files.log, 32768)
     if (SUPERVISOR_EXIT.test(log)) {
-      await stopRtmpStreamUnlocked()
-      const error = redact(readTail(RTMP_LOG_FILE, 4000)) || "ffmpeg exited before the stream connected."
-      writeFailure(error)
+      await stopRtmpStreamUnlocked(ch)
+      const error = redact(readTail(files.log, 4000)) || "ffmpeg exited before the stream connected."
+      writeFailure(error, ch)
       return { ok: false, error, status: 500 }
     }
     if (/Output #0/.test(log)) return { ok: true }
   }
   if (!alive(child.pid)) {
-    const error = redact(readTail(RTMP_LOG_FILE, 4000)) || "The RTMP supervisor exited."
-    writeFailure(error)
+    const error = redact(readTail(files.log, 4000)) || "The RTMP supervisor exited."
+    writeFailure(error, ch)
     return { ok: false, error, status: 500 }
   }
-  // Still connecting after 8s: the supervisor keeps retrying and the desk shows "Reconnecting".
+  // Still connecting: the supervisor keeps retrying and the desk shows "Reconnecting".
   return { ok: true }
 }
 
-export function stopRtmpStream(now = Date.now()): Promise<RtmpStopResult> {
-  const gate = decideRtmpCommand({ kind: "stop", inFlight: rtmpInFlight, running: rtmpAlive(), last: lastRtmpCommand, now })
+export function stopRtmpStream(now = Date.now(), ch: RtmpChannel = "slate"): Promise<RtmpStopResult> {
+  const gate = decideRtmpCommand({ kind: "stop", inFlight: gates[ch].inFlight, running: rtmpAlive(ch), last: gates[ch].last, now })
   if (gate.action === "reject") return Promise.resolve({ ok: false, error: gate.error, status: gate.status })
   if (gate.action === "noop") {
-    clearFailure()
+    clearFailure(ch)
     return Promise.resolve({ ...NOT_STOPPED, ok: true, note: gate.note })
   }
-  rtmpInFlight = "stop"
-  return withRtmpLock(async () => {
-    clearFailure()
-    return { ...(await stopRtmpStreamUnlocked()), ok: true as const }
+  gates[ch].inFlight = "stop"
+  return withRtmpLock(ch, async () => {
+    clearFailure(ch)
+    return { ...(await stopRtmpStreamUnlocked(ch)), ok: true as const }
   }).finally(() => {
-    rtmpInFlight = null
-    lastRtmpCommand = { kind: "stop", at: Date.now() }
+    gates[ch].inFlight = null
+    gates[ch].last = { kind: "stop", at: Date.now() }
   })
 }
 
-/** Test hook: forget the gate's in-memory history. */
+/** Test hook: forget the gates' in-memory history. */
 export function resetRtmpGate() {
-  rtmpInFlight = null
-  lastRtmpCommand = null
+  for (const ch of RTMP_CHANNELS) {
+    gates[ch].inFlight = null
+    gates[ch].last = null
+  }
 }
 
-async function stopRtmpStreamUnlocked(): Promise<StopResult> {
-  const pid = readRtmpPid()
+async function stopRtmpStreamUnlocked(ch: RtmpChannel = "slate"): Promise<StopResult> {
+  const pid = readRtmpPid(ch)
   // The supervisor, the script and ffmpeg share one process group. Only signal it
   // if it is still ours (not a reused pid from a stale file).
   const result = pid !== null && ownsGroup(pid, SUPERVISOR) ? noteStop("RTMP stream", await killGroup(pid)) : NOT_STOPPED
-  try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
-  try { fs.unlinkSync(RTMP_STATE_FILE) } catch { /* already gone */ }
+  forgetChannel(ch)
   return result
 }
 
