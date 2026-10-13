@@ -1016,7 +1016,18 @@ export function OperatorConsole() {
             <Pill size="sm" tone={thirds ? "solid" : "outline"} aria-pressed={thirds} onClick={() => setThirds(!thirds)}>3×3 grid</Pill>
             <Pill size="sm" tone={footage ? "solid" : "outline"} aria-pressed={footage} disabled={!transparent} title={transparent ? undefined : "Turn on transparent background to preview over footage"} onClick={() => setFootage(!footage)}>Game footage bg</Pill>
           </div>
-          <div data-testid="preview-pin" data-pinned={pinPreview ? "true" : "false"} className={pinPreview ? "fixed inset-x-0 top-0 z-40 border-b border-black/15 bg-[#F6F6F3]/95 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)] backdrop-blur [-webkit-backdrop-filter:blur(8px)] sm:px-6 lg:sticky lg:top-[var(--desk-header-h,5.5rem)] lg:inset-x-auto lg:z-10 lg:-mx-1 lg:px-1 lg:pt-1 lg:pb-3 lg:backdrop-blur-none" : ""}>
+          <div data-testid="preview-pin" data-pinned={pinPreview ? "true" : "false"} className={pinPreview ? "fixed inset-x-0 top-0 z-40 lg:pr-12 border-b border-black/15 bg-[#F6F6F3]/95 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)] backdrop-blur [-webkit-backdrop-filter:blur(8px)] sm:px-6 lg:sticky lg:top-[var(--desk-header-h,5.5rem)] lg:inset-x-auto lg:z-10 lg:-mx-1 lg:px-1 lg:pt-1 lg:pb-3 lg:backdrop-blur-none" : ""}>
+            {pinPreview ? (
+              <button
+                type="button"
+                data-testid="unpin-preview"
+                aria-label="Unpin preview"
+                onClick={() => setPinPreview(false)}
+                className="group absolute top-full right-[max(0.5rem,env(safe-area-inset-right))] z-30 inline-flex p-1 focus-visible:outline-none lg:top-1 lg:right-0"
+              >
+                <span aria-hidden className="inline-flex size-8 items-center justify-center rounded-full border border-black/15 bg-white text-[18px] leading-none font-bold text-black shadow-md group-hover:bg-black group-hover:text-white group-focus-visible:ring-2 group-focus-visible:ring-[#ff3c00] lg:size-9">×</span>
+              </button>
+            ) : null}
           <div
             data-testid="preview-frame"
             className={`relative mx-auto overflow-hidden ${pinPreview ? "max-w-[min(100%,calc(26svh*16/9))] lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
@@ -1028,17 +1039,6 @@ export function OperatorConsole() {
                 : { background: "#000" }
             }
           >
-            {pinPreview ? (
-              <button
-                type="button"
-                data-testid="unpin-preview"
-                aria-label="Unpin preview"
-                onClick={() => setPinPreview(false)}
-                className="absolute top-1.5 right-1.5 z-30 inline-flex size-11 items-center justify-center rounded-full border border-white/40 bg-black/70 text-[22px] leading-none font-bold text-white shadow-lg backdrop-blur hover:bg-black/85 focus-visible:ring-2 focus-visible:ring-[#ff3c00] focus-visible:outline-none"
-              >
-                <span aria-hidden>×</span>
-              </button>
-            ) : null}
             {transparent && footage ? (
               <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center blur-md brightness-75" style={{ backgroundImage: "url(/brand/hero-bg.png)" }} />
             ) : null}
