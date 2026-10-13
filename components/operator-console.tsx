@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { NumberField } from "@/components/number-field"
 import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
@@ -1431,16 +1432,16 @@ export function OperatorConsole() {
             {draftBar("speakers")}
             <p className="font-mono text-[13px] leading-5 text-black/70">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
             <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
-              <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
+              <NumberField id="gallery-seconds" value={gallerySeconds} onChange={setGallerySeconds} rule={{ min: 2, max: 30, integer: true }} unit="s" />
             </Field>
             <Field label="Pause before it returns" htmlFor="gallery-pause">
-              <Input id="gallery-pause" type="number" min={2} max={30} value={galleryPause} onChange={(event) => setGalleryPause(Math.min(30, Math.max(2, Number(event.target.value) || 6)))} />
+              <NumberField id="gallery-pause" value={galleryPause} onChange={setGalleryPause} rule={{ min: 2, max: 30, integer: true }} unit="s" />
             </Field>
             <Field label="Vertical position (px, higher moves it down)" htmlFor="gallery-offset">
-              <Input id="gallery-offset" type="number" min={-600} max={400} value={galleryOffset} onChange={(event) => setGalleryOffset(Math.min(400, Math.max(-600, Number(event.target.value) || 0)))} />
+              <NumberField id="gallery-offset" value={galleryOffset} onChange={setGalleryOffset} rule={{ min: -600, max: 400, integer: true }} unit="px" />
             </Field>
             <Field label="Portrait size (%)" htmlFor="gallery-scale">
-              <Input id="gallery-scale" type="number" min={40} max={200} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(200, Math.max(40, Number(event.target.value) || 80)))} />
+              <NumberField id="gallery-scale" value={galleryScale} onChange={setGalleryScale} rule={{ min: 40, max: 200, integer: true }} unit="%" />
             </Field>
             {speakers.length > 0 ? <div><Pill data-testid="add-speaker-top" tone="outline" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>+ Add speaker</Pill></div> : null}
             {speakers.map((speaker, index) => (
