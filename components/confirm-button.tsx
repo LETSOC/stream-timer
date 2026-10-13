@@ -23,7 +23,7 @@ export function ConfirmButton({
       type="button"
       {...props}
       aria-live="polite"
-      className={`${className} ${armed ? "ring-2 ring-[#ff3c00] ring-offset-2" : ""}`}
+      className={`${className} ${armed ? "ring-2 ring-[#b42318] ring-offset-2" : ""}`}
       onClick={() => {
         if (!armed) {
           setArmed(true)
