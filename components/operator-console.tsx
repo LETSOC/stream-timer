@@ -431,7 +431,7 @@ export function OperatorConsole() {
   }
 
   return (
-    <div className="min-h-full bg-[#F6F6F3] text-black [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]">
+    <div data-pin-spacer={pinPreview ? "true" : undefined} className={`min-h-full bg-[#F6F6F3] text-black ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
       <header className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -765,10 +765,10 @@ export function OperatorConsole() {
             <Pill size="sm" tone={thirds ? "solid" : "outline"} aria-pressed={thirds} onClick={() => setThirds(!thirds)}>3×3 grid</Pill>
             <Pill size="sm" tone={footage ? "solid" : "outline"} aria-pressed={footage} disabled={!transparent} title={transparent ? undefined : "Turn on transparent background to preview over footage"} onClick={() => setFootage(!footage)}>Game footage bg</Pill>
           </div>
-          <div data-testid="preview-pin" data-pinned={pinPreview ? "true" : "false"} className={pinPreview ? "sticky top-0 z-30 -mx-4 border-b border-black/15 bg-[#F6F6F3]/95 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)] backdrop-blur sm:-mx-6 sm:px-6 lg:z-10 lg:-mx-1 lg:px-1 lg:pt-1 lg:pb-3" : ""}>
+          <div data-testid="preview-pin" data-pinned={pinPreview ? "true" : "false"} className={pinPreview ? "fixed inset-x-0 top-0 z-40 border-b border-black/15 bg-[#F6F6F3]/95 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)] backdrop-blur [-webkit-backdrop-filter:blur(8px)] sm:px-6 lg:sticky lg:inset-x-auto lg:z-10 lg:-mx-1 lg:px-1 lg:pt-1 lg:pb-3 lg:backdrop-blur-none" : ""}>
           <div
             data-testid="preview-frame"
-            className={`relative mx-auto overflow-hidden ${pinPreview ? "max-w-[calc(26svh*16/9)] lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
+            className={`relative mx-auto overflow-hidden ${pinPreview ? "max-w-[min(100%,calc(26svh*16/9))] lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
             style={
               transparent && footage
                 ? { background: "#111" }
