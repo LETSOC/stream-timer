@@ -106,3 +106,10 @@ test("server save with identical content keeps rev (no ping-pong between synced 
   const again = es.writeServerEvent({ ...DEFAULT_EVENT }, null, null, {}, first.rev - 5)!
   assert.equal(again.rev, first.rev)
 })
+
+test("previewSkew: a remote clear (null testUntil, no pause) puts the preview back on real time", async () => {
+  const { previewSkew } = await import("@/lib/desk-sections")
+  assert.equal(previewSkew(10_000, 4_000, null, 0), 6_000)
+  assert.equal(previewSkew(10_000, null, null, 6_000), 0, "cleared elsewhere")
+  assert.equal(previewSkew(10_000, null, 123, 6_000), 6_000, "paused keeps its offset")
+})

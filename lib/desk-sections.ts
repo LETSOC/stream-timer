@@ -78,3 +78,10 @@ export function planRemoteSync(draft: DeskSnapshot, published: DeskSnapshot, rem
   }
   return { take, conflicts }
 }
+
+/** Preview clock offset from the shared clock fields. null testUntil and no pause = real time (0). */
+export function previewSkew(targetMs: number, testUntil: number | null, pausedMs: number | null, current: number): number {
+  if (testUntil) return targetMs - testUntil
+  if (!pausedMs) return 0
+  return current
+}

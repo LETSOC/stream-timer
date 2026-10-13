@@ -28,7 +28,7 @@ import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { DEFAULT_STAGE, parseStage, stageScreen, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
-import { IMMEDIATE_STAGE, pickSection, planRemoteSync, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
+import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
@@ -355,7 +355,9 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!hydrated || !valid) return
-    if (testUntil) setSkewMs(target.getTime() - testUntil)
+    // Follows testUntil/pausedAt whoever set them (this desk or a synced one): clearing the test clock
+    // on another device must put this preview back on real time too, not just hide the banner.
+    setSkewMs((current) => previewSkew(target.getTime(), testUntil, pausedMs || null, current))
     window.localStorage.setItem("hyphen-countdown-clock", JSON.stringify({ testUntil, pausedAt: pausedMs || null }))
   }, [hydrated, valid, target, testUntil, pausedMs])
 
@@ -607,9 +609,16 @@ export function OperatorConsole() {
 
   useEffect(() => {
     if (!token || !hydrated || !published) return
-    const id = window.setTimeout(() => sendSaveRef.current(JSON.parse(payloadJson)), 400)
+    const id = window.setTimeout(() => {
+      saveTimer.current = null
+      sendSaveRef.current(JSON.parse(payloadJson))
+    }, 400)
     saveTimer.current = id
-    return () => window.clearTimeout(id)
+    return () => {
+      window.clearTimeout(id)
+      // A cancelled debounce must not leave a stale handle: live sync skips while a save is "pending".
+      if (saveTimer.current === id) saveTimer.current = null
+    }
   }, [payloadJson, token, hydrated, published])
 
   const stableHref = useMemo(() => {
@@ -1253,6 +1262,7 @@ export function OperatorConsole() {
             ) : null}
           <div
             data-testid="preview-frame"
+            data-skew={skewMs}
             className={`relative mx-auto overflow-hidden ${pinPreview ? "max-w-[min(100%,calc(26svh*16/9))] lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
             style={
               transparent && footage
