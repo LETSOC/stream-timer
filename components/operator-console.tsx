@@ -26,7 +26,7 @@ import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@
 import { useNow } from "@/lib/use-now"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
-import { useEncoderToken } from "@/lib/use-encoder-token"
+import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import type { StageOptions } from "@/lib/event-server"
 import { ConfirmButton } from "@/components/confirm-button"
 import {
@@ -69,7 +69,9 @@ export function OperatorConsole() {
   const [endAt, setEndAt] = useState("16:15")
   const [forceEnd, setForceEnd] = useState(false)
   const [holdCountdown, setHoldCountdown] = useState(false)
-  const token = useEncoderToken()
+  const [operator, setOperator] = useOperator()
+  // Truthy once the session is confirmed; gates autosave like the old encoder token did.
+  const token = operator.operator ? "session" : ""
   const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
   const [syncError, setSyncError] = useState("")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
@@ -129,8 +131,9 @@ export function OperatorConsole() {
       meta: showMeta ? "1" : "0",
       bg: transparent ? "clear" : "black",
     })
+    if (operator.viewKey) params.set("k", operator.viewKey)
     return `/stream?${params.toString()}`
-  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl, checker, showMeta, showLink, transparent])
+  }, [name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl, checker, showMeta, showLink, transparent, operator.viewKey])
 
   const streamCommand = buildStreamShellCommand({
     eventName: name,
@@ -274,9 +277,10 @@ export function OperatorConsole() {
       try {
         const response = await fetch("/api/event", {
           method: "PUT",
-          headers: { "Content-Type": "application/json", "x-encoder-token": token },
+          headers: { "Content-Type": "application/json" },
           body: json,
         })
+        if (handleUnauthorized(response)) return
         if (seq !== saveSeq.current) return
         if (response.ok) {
           setSyncState("saved")
@@ -313,9 +317,24 @@ export function OperatorConsole() {
     if (!showMeta) params.set("meta", "0")
     if (!showLink) params.set("showlink", "0")
     if (transparent) params.set("bg", "clear")
+    if (operator.viewKey) params.set("k", operator.viewKey)
     const query = params.toString()
     return query ? `/stream?${query}` : "/stream"
-  }, [checker, showMeta, showLink, transparent])
+  }, [checker, showMeta, showLink, transparent, operator.viewKey])
+  const endHref = operator.viewKey ? `/end?k=${encodeURIComponent(operator.viewKey)}` : "/end"
+
+  async function rotateViewKey() {
+    const response = await fetch("/api/view-key", { method: "POST" })
+    if (handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as { key?: string; error?: string } | null
+    if (response.ok && body?.key) setOperator((current) => ({ ...current, viewKey: body.key ?? "" }))
+    else if (body?.error) setToast(body.error)
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined)
+    hardNavigate("/login")
+  }
 
   useEffect(() => {
     if (!previewReady.current) {
@@ -392,7 +411,13 @@ export function OperatorConsole() {
   }, [])
 
   async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
-    await navigator.clipboard.writeText(value)
+    // navigator.clipboard is missing on plain-http non-localhost origins (e.g. LAN IP).
+    const copiedOk = await navigator.clipboard?.writeText(value).then(() => true, () => false)
+    if (!copiedOk) {
+      setToast(value)
+      window.setTimeout(() => setToast((current) => (current === value ? null : current)), 6000)
+      return
+    }
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
     if (kind === "link" || kind === "params") {
@@ -419,7 +444,8 @@ export function OperatorConsole() {
                 {previewRemaining?.done ? "LIVE" : "Armed"}
               </span>
             </span>
-            <SyncBadge state={syncState} hasToken={Boolean(token)} error={syncError} />
+            <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
+            {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
             <Button type="button" className={pillClass()} onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
@@ -670,7 +696,7 @@ export function OperatorConsole() {
                   setRtmpMessage("")
                   void fetch("/api/encoder", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json", "x-encoder-token": token },
+                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ mode: "rtmp", rtmpUrl, eventName: name, dateLine, targetUnix, refreshSeconds: 0 }),
                   })
                     .then(async (response) => {
@@ -693,7 +719,7 @@ export function OperatorConsole() {
                 Start stream
               </Pill>
               <ConfirmButton className={pillClass("danger")} onConfirm={() => {
-                  void fetch("/api/encoder?target=rtmp", { method: "DELETE", headers: { "x-encoder-token": token } }).then(() => {
+                  void fetch("/api/encoder?target=rtmp", { method: "DELETE" }).then(() => {
                     setRtmpState("idle")
                     setRtmpLive(false)
                     setRtmpMessage("Stream stopped.")
@@ -803,6 +829,11 @@ export function OperatorConsole() {
             >
               {copied === "params" ? "Copied" : "Copy full param URL"}
             </Button>
+            {operator.viewKey && !operator.viewKeyFromEnv ? (
+              <ConfirmButton className={pillClass("danger")} confirmLabel="Old OBS URLs stop working · confirm" onConfirm={() => void rotateViewKey()}>
+                Rotate view key
+              </ConfirmButton>
+            ) : null}
           </div>
           <p className="font-mono text-[13px] leading-5 text-black/70">
             — This is a local draft preview. No data leaves the browser. For OBS, add a Browser Source at 1920×1080 and paste the copied link. Countdown runs off this computer’s clock.
@@ -810,7 +841,7 @@ export function OperatorConsole() {
           </p>
           <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
           <Panel id="end-card" title="End card">
-            <p className="font-mono text-[13px] leading-5 text-black/70">OBS browser source: http://localhost:43211/end. This page is separate from the countdown.</p>
+            <p className="font-mono text-[13px] leading-5 break-all text-black/70">OBS browser source: {operator.origin}{endHref}. This page is separate from the countdown.</p>
             <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
             <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
@@ -1053,7 +1084,7 @@ function SyncBadge({ state, hasToken, error }: { state: "idle" | "saved" | "loca
       ? { label: "Local only · /stream not updated", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
       : hasToken
         ? { label: "Syncing…", tone: "border-black/15 bg-black/5 text-black/75", dot: "bg-black/40" }
-        : { label: "Out of sync · no encoder token", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+        : { label: "Out of sync · not logged in", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
   return (
     <span role="status" aria-live="polite" title={error || undefined} className={`max-w-[42ch] truncate inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[12px] font-bold tracking-[0.08em] uppercase ${view.tone}`}>
       <span className={`size-2 rounded-full ${view.dot}`} aria-hidden />

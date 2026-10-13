@@ -108,3 +108,23 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.letsoc.stream-timer.
 It brings the desk back after a reboot, not the RTMP stream: press Start stream again. On Linux use `deploy/stream-timer.service` (systemd) instead.
 
 Encoder hardening: requests that arrive through a proxy or tunnel, or with a non-local `Host`/`Origin`, are never treated as local. Set `RTMP_ALLOWED_HOSTS=castr.io` to refuse any other ingest host. `data/rtmp.log` is owner-only (it holds the raw ingest URL) and is trimmed past 5 MB.
+
+## Operator login and OBS view key
+
+**Local (Mac, default):** `npm run dev` with no extra env runs in *local mode*: the desk at `http://127.0.0.1:43211` needs no login and OBS URLs work with or without a key, exactly as before.
+
+**Password mode** turns on when `OPERATOR_PASSWORD_HASH` (or `OPERATOR_PASSWORD`) is set, when `AUTH_MODE=password`, or when `BIND_HOST` is not loopback (always the case in the cloud).
+
+```bash
+npm run hash-password            # prompts, prints OPERATOR_PASSWORD_HASH=scrypt$...
+# put that line (and optionally SESSION_SECRET) in .env.local, or in your host's secrets
+npm run dev
+```
+
+- The desk redirects to `/login`. Sessions are a signed, HttpOnly, SameSite=Lax cookie (12 h, refreshed while in use; Secure on https). **Log out** is in the header.
+- 5 wrong passwords lock login for 30 s, doubling up to 15 min (in memory, per instance).
+- All desk APIs need the session: `GET/PUT /api/event`, `GET/POST/DELETE /api/encoder`, `/api/view-key`. Scripts can still use `Authorization: Bearer $ENCODER_TOKEN` from the same machine (or anywhere with `ENCODER_ALLOW_REMOTE=1`). The token is no longer sent to browsers.
+
+**OBS URLs** carry a read-only view key: `http://<host>/stream?k=<key>` and `http://<host>/end?k=<key>`. **Copy OBS URL** on the desk includes it. **Rotate view key** (in the preview's URL bar) makes old URLs stop working. The key is required in password mode, optional locally (`REQUIRE_VIEW_KEY=1` to require it). OBS pages read `GET /api/public/state`, which returns only the event, clock and stage, never tokens, RTMP details, logs or process ids.
+
+Cloud hosting needs a long-running server with ffmpeg and a persistent `data/` volume (not serverless); see `AUTH_PLAN.md`.

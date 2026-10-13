@@ -1,19 +1,20 @@
 import { connection } from "next/server"
-import { authorizeMutation, getEncoderToken, isLoopbackRequest } from "@/lib/encoder-auth"
+import { authorizeMutation, requireOperator } from "@/lib/auth"
 import { eventProblems } from "@/lib/event"
 import { hasServerEvent, readServerState, writeServerEvent } from "@/lib/event-server"
 
 export async function GET(request: Request) {
   await connection()
+  const denied = requireOperator(request)
+  if (denied) return denied
   const state = readServerState()
-  const body: { event: typeof state.event; testUntil: number | null; pausedAt: number | null; stage: typeof state.stage; hasSaved: boolean; token?: string } = {
+  const body: { event: typeof state.event; testUntil: number | null; pausedAt: number | null; stage: typeof state.stage; hasSaved: boolean } = {
     event: state.event,
     testUntil: state.testUntil,
     pausedAt: state.pausedAt,
     stage: state.stage,
     hasSaved: hasServerEvent(),
   }
-  if (isLoopbackRequest(request)) body.token = getEncoderToken()
   return Response.json(body)
 }
 

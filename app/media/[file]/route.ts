@@ -2,14 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { connection } from "next/server";
 import { HLS_DIR } from "@/lib/encoder";
+import { canView } from "@/lib/view-key";
 
 const FILE_NAME = /^(stream\.m3u8|seg-\d+\.ts)$/;
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: RouteContext<"/media/[file]">,
 ) {
   await connection();
+  if (!canView(request)) return new Response("View key required", { status: 401 });
   const { file } = await context.params;
   if (!FILE_NAME.test(file)) {
     return new Response("Not found", { status: 404 });
