@@ -451,9 +451,9 @@ export function OperatorConsole() {
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
-            <Button type="button" className={pillClass()} onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
+            <Pill size="sm" onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
-            </Button>
+            </Pill>
             <Button nativeButton={false} render={<Link href={stableHref} target="_blank" rel="noreferrer" />} className={pillClass()}>
               Open /stream in new window
             </Button>
@@ -824,23 +824,14 @@ export function OperatorConsole() {
                 {revealParams ? "Hide" : "Reveal"}
               </button>
             </div>
-            <Button
-              type="button"
-              className={pillClass()}
-              onClick={() => copy("link", `${window.location.origin}${stableHref}`)}
-            >
+            <Pill size="sm" onClick={() => copy("link", `${window.location.origin}${stableHref}`)}>
               {copied === "link" ? "Copied" : "Copy OBS URL"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className={pillClass("outline")}
-              onClick={() => copy("params", `${window.location.origin}${streamHref}`)}
-            >
-              {copied === "params" ? "Copied" : "Copy"}
-            </Button>
+            </Pill>
+            <Pill size="sm" tone="outline" aria-label="Copy full stream URL" onClick={() => copy("params", `${window.location.origin}${streamHref}`)}>
+              {copied === "params" ? "Copied" : "Copy full URL"}
+            </Pill>
             {operator.viewKey && !operator.viewKeyFromEnv ? (
-              <ConfirmButton className={pillClass("danger")} confirmLabel="Old OBS URLs stop working · confirm" onConfirm={() => void rotateViewKey()}>
+              <ConfirmButton className={pillClass("danger", "sm")} confirmLabel="Old OBS URLs stop working · confirm" onConfirm={() => void rotateViewKey()}>
                 Rotate view key
               </ConfirmButton>
             ) : null}
@@ -1081,9 +1072,9 @@ function CommandBlock({
       <pre className="overflow-x-auto rounded-xl bg-[#F6F6F3] p-3 font-mono text-[13px] leading-5 text-black/80 whitespace-pre-wrap">
         {value}
       </pre>
-      <Button variant="secondary" onClick={onCopy} className={`${pillClass("outline")} w-full`}>
+      <Pill tone="outline" onClick={onCopy} className="w-full">
         {copied ? "Copied" : "Copy command"}
-      </Button>
+      </Pill>
     </div>
   )
 }
