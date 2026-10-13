@@ -53,6 +53,16 @@ export function OperatorConsole() {
   const rtmpBusyRef = useRef<"starting" | "stopping" | null>(null)
   const [rtmpConnectError, setRtmpConnectError] = useState<string | null>(null)
   const [rtmpFailure, setRtmpFailure] = useState<string | null>(null)
+  const headerRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+    const update = () => document.documentElement.style.setProperty("--desk-header-h", `${el.offsetHeight}px`)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   const [strayPids, setStrayPids] = useState<number[]>([])
   const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
   const [rtmpMessage, setRtmpMessage] = useState("")
@@ -560,8 +570,8 @@ export function OperatorConsole() {
   }
 
   return (
-    <div data-desk-root data-pin-spacer={pinPreview ? "true" : undefined} className={`flex min-h-dvh flex-1 flex-col bg-[#F6F6F3] text-black lg:h-dvh lg:max-h-dvh lg:flex-none lg:overflow-hidden ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
-      <header className="z-20 shrink-0 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
+    <div data-desk-root data-pin-spacer={pinPreview ? "true" : undefined} className={`min-h-dvh bg-[#F6F6F3] text-black ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
+      <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-mono text-[12px] tracking-[0.16em] text-black/70 uppercase">
@@ -628,8 +638,8 @@ export function OperatorConsole() {
         </div>
       ) : null}
 
-      <main className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 w-full lg:min-h-0 lg:flex-1 lg:flex-row lg:overflow-hidden lg:pt-6 lg:pb-0">
-        <section className="space-y-4 lg:w-[380px] lg:shrink-0 lg:overflow-y-auto lg:pr-2 lg:pb-6 [scrollbar-width:thin]">
+      <main className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 w-full lg:flex-row">
+        <section className="space-y-4 lg:w-[380px] lg:shrink-0">
           <div className="rounded-[20px] bg-black p-5 text-white">
             {previewRemaining?.done ? (
               <div>
@@ -973,7 +983,7 @@ export function OperatorConsole() {
           </Panel>
         </section>
 
-        <section className="space-y-4 lg:flex-1 lg:overflow-y-auto lg:pr-2 lg:pb-6 [scrollbar-width:thin]">
+        <section className="min-w-0 space-y-4 lg:flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
               <h2 className="min-w-0 text-[13px] font-black tracking-[0.12em] uppercase">
@@ -996,7 +1006,7 @@ export function OperatorConsole() {
             <Pill size="sm" tone={thirds ? "solid" : "outline"} aria-pressed={thirds} onClick={() => setThirds(!thirds)}>3×3 grid</Pill>
             <Pill size="sm" tone={footage ? "solid" : "outline"} aria-pressed={footage} disabled={!transparent} title={transparent ? undefined : "Turn on transparent background to preview over footage"} onClick={() => setFootage(!footage)}>Game footage bg</Pill>
           </div>
-          <div data-testid="preview-pin" data-pinned={pinPreview ? "true" : "false"} className={pinPreview ? "fixed inset-x-0 top-0 z-40 border-b border-black/15 bg-[#F6F6F3]/95 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)] backdrop-blur [-webkit-backdrop-filter:blur(8px)] sm:px-6 lg:sticky lg:inset-x-auto lg:z-10 lg:-mx-1 lg:px-1 lg:pt-1 lg:pb-3 lg:backdrop-blur-none" : ""}>
+          <div data-testid="preview-pin" data-pinned={pinPreview ? "true" : "false"} className={pinPreview ? "fixed inset-x-0 top-0 z-40 border-b border-black/15 bg-[#F6F6F3]/95 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)] backdrop-blur [-webkit-backdrop-filter:blur(8px)] sm:px-6 lg:sticky lg:top-[var(--desk-header-h,5.5rem)] lg:inset-x-auto lg:z-10 lg:-mx-1 lg:px-1 lg:pt-1 lg:pb-3 lg:backdrop-blur-none" : ""}>
           <div
             data-testid="preview-frame"
             className={`relative mx-auto overflow-hidden ${pinPreview ? "max-w-[min(100%,calc(26svh*16/9))] lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
