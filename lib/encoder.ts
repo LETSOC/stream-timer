@@ -385,7 +385,7 @@ function rtmpAlive(): boolean {
   return false
 }
 
-function allowedRtmpHost(url: string): boolean {
+export function allowedRtmpHost(url: string): boolean {
   const list = (process.env.RTMP_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
   if (list.length === 0) return true
   let host = ""

@@ -10,6 +10,7 @@ import {
   stopEncoder,
   stopRtmpStream, stopAllRtmp,
 } from "@/lib/encoder"
+import { resolveDestination } from "@/lib/rtmp-destinations"
 
 export async function GET(request: Request) {
   await connection()
@@ -36,9 +37,16 @@ export async function POST(request: Request) {
       { status: 400 },
     )
   }
-  const record = body as { replace?: boolean; restart?: boolean; mode?: string; rtmpUrl?: string }
+  const record = body as { replace?: boolean; restart?: boolean; mode?: string; rtmpUrl?: string; destinationId?: string }
   if (record.mode === "rtmp") {
-    const result = await startRtmpStream(input, typeof record.rtmpUrl === "string" ? record.rtmpUrl : "")
+    // The desk sends a saved destination id; the URL (with key) is resolved here and never round-trips.
+    let rtmpUrl = typeof record.rtmpUrl === "string" ? record.rtmpUrl : ""
+    if (typeof record.destinationId === "string") {
+      const destination = resolveDestination(record.destinationId)
+      if (!destination) return Response.json({ ...readStatus(), error: "That destination no longer exists. Pick another." }, { status: 404 })
+      rtmpUrl = destination.url
+    }
+    const result = await startRtmpStream(input, rtmpUrl)
     if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
     return Response.json({ ...readStatus(), note: result.note ?? null })
   }

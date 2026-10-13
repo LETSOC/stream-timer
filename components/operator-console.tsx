@@ -41,7 +41,14 @@ import {
 export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
-  const [rtmpUrl, setRtmpUrl] = useState("")
+  // Named RTMP destinations live on the server (data/rtmp-destinations.json); the desk only sees masked values.
+  const [dests, setDests] = useState<{ selectedId: string | null; items: Dest[] }>({ selectedId: null, items: [] })
+  const [destForm, setDestForm] = useState<{ mode: "add" | "rename" | null; name: string; url: string }>({ mode: null, name: "", url: "" })
+  const [destError, setDestError] = useState("")
+  const [revealed, setRevealed] = useState<{ id: string; url: string } | null>(null)
+  const [legacyRtmp, setLegacyRtmp] = useState<string | null>(null)
+  const selectedDest = dests.items.find((item) => item.id === dests.selectedId) ?? null
+  const rtmpUrl = selectedDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
   const [rtmpLive, setRtmpLive] = useState(false)
   const [rtmpPhase, setRtmpPhase] = useState<"stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed">("stopped")
   const [rtmpAdopted, setRtmpAdopted] = useState(false)
@@ -292,7 +299,7 @@ export function OperatorConsole() {
     if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
-  }, [setLiveMode])
+  }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
   useEffect(() => {
     // The server is the source of truth. The browser keeps only section drafts, the RTMP URL and
@@ -310,7 +317,7 @@ export function OperatorConsole() {
       }
     }
     const savedRtmp = window.localStorage.getItem("hyphen-countdown-rtmp")
-    if (savedRtmp) setRtmpUrl(savedRtmp)
+    if (savedRtmp) setLegacyRtmp(savedRtmp) // pre-server-destinations URL: offered once as "Save to server as …"
     void fetch("/api/event", { cache: "no-store" })
       .then((response) => response.json())
       .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; hasSaved?: boolean; rev?: unknown; recovered?: unknown }) => {
@@ -352,10 +359,61 @@ export function OperatorConsole() {
     window.localStorage.setItem("hyphen-countdown-clock", JSON.stringify({ testUntil, pausedAt: pausedMs || null }))
   }, [hydrated, valid, target, testUntil, pausedMs])
 
+  const loadDests = useCallback(async () => {
+    const response = await fetch("/api/rtmp-destinations", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return
+    const body = (await response.json().catch(() => null)) as { selectedId?: string | null; items?: Dest[] } | null
+    if (body && Array.isArray(body.items)) setDests({ selectedId: body.selectedId ?? null, items: body.items })
+  }, [])
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-rtmp", rtmpUrl)
-  }, [hydrated, rtmpUrl])
+    const first = window.setTimeout(() => void loadDests(), 0)
+    // Same cadence as desk sync, so a destination added or selected on another device shows up here.
+    const id = window.setInterval(() => void loadDests(), 2000)
+    return () => {
+      window.clearTimeout(first)
+      window.clearInterval(id)
+    }
+  }, [hydrated, loadDests])
+  async function destAction(payload: Record<string, unknown>): Promise<boolean> {
+    setDestError("")
+    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
+    if (!response) {
+      setDestError("Could not reach the server.")
+      return false
+    }
+    if (handleUnauthorized(response)) return false
+    const body = (await response.json().catch(() => null)) as { error?: string; selectedId?: string | null; items?: Dest[] } | null
+    if (!response.ok) {
+      setDestError(body?.error ?? `Server returned ${response.status}.`)
+      return false
+    }
+    if (body && Array.isArray(body.items)) setDests({ selectedId: body.selectedId ?? null, items: body.items })
+    return true
+  }
+  async function revealDest(id: string) {
+    if (revealed?.id === id) {
+      setRevealed(null)
+      return
+    }
+    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal", id }) }).catch(() => null)
+    if (!response || handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as { url?: string } | null
+    if (response.ok && body?.url) {
+      setRevealed({ id, url: body.url })
+      window.setTimeout(() => setRevealed((current) => (current?.id === id ? null : current)), 30_000)
+    }
+  }
+  async function copyDest(id: string) {
+    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal", id }) }).catch(() => null)
+    if (!response || handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as { url?: string } | null
+    if (response.ok && body?.url) void copy("stream", body.url)
+  }
+  function forgetLegacy() {
+    window.localStorage.removeItem("hyphen-countdown-rtmp")
+    setLegacyRtmp(null)
+  }
 
   // Autosave carries the published sections plus live switches; section drafts never leave the browser.
   const savePayload = {
@@ -417,7 +475,7 @@ export function OperatorConsole() {
       lastSyncToastAt.current = Date.now()
       showToast("sync", "Settings updated from another device.")
     }
-  }, [updateEvent, applyStage, showToast])
+  }, [updateEvent, applyStage, showToast, setPausedAt, setTestUntil])
   useEffect(() => {
     syncNowRef.current = () => void pullRemote(true)
   }, [pullRemote])
@@ -979,11 +1037,79 @@ export function OperatorConsole() {
                 {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
               </span>
             </div>
-            <Field label="RTMP URL" htmlFor="rtmp">
-              <Input id="rtmp" type="password" autoComplete="off" placeholder="rtmp://uk.castr.io/static/…?password=…" value={rtmpUrl} onChange={(event) => setRtmpUrl(event.target.value)} />
+            <Field label="Destination" htmlFor="rtmp">
+              <div className="space-y-2">
+                {dests.items.length ? (
+                  <select
+                    id="rtmp"
+                    data-testid="rtmp-destination"
+                    className="h-9 w-full px-3 text-sm"
+                    value={dests.selectedId ?? ""}
+                    onChange={(event) => {
+                      setRevealed(null)
+                      setDests((current) => ({ ...current, selectedId: event.target.value || null }))
+                      void destAction({ action: "select", id: event.target.value || null })
+                    }}
+                  >
+                    {dests.items.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name} · {item.host}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="font-mono text-[13px] text-black/70">No destinations saved yet. Add one (name + ingest URL with key); it is stored on this server, not in the browser.</p>
+                )}
+                {selectedDest ? (
+                  <p data-testid="rtmp-masked" className="font-mono text-[12px] break-all text-black/70">{revealed?.id === selectedDest.id ? revealed.url : selectedDest.masked}</p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Pill size="sm" tone="outline" data-testid="dest-add" onClick={() => setDestForm({ mode: destForm.mode === "add" ? null : "add", name: "", url: "" })}>+ Add destination</Pill>
+                  {selectedDest ? (
+                    <>
+                      <Pill size="sm" tone="outline" data-testid="dest-rename" onClick={() => setDestForm({ mode: destForm.mode === "rename" ? null : "rename", name: selectedDest.name, url: "" })}>Rename</Pill>
+                      <Pill size="sm" tone="outline" data-testid="dest-reveal" aria-pressed={revealed?.id === selectedDest.id} onClick={() => void revealDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? "Hide" : "Reveal"}</Pill>
+                      <Pill size="sm" tone="outline" data-testid="dest-copy" onClick={() => void copyDest(selectedDest.id)}>Copy</Pill>
+                      <ConfirmButton data-testid="dest-delete" className={pillClass("danger", "sm")} disabled={rtmpLive} confirmLabel={`Delete ${selectedDest.name}? · confirm`} onConfirm={() => void destAction({ action: "delete", id: selectedDest.id })}>Delete</ConfirmButton>
+                    </>
+                  ) : null}
+                </div>
+                {destForm.mode ? (
+                  <form
+                    data-testid="dest-form"
+                    className="space-y-2 rounded-xl border border-black/10 bg-white p-3"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      const payload = destForm.mode === "add" ? { action: "add", name: destForm.name, url: destForm.url } : { action: "rename", id: selectedDest?.id, name: destForm.name }
+                      void destAction(payload).then((ok) => {
+                        if (ok) setDestForm({ mode: null, name: "", url: "" })
+                      })
+                    }}
+                  >
+                    <Input aria-label="Destination name" data-testid="dest-name" placeholder="Name, e.g. Restream main" value={destForm.name} onChange={(event) => setDestForm({ ...destForm, name: event.target.value })} />
+                    {destForm.mode === "add" ? (
+                      <Input aria-label="Ingest URL with key" data-testid="dest-url" type="password" autoComplete="off" placeholder="rtmp://live.restream.io/live/KEY" value={destForm.url} onChange={(event) => setDestForm({ ...destForm, url: event.target.value })} />
+                    ) : null}
+                    <div className="flex gap-2">
+                      <button type="submit" data-testid="dest-save" className={pillClass("live", "sm")}>{destForm.mode === "add" ? "Save destination" : "Save name"}</button>
+                      <button type="button" className={pillClass("outline", "sm")} onClick={() => setDestForm({ mode: null, name: "", url: "" })}>Cancel</button>
+                    </div>
+                  </form>
+                ) : null}
+                {destError ? <p role="alert" className="font-mono text-[13px] font-bold text-[#b42318]">{destError}</p> : null}
+                {legacyRtmp ? (
+                  <div data-testid="dest-legacy" className="space-y-2 rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 p-3 font-mono text-[13px] text-[#7a3b06]">
+                    <p className="font-bold">This browser has an old RTMP URL saved ({hostOf(legacyRtmp, "unknown host")}). Move it to the server so every desk can use it?</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" data-testid="dest-legacy-save" className={pillClass("live", "sm")} onClick={() => {
+                        void destAction({ action: "add", name: hostOf(legacyRtmp, "Saved stream"), url: legacyRtmp }).then((ok) => { if (ok) forgetLegacy() })
+                      }}>Save to server as “{hostOf(legacyRtmp, "Saved stream")}”</button>
+                      <button type="button" className={pillClass("outline", "sm")} onClick={forgetLegacy}>Discard</button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </Field>
             <div className="flex gap-2">
-              <Pill data-testid="rtmp-start" disabled={!valid || rtmpUrl.trim().length === 0 || rtmpBusy !== null || rtmpLive} aria-busy={rtmpBusy === "starting"} onClick={() => {
+              <Pill data-testid="rtmp-start" disabled={!valid || !selectedDest || rtmpBusy !== null || rtmpLive} aria-busy={rtmpBusy === "starting"} onClick={() => {
                   if (rtmpBusyRef.current) return // ignore clicks while a request is in flight
                   rtmpBusyRef.current = "starting"
                   setRtmpBusy("starting")
@@ -992,7 +1118,7 @@ export function OperatorConsole() {
                   void fetch("/api/encoder", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ mode: "rtmp", rtmpUrl, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
+                    body: JSON.stringify({ mode: "rtmp", destinationId: selectedDest?.id, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
                   })
                     .then(async (response) => {
                       if (handleUnauthorized(response)) return
@@ -1005,7 +1131,7 @@ export function OperatorConsole() {
                         return
                       }
                       setRtmpState("live")
-                      setRtmpMessage(body?.note || (body?.rtmpState === "connected" ? "Connected. Sending to the pasted RTMP URL." : "Started; still connecting. Watch the status above."))
+                      setRtmpMessage(body?.note || (body?.rtmpState === "connected" ? `Connected. Sending to ${selectedDest?.name ?? "the destination"}.` : "Started; still connecting. Watch the status above."))
                     })
                     .catch(() => {
                       setRtmpState("error")
@@ -1630,4 +1756,14 @@ function BackToTop() {
       <span aria-hidden>↑</span> Top
     </button>
   )
+}
+
+type Dest = { id: string; name: string; host: string; masked: string; createdAt: number }
+
+function hostOf(url: string, fallback: string): string {
+  try {
+    return new URL(url).host || fallback
+  } catch {
+    return fallback
+  }
 }
