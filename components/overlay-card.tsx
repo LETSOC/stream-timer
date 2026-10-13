@@ -50,7 +50,7 @@ export function OverlayCard({ kind, title, message, image, fit = "cover", since,
       ) : null}
       <div className={`absolute inset-x-[8%] flex flex-col items-center overflow-hidden ${contain ? "top-[52%] bottom-[5%] justify-start" : "inset-y-[6%] justify-center"}`}>
         <div className="mb-[2cqi] shrink-0 rounded-full border border-white/30 px-[1.4cqi] py-[0.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.18em] uppercase">
-          {kind === "break" ? "Short break" : kind === "welcome" ? "We&apos;re back" : "Stand by"}
+          {kind === "break" ? "Short break" : kind === "welcome" ? "We’re back" : "Stand by"}
         </div>
         <h1 className={`m-0 max-w-full font-[Arial,Helvetica,sans-serif] ${contain ? "text-[4cqi]" : "text-[5cqi]"} leading-none font-bold break-words`}>{title}</h1>
         {message ? <p className="mt-[1.6cqi] max-w-[56cqi] font-[Arial,Helvetica,sans-serif] text-[1.6cqi] leading-snug break-words whitespace-pre-line text-white/85">{message}</p> : null}
