@@ -1,4 +1,4 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google"
 import "./globals.css"
 
@@ -23,6 +23,9 @@ export const metadata: Metadata = {
   description:
     "16:9 live countdown player and FFmpeg RTMP helper for Hyphen Festival 2026.",
 }
+
+/** viewport-fit=cover so env(safe-area-inset-*) is non-zero on iPhone (notch, home bar, Safari toolbar). */
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover" }
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

@@ -4,46 +4,35 @@ import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EndStreamPage } from "@/app/end/page"
-import { DEFAULT_EVENT, safeUrl, sanitizeSpeakers, type EventConfig } from "@/lib/event"
+import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
-import type { StageOptions } from "@/lib/event-server"
+import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
+import { OverlayCard } from "@/components/overlay-card"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
+/**
+ * The server was rebuilt since this tab loaded: reload so OBS runs the new code
+ * (old code silently drops anything it doesn't know, like a new card). At most once a minute.
+ */
+function reloadIfRebuilt(serverBuild: unknown): boolean {
+  const mine = process.env.APP_BUILD
+  if (typeof serverBuild !== "string" || !mine || serverBuild === mine) return false
+  try {
+    const last = Number(sessionStorage.getItem("stream-reload-at") ?? 0)
+    if (Date.now() - last < 60_000) return false
+    sessionStorage.setItem("stream-reload-at", String(Date.now()))
+  } catch { /* storage blocked: still reload */ }
+  window.location.reload()
+  return true
+}
+
 export type StreamInitial = { event: EventConfig; testUntil: number | null; pausedAt: number | null; stage: Partial<Record<keyof StageOptions, unknown>> }
 
-type Stage = ReturnType<typeof parseStage>
-
-export function parseStage(raw: Partial<Record<keyof StageOptions, unknown>>) {
-  return {
-              checker: Number(raw.checker) || 6,
-              showMeta: raw.showMeta !== false,
-              showLink: raw.showLink !== false,
-              transparent: raw.transparent === true,
-              lineSpacing: Number(raw.lineSpacing) || 1.14,
-              blockGap: Number(raw.blockGap) || 1.2,
-              clockScale: clampSize(raw.clockScale, CLOCK_SCALE_RANGE),
-              clockText: clampSize(raw.clockText, CLOCK_TEXT_RANGE),
-              logoUrl: safeUrl(raw.logoUrl, "", { relative: true, dataImage: true }),
-              speakers: sanitizeSpeakers(raw.speakers),
-              gallerySeconds: Number(raw.gallerySeconds) || 4,
-              galleryPause: Number(raw.galleryPause) || 6,
-              galleryOffset: Number.isFinite(Number(raw.galleryOffset)) ? Number(raw.galleryOffset) : -86,
-              galleryScale: Number(raw.galleryScale) || 80,
-              endTitle: typeof raw.endTitle === "string" ? raw.endTitle : "Thank you for joining",
-              endSubtitle: typeof raw.endSubtitle === "string" ? raw.endSubtitle : "Hyphen Festival 2026",
-              endDate: typeof raw.endDate === "string" ? raw.endDate : "Wed, 04 Nov, 2026",
-              endBody: typeof raw.endBody === "string" ? raw.endBody : "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.",
-              endQrUrl: typeof raw.endQrUrl === "string" ? raw.endQrUrl : "https://linktr.ee/onlinehyphen",
-              endButton: typeof raw.endButton === "string" ? raw.endButton : "Watch replay — coming soon",
-              endAt: typeof raw.endAt === "string" ? raw.endAt : "16:15",
-              forceEnd: raw.forceEnd === true,
-              holdCountdown: raw.holdCountdown === true,
-            }
-}
+type Stage = StageOptions
 
 /** Server passes the saved public state (only when the view key checks out) so the first paint is already correct. */
 export function StreamClient({ initial }: { initial: StreamInitial | null }) {
@@ -100,9 +89,10 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
+          if (reloadIfRebuilt(body.build)) return
           if (!hasOverrides && next) setServerEvent(next)
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
@@ -129,7 +119,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
       ? new Date(now.getTime() + targetMs - testUntil)
       : undefined
 
-  const checker = params.get("grid") ? Number(params.get("grid")) : stage.checker
+  const checker = params.get("grid") ? clampChecker(params.get("grid"), stage.checker) : stage.checker
   const showMeta = params.get("meta") ? params.get("meta") !== "0" : stage.showMeta
   const showLink = params.get("showlink") ? params.get("showlink") !== "0" : stage.showLink
   const transparent = params.get("bg") ? params.get("bg") === "clear" : stage.transparent
@@ -150,7 +140,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   }, [transparent])
 
   const clock = testClock ?? now
-  const ended = stage.forceEnd || (!stage.holdCountdown && Boolean(clock && wallTimeInZone(event.date, stage.endAt || event.endTime, event.timeZone).getTime() <= clock.getTime()))
+  const pastEnd = Boolean(clock && wallTimeInZone(event.date, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
+  const screen = stageScreen(stage, pastEnd)
+  const ended = screen === "end"
 
   if (blocked) {
     return (
@@ -162,7 +154,18 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
 
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
-      {ended ? (
+      {screen === "break" || screen === "hold" || screen === "welcome" ? (
+        <OverlayCard
+          kind={screen}
+          title={screen === "break" ? stage.breakTitle : screen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
+          message={screen === "break" ? stage.breakMessage : screen === "welcome" ? stage.welcomeMessage : stage.holdMessage}
+          image={screen === "break" ? stage.breakImage : screen === "welcome" ? stage.welcomeImage : stage.holdImage}
+          fit={screen === "break" ? stage.breakFit : screen === "welcome" ? stage.welcomeFit : stage.holdFit}
+          since={stage.overlayAt}
+          clock={now}
+          className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
+        />
+      ) : ended ? (
         <EndStreamPage className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
           subtitle: stage.endSubtitle,

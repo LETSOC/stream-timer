@@ -174,3 +174,25 @@ test("deriveRtmpState maps supervisor + log to a state", () => {
   const afterExit = started + "Output #0\nframe= 10\n[supervisor 10:01:00] ffmpeg exited (code 1) after 5s; restart #1 in 2s\n"
   assert.equal(enc.deriveRtmpState(true, "running", afterExit, null), "starting")
 })
+
+test("deriveRtmpState: long streams, stale logs and connect timeout", () => {
+  // Long run: "Output #0" has scrolled out of the tail, only progress lines remain.
+  assert.equal(enc.deriveRtmpState(true, null, "frame= 90000 fps=30 size= 1000kB\n", null, { logAgeMs: 5000 }), "connected")
+  assert.equal(enc.deriveRtmpState(true, "running", "frame= 9 fps=30\n", null, { logAgeMs: 60_000 }), "stalled")
+  const started = "[supervisor 10:00:00] supervisor started (pid 1)\nInput #0\n"
+  assert.equal(enc.deriveRtmpState(true, "running", started, null, { logAgeMs: 1000, runAgeMs: 10_000 }), "starting")
+  assert.equal(enc.deriveRtmpState(true, "running", started, null, { logAgeMs: 1000, runAgeMs: 60_000 }), "stalled")
+})
+
+test("parseOwnSupervisors only matches this project's group leaders", () => {
+  const sup = "/Users/c/stream-timer/scripts/rtmp-supervisor.sh"
+  const ps = [
+    `  100   100 bash ${sup}`,
+    `  101   100 /opt/homebrew/bin/ffmpeg -re -i x -f flv rtmp://a/b`,
+    `  200   200 bash /Users/c/other-checkout/scripts/rtmp-supervisor.sh`,
+    `  300   250 bash ${sup}`,
+    `  400   400 /bin/bash ${sup}`,
+    `  500   500 vim ${sup}`,
+  ].join("\n")
+  assert.deepEqual(enc.parseOwnSupervisors(ps, sup), [100, 400])
+})

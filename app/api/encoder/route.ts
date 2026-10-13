@@ -8,8 +8,9 @@ import {
   startEncoder,
   startRtmpStream,
   stopEncoder,
-  stopRtmpStream,
+  stopRtmpStream, stopAllRtmp,
 } from "@/lib/encoder"
+import { resolveDestination } from "@/lib/rtmp-destinations"
 
 export async function GET(request: Request) {
   await connection()
@@ -36,11 +37,18 @@ export async function POST(request: Request) {
       { status: 400 },
     )
   }
-  const record = body as { replace?: boolean; restart?: boolean; mode?: string; rtmpUrl?: string }
+  const record = body as { replace?: boolean; restart?: boolean; mode?: string; rtmpUrl?: string; destinationId?: string }
   if (record.mode === "rtmp") {
-    const result = await startRtmpStream(input, typeof record.rtmpUrl === "string" ? record.rtmpUrl : "")
-    if (!result.ok) return Response.json({ error: result.error }, { status: result.status })
-    return Response.json(readStatus())
+    // The desk sends a saved destination id; the URL (with key) is resolved here and never round-trips.
+    let rtmpUrl = typeof record.rtmpUrl === "string" ? record.rtmpUrl : ""
+    if (typeof record.destinationId === "string") {
+      const destination = resolveDestination(record.destinationId)
+      if (!destination) return Response.json({ ...readStatus(), error: "That destination no longer exists. Pick another." }, { status: 404 })
+      rtmpUrl = destination.url
+    }
+    const result = await startRtmpStream(input, rtmpUrl)
+    if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
+    return Response.json({ ...readStatus(), note: result.note ?? null })
   }
   const result =
     record.replace || record.restart ? await restartEncoder(input) : await startEncoder(input)
@@ -52,7 +60,17 @@ export async function DELETE(request: Request) {
   await connection()
   const denied = authorizeMutation(request)
   if (denied) return denied
+  const target = new URL(request.url).searchParams.get("target")
+  if (target === "rtmp-all") {
+    const result = await stopAllRtmp()
+    return Response.json({ ...readStatus(), note: `Stopped ${result.stopped.length} stream supervisor(s) and ${result.strays.length} stray ffmpeg publisher(s).` })
+  }
+  if (target === "rtmp") {
+    const result = await stopRtmpStream()
+    if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
+    await stopEncoder()
+    return Response.json({ ...readStatus(), note: result.note ?? null })
+  }
   await stopEncoder()
-  if (new URL(request.url).searchParams.get("target") === "rtmp") await stopRtmpStream()
   return Response.json(readStatus())
 }

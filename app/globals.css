@@ -190,3 +190,36 @@
   0%, 72%, 100% { transform: scale(1); }
   82% { transform: scale(1.045); }
 }
+/* Desk: the page itself is light, so no overscroll bounce, short content or
+   breakpoint change can ever reveal the dark html background (/stream stays dark for OBS). */
+html:has([data-desk-root]),
+html:has([data-desk-root]) body {
+  background-color: #f6f6f3;
+  color-scheme: light;
+  overscroll-behavior: none;
+}
+html:has([data-desk-root]) body {
+  min-height: 100dvh;
+}
+
+/* iOS Safari gives date/time inputs an intrinsic min-width and centred text, so
+   they burst out of narrow grid columns. Force them to fill their cell. */
+[data-desk-root] input,
+[data-desk-root] select,
+[data-desk-root] textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+[data-desk-root] input[type="date"],
+[data-desk-root] input[type="time"],
+[data-desk-root] input[type="datetime-local"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+[data-desk-root] input::-webkit-date-and-time-value {
+  text-align: left;
+  min-height: 1.25rem;
+}

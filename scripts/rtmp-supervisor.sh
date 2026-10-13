@@ -13,9 +13,12 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 STATE_FILE="${RTMP_STATE_FILE:-}"
-MIN_DELAY=2
+MIN_DELAY="${RTMP_MIN_DELAY:-2}"
 MAX_DELAY=30
 STABLE_AFTER=30
+# Give up after this many quick failures in a row (bad key, ingest down) instead of retrying forever.
+MAX_FAST_FAILS="${RTMP_MAX_FAST_FAILS:-8}"
+FAIL_FILE="${RTMP_FAIL_FILE:-}"
 
 restarts=0
 fails=0
@@ -82,6 +85,14 @@ while true; do
     i=$(( i + 1 ))
   done
   if (( delay > MAX_DELAY )); then delay=$MAX_DELAY; fi
+
+  if (( ran < STABLE_AFTER && fails >= MAX_FAST_FAILS )); then
+    log "giving up after $fails quick failures (last code $code)"
+    if [[ -n "$FAIL_FILE" ]]; then
+      printf '{"error":"Gave up after %s quick connection failures (last ffmpeg exit code %s). Check the RTMP URL/key and the ingest server, then Start again.","at":%s000}\n' "$fails" "$code" "$(date +%s)" > "$FAIL_FILE"
+    fi
+    exit 3
+  fi
 
   restarts=$(( restarts + 1 ))
   write_state waiting

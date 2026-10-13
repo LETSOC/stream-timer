@@ -227,8 +227,9 @@ export function validateRtmpUrl(raw: string): RtmpUrlCheck {
 
 export function readStatus(): EncoderStatus {
   const meta = readMeta();
+  adoptRunningSupervisor();
   const rtmpRunning = rtmpAlive();
-  const supervisor = rtmpRunning ? readSupervisorState() : { state: null, restarts: 0 };
+  const supervisor = rtmpRunning ? readSupervisorState() : { state: null, restarts: 0, updatedAt: null };
   const running = meta ? pidRunsScript(meta.pid, SCRIPT) : false;
   const hls = hlsHealth(running, meta?.startedAt ?? null);
   if (meta && !running) {
@@ -254,11 +255,15 @@ export function readStatus(): EncoderStatus {
     burnedRemainingAtStart: running && meta ? meta.burnedRemainingAtStart : null,
     refreshSeconds: running && meta ? meta.refreshSeconds : null,
     encoderState: hls,
-    rtmpState: deriveRtmpState(rtmpRunning, supervisor.state, readTail(RTMP_LOG_FILE, 32768), readFailure()),
+    rtmpState: deriveRtmpState(rtmpRunning, supervisor.state, readTail(RTMP_LOG_FILE, 32768), readFailure(), { logAgeMs: fileAgeMs(RTMP_LOG_FILE), runAgeMs: supervisor.updatedAt ? Date.now() - supervisor.updatedAt : null }),
+    rtmpAdopted: rtmpRunning && readRtmpMeta()?.adopted === true,
+    rtmpOwnProcesses: ownSupervisorCount(),
     stopNote: lastStopNote,
     rtmpRunning,
     rtmpReconnecting: rtmpRunning && supervisor.state === "waiting",
     rtmpRestarts: supervisor.restarts,
+    rtmpConnectError: rtmpRunning ? parseConnectError(readTail(RTMP_LOG_FILE, 32768), readRtmpHost()) : null,
+    rtmpFailure: rtmpRunning ? null : readFailure(),
     rtmpLogTail: redact(readTail(RTMP_LOG_FILE).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
     strayPublishers: findStrayPublishers(),
   };
@@ -283,17 +288,60 @@ function hlsHealth(running: boolean, startedAt: number | null): EncoderStatus["e
  * reconnecting: ffmpeg exited and the supervisor is waiting to relaunch.
  * failed: the last start gave up (bad URL/key, refused); stopped: nothing running.
  */
+/** ffmpeg prints progress every 10s (-stats_period 10); no new log line for this long means it's stuck. */
+export const RTMP_LOG_STALE_MS = 35_000
+/** A run that hasn't sent a frame within this long is reported as failed instead of "Connecting" forever. */
+export const RTMP_CONNECT_TIMEOUT_MS = 45_000
+
 export function deriveRtmpState(
   running: boolean,
   supervisorState: "running" | "waiting" | null,
   log: string,
   failure: string | null,
+  timing: { logAgeMs?: number | null; runAgeMs?: number | null } = {},
 ): EncoderStatus["rtmpState"] {
   if (!running) return failure ? "failed" : "stopped"
   if (supervisorState === "waiting") return "reconnecting"
   const lastStart = Math.max(log.lastIndexOf("supervisor started"), log.lastIndexOf("] ffmpeg exited"))
   const currentRun = lastStart >= 0 ? log.slice(lastStart) : log
-  return /Output #0/.test(currentRun) && /(frame=\s*\d+|size=\s*\d+)/.test(currentRun) ? "connected" : "starting"
+  // Progress lines only appear once ffmpeg has opened the RTMP output, so they alone mean "sending".
+  // (Requiring "Output #0" too broke long streams: it scrolls out of the 32 KB tail we read.)
+  const progress = /(frame=\s*\d+|size=\s*\d+)/.test(currentRun)
+  const logAge = timing.logAgeMs ?? 0
+  if (progress) return logAge > RTMP_LOG_STALE_MS ? "stalled" : "connected"
+  const runAge = timing.runAgeMs ?? logAge
+  return runAge > RTMP_CONNECT_TIMEOUT_MS ? "stalled" : "starting"
+}
+
+const CONNECT_ERROR = /(Error opening output|Connection refused|Connection timed out|End of file|Input\/output error|Server returned|Failed to resolve|No route to host|Network is unreachable|Operation timed out|Broken pipe)/i
+
+/**
+ * When the latest ffmpeg run died before it connected, a short operator message such as
+ * "Can't connect to ingest (live.restream.io): End of file". Null while connected or with no failure.
+ */
+export function parseConnectError(log: string, host: string | null): string | null {
+  const exits = [...log.matchAll(/\[supervisor [^\]]*\] ffmpeg exited[^\n]*/g)]
+  if (exits.length === 0) return null
+  const lastExit = exits[exits.length - 1]
+  // A run that started after the last exit and is now sending frames means we recovered.
+  const after = log.slice((lastExit.index ?? 0) + lastExit[0].length)
+  if (/Output #0/.test(after) && /(frame=\s*\d+|size=\s*\d+)/.test(after)) return null
+  const before = log.slice(0, lastExit.index)
+  const runStart = Math.max(before.lastIndexOf("supervisor started"), before.lastIndexOf("] ffmpeg exited"))
+  const run = runStart >= 0 ? before.slice(runStart) : before
+  if (/Output #0/.test(run) && /(frame=\s*\d+|size=\s*\d+)/.test(run)) return null // it was live, then dropped
+  const match = run.match(CONNECT_ERROR)
+  const reason = match ? match[1] : "ffmpeg exited before connecting"
+  return `Can't connect to ingest${host ? ` (${host})` : ""}: ${reason}`
+}
+
+function readRtmpHost(): string | null {
+  try {
+    const meta = JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { host?: unknown }
+    return typeof meta.host === "string" ? meta.host : null
+  } catch {
+    return null
+  }
 }
 
 function readFailure(): string | null {
@@ -337,7 +385,7 @@ function rtmpAlive(): boolean {
   return false
 }
 
-function allowedRtmpHost(url: string): boolean {
+export function allowedRtmpHost(url: string): boolean {
   const list = (process.env.RTMP_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
   if (list.length === 0) return true
   let host = ""
@@ -349,16 +397,103 @@ function allowedRtmpHost(url: string): boolean {
   return list.some((allowed) => host === allowed || host.endsWith(`.${allowed}`))
 }
 
-function readSupervisorState(): { state: "running" | "waiting" | null; restarts: number } {
+function readSupervisorState(): { state: "running" | "waiting" | null; restarts: number; updatedAt: number | null } {
   try {
-    const parsed = JSON.parse(fs.readFileSync(RTMP_STATE_FILE, "utf8")) as { state?: unknown; restarts?: unknown }
+    const parsed = JSON.parse(fs.readFileSync(RTMP_STATE_FILE, "utf8")) as { state?: unknown; restarts?: unknown; updatedAt?: unknown }
     return {
       state: parsed.state === "running" || parsed.state === "waiting" ? parsed.state : null,
       restarts: typeof parsed.restarts === "number" ? parsed.restarts : 0,
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt * 1000 : null,
     }
   } catch {
-    return { state: null, restarts: 0 }
+    // Adopted stream whose state file we lost: treat as running.
+    return { state: null, restarts: 0, updatedAt: null }
   }
+}
+
+function fileAgeMs(file: string): number | null {
+  try {
+    return Date.now() - fs.statSync(file).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+function readRtmpMeta(): { pid?: number; adopted?: boolean; host?: string } | null {
+  try {
+    return JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number; adopted?: boolean; host?: string }
+  } catch {
+    return null
+  }
+}
+
+// ---------- re-attaching to a stream that outlived the server (restart, rebuild, crash) ----------
+
+/**
+ * Supervisor processes of THIS project: `bash <absolute path to our rtmp-supervisor.sh>`,
+ * and process-group leaders (spawned detached), so another checkout's stream never matches.
+ */
+export function parseOwnSupervisors(psOutput: string, supervisorPath: string): number[] {
+  const pids: number[] = []
+  for (const line of psOutput.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+    if (!match) continue
+    const pid = Number(match[1])
+    const pgid = Number(match[2])
+    const command = match[3].trim()
+    if (pid !== pgid) continue
+    if (/^(\S*\/)?bash\s+/.test(command) && command.split(/\s+/).includes(supervisorPath)) pids.push(pid)
+  }
+  return pids
+}
+
+let ownCache: { at: number; value: number[] } = { at: 0, value: [] }
+export function findOwnSupervisors(): number[] {
+  if (Date.now() - ownCache.at < 3000) return ownCache.value
+  const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
+  const value = result.status === 0 ? parseOwnSupervisors(result.stdout, SUPERVISOR) : []
+  ownCache = { at: Date.now(), value }
+  return value
+}
+
+function ownSupervisorCount(): number {
+  return findOwnSupervisors().length
+}
+
+/**
+ * No pidfile (or a stale one) but exactly one of our supervisors is running: take it back,
+ * so the desk shows it and Stop works. Several running is a mess the operator must see ("Stop all").
+ */
+function adoptRunningSupervisor() {
+  const current = readRtmpPid()
+  if (current !== null && pidRunsScript(current, SUPERVISOR)) return
+  const found = findOwnSupervisors()
+  if (found.length !== 1) return
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: found[0], startedAt: Date.now(), adopted: true }))
+  strayCache = { at: 0, value: [] }
+}
+
+/** Stop every supervisor of this project plus stray RTMP ffmpeg publishers (explicit "Stop all"). */
+export function stopAllRtmp(): Promise<{ stopped: number[]; strays: number[] }> {
+  return withRtmpLock(async () => {
+    ownCache = { at: 0, value: [] }
+    strayCache = { at: 0, value: [] }
+    const supervisors = findOwnSupervisors()
+    for (const pid of supervisors) await killGroup(pid)
+    strayCache = { at: 0, value: [] }
+    const strays = findStrayPublishers().map((item) => item.pid)
+    for (const pid of strays) {
+      try { process.kill(pid, "SIGTERM") } catch { /* gone */ }
+    }
+    try { fs.unlinkSync(RTMP_META_FILE) } catch { /* already gone */ }
+    try { fs.unlinkSync(RTMP_STATE_FILE) } catch { /* already gone */ }
+    clearFailure()
+    ownCache = { at: 0, value: [] }
+    strayCache = { at: 0, value: [] }
+    lastRtmpCommand = { kind: "stop", at: Date.now() }
+    return { stopped: supervisors, strays }
+  })
 }
 
 export type StrayPublisher = { pid: number; command: string }
@@ -403,8 +538,56 @@ const SUPERVISOR_EXIT = /\[supervisor [^\]]*\] ffmpeg exited/
  * Starts the RTMP stream under scripts/rtmp-supervisor.sh, which relaunches
  * ffmpeg whenever it exits. Replaces any stream this app started earlier.
  */
-export function startRtmpStream(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
-  return withRtmpLock(() => startRtmpStreamUnlocked(input, rtmpUrl))
+// ---------- RTMP command gate (spam-click / opposing-command protection) ----------
+
+export type RtmpCommand = "start" | "stop"
+export type RtmpGateInput = {
+  kind: RtmpCommand
+  inFlight: RtmpCommand | null
+  running: boolean
+  last: { kind: RtmpCommand; at: number } | null
+  now: number
+}
+export type RtmpGate = { action: "run" } | { action: "noop"; note: string } | { action: "reject"; status: number; error: string; retryAfterMs?: number }
+
+/** Minimum gap between a start and a following stop (or the reverse). */
+export const RTMP_COOLDOWN_MS = 2000
+
+/**
+ * Pure decision for a start/stop request. Same command twice is idempotent (no relaunch,
+ * no second stop); an opposite command while one is in flight, or within the cooldown, is refused.
+ */
+export function decideRtmpCommand({ kind, inFlight, running, last, now }: RtmpGateInput): RtmpGate {
+  if (inFlight === kind) return { action: "reject", status: 409, error: kind === "start" ? "Already starting the stream." : "Already stopping the stream." }
+  if (inFlight) return { action: "reject", status: 409, error: inFlight === "start" ? "The stream is still starting. Wait for it, then stop." : "The stream is still stopping. Wait, then start." }
+  if (kind === "start" && running) return { action: "noop", note: "The stream is already running. Stop it first to change the URL." }
+  if (kind === "stop" && !running) return { action: "noop", note: "The stream is not running." }
+  if (last && last.kind !== kind && now - last.at < RTMP_COOLDOWN_MS) {
+    const retryAfterMs = RTMP_COOLDOWN_MS - (now - last.at)
+    return { action: "reject", status: 429, error: `Too soon after ${last.kind}. Try again in ${Math.ceil(retryAfterMs / 1000)}s.`, retryAfterMs }
+  }
+  return { action: "run" }
+}
+
+let rtmpInFlight: RtmpCommand | null = null
+let lastRtmpCommand: { kind: RtmpCommand; at: number } | null = null
+
+export function rtmpInFlightCommand(): RtmpCommand | null {
+  return rtmpInFlight
+}
+
+type RtmpStartResult = { ok: true; note?: string } | { ok: false; error: string; status: number }
+type RtmpStopResult = (StopResult & { ok: true; note?: string }) | { ok: false; error: string; status: number }
+
+export function startRtmpStream(input: StartInput, rtmpUrl: string, now = Date.now()): Promise<RtmpStartResult> {
+  const gate = decideRtmpCommand({ kind: "start", inFlight: rtmpInFlight, running: rtmpAlive(), last: lastRtmpCommand, now })
+  if (gate.action === "reject") return Promise.resolve({ ok: false, error: gate.error, status: gate.status })
+  if (gate.action === "noop") return Promise.resolve({ ok: true, note: gate.note })
+  rtmpInFlight = "start"
+  return withRtmpLock(() => startRtmpStreamUnlocked(input, rtmpUrl)).finally(() => {
+    rtmpInFlight = null
+    lastRtmpCommand = { kind: "start", at: Date.now() }
+  })
 }
 
 async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
@@ -439,12 +622,15 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Prom
       RTMP_URL: url,
       RTMP_STATE_FILE,
       RTMP_LOG_FILE,
+      RTMP_FAIL_FILE,
     }),
   })
   child.unref()
   fs.closeSync(logFd)
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
-  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: child.pid, startedAt: Date.now() }))
+  let host = ""
+  try { host = new URL(url).hostname } catch { /* validated above */ }
+  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host }))
 
   // Wait for the first connection. "Output #0" means ffmpeg opened the RTMP output.
   // A supervisor "exited" line this early means the URL or script is wrong, so stop
@@ -471,11 +657,27 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Prom
   return { ok: true }
 }
 
-export function stopRtmpStream(): Promise<StopResult> {
+export function stopRtmpStream(now = Date.now()): Promise<RtmpStopResult> {
+  const gate = decideRtmpCommand({ kind: "stop", inFlight: rtmpInFlight, running: rtmpAlive(), last: lastRtmpCommand, now })
+  if (gate.action === "reject") return Promise.resolve({ ok: false, error: gate.error, status: gate.status })
+  if (gate.action === "noop") {
+    clearFailure()
+    return Promise.resolve({ ...NOT_STOPPED, ok: true, note: gate.note })
+  }
+  rtmpInFlight = "stop"
   return withRtmpLock(async () => {
     clearFailure()
-    return stopRtmpStreamUnlocked()
+    return { ...(await stopRtmpStreamUnlocked()), ok: true as const }
+  }).finally(() => {
+    rtmpInFlight = null
+    lastRtmpCommand = { kind: "stop", at: Date.now() }
   })
+}
+
+/** Test hook: forget the gate's in-memory history. */
+export function resetRtmpGate() {
+  rtmpInFlight = null
+  lastRtmpCommand = null
 }
 
 async function stopRtmpStreamUnlocked(): Promise<StopResult> {

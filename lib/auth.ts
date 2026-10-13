@@ -123,7 +123,12 @@ export function readCookie(request: Request, name: string): string | undefined {
   if (!header) return undefined
   for (const part of header.split(";")) {
     const [key, ...rest] = part.trim().split("=")
-    if (key === name) return decodeURIComponent(rest.join("="))
+    if (key !== name) continue
+    try {
+      return decodeURIComponent(rest.join("="))
+    } catch {
+      return undefined // malformed %-escape: treat as no cookie instead of a 500
+    }
   }
   return undefined
 }
