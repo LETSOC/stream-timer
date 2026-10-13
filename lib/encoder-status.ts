@@ -32,6 +32,19 @@ export type EncoderStatus = {
   /** Last give-up reason after the stream stopped (bad URL, too many quick failures). */
   rtmpFailure: string | null
   rtmpLogTail: string
+  /** Both RTMP channels, independent: Slate (drawtext) and Browser capture (/stream). */
+  rtmpChannels: Record<"slate" | "capture", {
+    running: boolean
+    state: "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
+    reconnecting: boolean
+    restarts: number
+    adopted: boolean
+    host: string | null
+    size: string | null
+    connectError: string | null
+    failure: string | null
+    logTail: string
+  }>
   /** Other ffmpeg processes publishing over RTMP that this app did not start. */
   strayPublishers: { pid: number; command: string }[]
 }

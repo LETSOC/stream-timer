@@ -19,7 +19,11 @@ export async function GET(request: Request) {
   const denied = requireOperator(request)
   if (denied) return denied
   await maybeRefreshStaleSlate()
-  return Response.json(readStatus())
+  const status = readStatus()
+  const mode = new URL(request.url).searchParams.get("mode")
+  // ?mode=slate|capture adds that channel's status as `channel` (the full object has both).
+  if (mode === "slate" || mode === "capture") return Response.json({ ...status, channel: status.rtmpChannels[mode] })
+  return Response.json(status)
 }
 
 export async function POST(request: Request) {
@@ -70,15 +74,18 @@ export async function DELETE(request: Request) {
   await connection()
   const denied = authorizeMutation(request)
   if (denied) return denied
-  const target = new URL(request.url).searchParams.get("target")
+  const params = new URL(request.url).searchParams
+  const target = params.get("target")
+  // Which RTMP channel to stop: ?source=capture (or ?mode=capture); default slate, as before.
+  const channel = params.get("source") === "capture" || params.get("mode") === "capture" ? "capture" : "slate"
   if (target === "rtmp-all") {
     const result = await stopAllRtmp()
     return Response.json({ ...readStatus(), note: `Stopped ${result.stopped.length} stream supervisor(s) and ${result.strays.length} stray ffmpeg publisher(s).` })
   }
   if (target === "rtmp") {
-    const result = await stopRtmpStream()
+    const result = await stopRtmpStream(Date.now(), channel)
     if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
-    await stopEncoder()
+    if (channel === "slate") await stopEncoder() // as before; stopping the capture leaves the HLS preview alone
     return Response.json({ ...readStatus(), note: result.note ?? null })
   }
   await stopEncoder()
