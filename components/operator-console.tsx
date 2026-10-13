@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,7 +27,10 @@ import { useNow } from "@/lib/use-now"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
-import { sameSpeakers, type StageOptions } from "@/lib/stage"
+import { DEFAULT_STAGE, parseStage, stageScreen, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { pickSection, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
+import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
+import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
 import {
@@ -61,10 +64,7 @@ export function OperatorConsole() {
   const [clockScale, setClockScale] = useState(1)
   const [clockText, setClockText] = useState(1)
   const [logoUrl, setLogoUrl] = useState("")
-  // Speakers are edited as a local draft (`speakers`) and only published with "Save speakers" (`savedSpeakers`).
   const [speakers, setSpeakers] = useState<SpeakerCard[]>([])
-  const [savedSpeakers, setSavedSpeakers] = useState<SpeakerCard[]>([])
-  const speakersDirty = !sameSpeakers(speakers, savedSpeakers)
   const [gallerySeconds, setGallerySeconds] = useState(4)
   const [galleryPause, setGalleryPause] = useState(6)
   const [galleryOffset, setGalleryOffset] = useState(-86)
@@ -78,6 +78,19 @@ export function OperatorConsole() {
   const [endAt, setEndAt] = useState("")
   const [forceEnd, setForceEnd] = useState(false)
   const [holdCountdown, setHoldCountdown] = useState(false)
+  const [breakTitle, setBreakTitle] = useState(DEFAULT_STAGE.breakTitle)
+  const [breakMessage, setBreakMessage] = useState("")
+  const [breakImage, setBreakImage] = useState("")
+  const [breakFit, setBreakFit] = useState<ImageFit>("cover")
+  const [holdTitle, setHoldTitle] = useState(DEFAULT_STAGE.holdTitle)
+  const [holdMessage, setHoldMessage] = useState("")
+  const [holdImage, setHoldImage] = useState("")
+  const [holdFit, setHoldFit] = useState<ImageFit>("cover")
+  const [overlay, setOverlay] = useState<Overlay>("none")
+  const [overlayAt, setOverlayAt] = useState<number | null>(null)
+  // What /stream has for the draft-managed sections (Event, Links, Look, Socials, End/Break/Hold card, Speakers).
+  // The fields above are the desk's draft; only "Save" copies a section into `published`.
+  const [published, setPublished] = useState<DeskSnapshot | null>(null)
   const [operator, setOperator] = useOperator()
   // Truthy once the session is confirmed; gates autosave like the old encoder token did.
   const token = operator.operator ? "session" : ""
@@ -127,6 +140,9 @@ export function OperatorConsole() {
         year: "numeric",
       }).format(target)}  •  ${time}`
     : `${date}  •  ${time}`
+
+  // The encoder burns in what /stream has (published Event), not the Event draft.
+  const pubLine = eventLine(published?.event ?? event)
 
   const streamHref = useMemo(() => {
     const params = new URLSearchParams({
@@ -196,35 +212,43 @@ export function OperatorConsole() {
     }
   }, [])
 
+  const applyStage = useCallback((stage: Partial<StageOptions>) => {
+    if (stage.checker) setChecker(stage.checker)
+    if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
+    if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
+    if (typeof stage.transparent === "boolean") setTransparent(stage.transparent)
+    if (typeof stage.lineSpacing === "number") setLineSpacing(stage.lineSpacing)
+    if (typeof stage.blockGap === "number") setBlockGap(stage.blockGap)
+    if (typeof stage.clockScale === "number") setClockScale(clampSize(stage.clockScale, CLOCK_SCALE_RANGE))
+    if (typeof stage.clockText === "number") setClockText(clampSize(stage.clockText, CLOCK_TEXT_RANGE))
+    if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
+    if (Array.isArray(stage.speakers)) setSpeakers(stage.speakers)
+    if (typeof stage.gallerySeconds === "number") setGallerySeconds(stage.gallerySeconds)
+    if (typeof stage.galleryPause === "number") setGalleryPause(stage.galleryPause)
+    if (typeof stage.galleryOffset === "number") setGalleryOffset(stage.galleryOffset)
+    if (typeof stage.galleryScale === "number") setGalleryScale(stage.galleryScale)
+    if (typeof stage.endTitle === "string") setEndTitle(stage.endTitle)
+    if (typeof stage.endSubtitle === "string") setEndSubtitle(stage.endSubtitle)
+    if (typeof stage.endDate === "string") setEndDate(stage.endDate)
+    if (typeof stage.endBody === "string") setEndBody(stage.endBody)
+    if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
+    if (typeof stage.endButton === "string") setEndButton(stage.endButton)
+    if (typeof stage.endAt === "string") setEndAt(stage.endAt)
+    if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
+    if (typeof stage.holdCountdown === "boolean") setHoldCountdown(stage.holdCountdown)
+    if (typeof stage.breakTitle === "string") setBreakTitle(stage.breakTitle)
+    if (typeof stage.breakMessage === "string") setBreakMessage(stage.breakMessage)
+    if (typeof stage.breakImage === "string") setBreakImage(stage.breakImage)
+    if (stage.breakFit === "cover" || stage.breakFit === "contain") setBreakFit(stage.breakFit)
+    if (typeof stage.holdTitle === "string") setHoldTitle(stage.holdTitle)
+    if (typeof stage.holdMessage === "string") setHoldMessage(stage.holdMessage)
+    if (typeof stage.holdImage === "string") setHoldImage(stage.holdImage)
+    if (stage.holdFit === "cover" || stage.holdFit === "contain") setHoldFit(stage.holdFit)
+    if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold") setOverlay(stage.overlay)
+    if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
+  }, [])
+
   useEffect(() => {
-    const applyStage = (stage: Partial<StageOptions>) => {
-      if (stage.checker) setChecker(stage.checker)
-      if (typeof stage.showMeta === "boolean") setShowMeta(stage.showMeta)
-      if (typeof stage.showLink === "boolean") setShowLink(stage.showLink)
-      if (typeof stage.transparent === "boolean") setTransparent(stage.transparent)
-      if (typeof stage.lineSpacing === "number") setLineSpacing(stage.lineSpacing)
-      if (typeof stage.blockGap === "number") setBlockGap(stage.blockGap)
-      if (typeof stage.clockScale === "number") setClockScale(clampSize(stage.clockScale, CLOCK_SCALE_RANGE))
-      if (typeof stage.clockText === "number") setClockText(clampSize(stage.clockText, CLOCK_TEXT_RANGE))
-      if (typeof stage.logoUrl === "string") setLogoUrl(stage.logoUrl)
-      if (Array.isArray(stage.speakers)) {
-        setSpeakers(stage.speakers)
-        setSavedSpeakers(stage.speakers)
-      }
-      if (typeof stage.gallerySeconds === "number") setGallerySeconds(stage.gallerySeconds)
-      if (typeof stage.galleryPause === "number") setGalleryPause(stage.galleryPause)
-      if (typeof stage.galleryOffset === "number") setGalleryOffset(stage.galleryOffset)
-      if (typeof stage.galleryScale === "number") setGalleryScale(stage.galleryScale)
-      if (typeof stage.endTitle === "string") setEndTitle(stage.endTitle)
-      if (typeof stage.endSubtitle === "string") setEndSubtitle(stage.endSubtitle)
-      if (typeof stage.endDate === "string") setEndDate(stage.endDate)
-      if (typeof stage.endBody === "string") setEndBody(stage.endBody)
-      if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
-      if (typeof stage.endButton === "string") setEndButton(stage.endButton)
-      if (typeof stage.endAt === "string") setEndAt(stage.endAt)
-      if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
-      if (typeof stage.holdCountdown === "boolean") setHoldCountdown(stage.holdCountdown)
-    }
     const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
     if (stageRaw) {
       try {
@@ -259,21 +283,25 @@ export function OperatorConsole() {
           setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
         }
         if ((serverWins || !stageRaw) && body.stage) applyStage(body.stage)
-        // An unsaved speaker draft from before a reload stays a draft on top of the saved list.
-        try {
-          const draft = JSON.parse(window.localStorage.getItem(SPEAKER_DRAFT_KEY) ?? "null") as unknown
-          if (Array.isArray(draft)) setSpeakers(draft as SpeakerCard[])
-        } catch {
-          /* ignore a bad draft */
+        setPublished({ event: saved ?? { ...DEFAULT_EVENT }, stage: parseStage(body.stage) })
+        // Unsaved section drafts from before a reload stay drafts on top of what /stream has.
+        for (const values of Object.values(readStoredDrafts())) {
+          if (values?.event) updateEvent(values.event)
+          if (values?.stage) applyStage(values.stage)
         }
       })
       .finally(() => setHydrated(true))
-  }, [updateEvent])
+  }, [updateEvent, applyStage])
+
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, overlay, overlayAt }
+  const draftJson = JSON.stringify({ event, stage: draftStage })
+  const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
+  const drafts = useSectionDrafts(draftSnap, published, hydrated)
 
   useEffect(() => {
     if (!hydrated) return
-    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify({ checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers: savedSpeakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown }))
-  }, [hydrated, checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, savedSpeakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown])
+    window.localStorage.setItem("hyphen-countdown-stage", JSON.stringify(draftSnap.stage))
+  }, [hydrated, draftSnap])
 
   useEffect(() => {
     if (!hydrated || !valid) return
@@ -286,28 +314,12 @@ export function OperatorConsole() {
     window.localStorage.setItem("hyphen-countdown-rtmp", rtmpUrl)
   }, [hydrated, rtmpUrl])
 
-  useEffect(() => {
-    if (!hydrated) return
-    // Keep the draft through a 409 too, so "Reload latest" doesn't throw away an unpublished speaker list.
-    if (speakersDirty || syncState === "conflict") window.localStorage.setItem(SPEAKER_DRAFT_KEY, JSON.stringify(speakers))
-    else window.localStorage.removeItem(SPEAKER_DRAFT_KEY)
-  }, [hydrated, speakers, speakersDirty, syncState])
-
-  useEffect(() => {
-    if (!speakersDirty) return
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    window.addEventListener("beforeunload", warn)
-    return () => window.removeEventListener("beforeunload", warn)
-  }, [speakersDirty])
-
+  // Autosave carries the published sections plus live switches; section drafts never leave the browser.
   const savePayload = {
-      event,
-      testUntil,
-      pausedAt: pausedMs || null,
-      stage: { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers: savedSpeakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown },
+    event: published?.event ?? event,
+    testUntil,
+    pausedAt: pausedMs || null,
+    stage: published ? savePayloadStage(published, draftSnap) : draftStage,
   }
   const payloadJson = JSON.stringify(savePayload)
   const saveTimer = useRef<number | null>(null)
@@ -316,8 +328,8 @@ export function OperatorConsole() {
   const lastSent = useRef("")
 
   /** Serialised save: one PUT at a time, in order; only the newest response updates the badge. */
-  function sendSave(payload: typeof savePayload) {
-    if (!token) return
+  function sendSave(payload: typeof savePayload, after?: (ok: boolean) => void) {
+    if (!token || !published) return
     if (saveTimer.current !== null) {
       window.clearTimeout(saveTimer.current)
       saveTimer.current = null
@@ -334,6 +346,7 @@ export function OperatorConsole() {
           body: JSON.stringify({ ...JSON.parse(json), rev: revRef.current }),
         })
         if (handleUnauthorized(response)) return
+        after?.(response.ok)
         if (response.ok) {
           const saved = (await response.json().catch(() => null)) as { rev?: number } | null
           if (typeof saved?.rev === "number") revRef.current = saved.rev
@@ -354,6 +367,7 @@ export function OperatorConsole() {
         setSyncState("error")
         setSyncError(body?.error ?? `Server returned ${response.status}.`)
       } catch {
+        after?.(false)
         if (seq !== saveSeq.current) return
         lastSent.current = ""
         setSyncState("local")
@@ -361,11 +375,50 @@ export function OperatorConsole() {
       }
     })
   }
-  function publishSpeakers() {
-    const next = speakers.filter((item) => item.image || item.name || item.description)
-    setSpeakers(next)
-    setSavedSpeakers(next)
-    sendSave({ ...savePayload, stage: { ...savePayload.stage, speakers: next } })
+  /** Put a section's saved values (or a stored draft) back into the desk fields. */
+  function applyDraft(values: SectionValues) {
+    if (values.event) updateEvent(values.event)
+    if (values.stage) applyStage(values.stage)
+  }
+
+  /** Publish one or more sections: only their fields change on /stream. Failed saves (incl. 409) put the draft back. */
+  function saveSections(ids: SectionId[]) {
+    if (!published || ids.length === 0) return
+    const before = published
+    const next = ids.reduce((acc, id) => withSection(id, acc, draftSnap), before)
+    setPublished(next)
+    sendSave({ ...savePayload, event: next.event, stage: savePayloadStage(next, draftSnap) }, (ok) => {
+      if (!ok) setPublished((current) => (current ? ids.reduce((acc, id) => withSection(id, acc, before), current) : current))
+    })
+  }
+
+  function discardSection(id: SectionId) {
+    if (published) applyDraft(pickSection(id, published))
+  }
+
+  function draftBar(id: SectionId) {
+    return <DraftBar id={id} dirty={drafts.isDirty(id)} canSave={Boolean(token)} onSave={() => saveSections([id])} onDiscard={() => discardSection(id)} pillClass={(tone, size) => pillClass(tone, size)} />
+  }
+
+  /** Live switch for /stream: break, hold, end card or countdown (mutually exclusive). */
+  function showScreen(next: "break" | "hold" | "end" | "countdown") {
+    const nextOverlay: Overlay = next === "break" || next === "hold" ? next : "none"
+    const at = nextOverlay === "none" ? null : nowMs()
+    const nextForceEnd = next === "end"
+    const nextHold = next === "countdown"
+    setOverlay(nextOverlay)
+    setOverlayAt(at)
+    setForceEnd(nextForceEnd)
+    setHoldCountdown(nextHold)
+    sendSave({ ...savePayload, stage: { ...savePayload.stage, overlay: nextOverlay, overlayAt: at, forceEnd: nextForceEnd, holdCountdown: nextHold } })
+  }
+
+  async function uploadImage(file: File, apply: (url: string) => void) {
+    const response = await fetch("/api/upload", { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file })
+    if (handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as { url?: string; error?: string } | null
+    if (response.ok && body?.url) apply(body.url)
+    else setToast(body?.error ?? `Upload failed (${response.status}).`)
   }
 
   const sendSaveRef = useRef(sendSave)
@@ -374,22 +427,24 @@ export function OperatorConsole() {
   })
 
   useEffect(() => {
-    if (!token || !hydrated) return
+    if (!token || !hydrated || !published) return
     const id = window.setTimeout(() => sendSaveRef.current(JSON.parse(payloadJson)), 400)
     saveTimer.current = id
     return () => window.clearTimeout(id)
-  }, [payloadJson, token, hydrated])
+  }, [payloadJson, token, hydrated, published])
 
   const stableHref = useMemo(() => {
     const params = new URLSearchParams()
-    if (checker !== 6) params.set("grid", String(checker))
-    if (!showMeta) params.set("meta", "0")
-    if (!showLink) params.set("showlink", "0")
-    if (transparent) params.set("bg", "clear")
+    // The OBS link carries only published Look values, so a Look draft never leaks into OBS via the URL.
+    const look = published?.stage ?? { checker, showMeta, showLink, transparent }
+    if (look.checker !== 6) params.set("grid", String(look.checker))
+    if (!look.showMeta) params.set("meta", "0")
+    if (!look.showLink) params.set("showlink", "0")
+    if (look.transparent) params.set("bg", "clear")
     if (operator.viewKey) params.set("k", operator.viewKey)
     const query = params.toString()
     return query ? `/stream?${query}` : "/stream"
-  }, [checker, showMeta, showLink, transparent, operator.viewKey])
+  }, [published, checker, showMeta, showLink, transparent, operator.viewKey])
   const endHref = operator.viewKey ? `/end?k=${encodeURIComponent(operator.viewKey)}` : "/end"
 
   async function rotateViewKey() {
@@ -419,11 +474,12 @@ export function OperatorConsole() {
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
   const endTarget = wallTimeInZone(date, endAt || endTime, timeZone)
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
+  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
   async function jumpPreview(seconds: number) {
     if (!valid) return
     setPausedAt(null)
-    const nextUntil = Date.now() + seconds * 1000
+    const nextUntil = nowMs() + seconds * 1000
     setTestUntil(nextUntil)
     setSkewMs(target.getTime() - nextUntil)
     sendSave({ ...savePayload, testUntil: nextUntil, pausedAt: null })
@@ -431,7 +487,7 @@ export function OperatorConsole() {
 
   function goLiveNow() {
     if (!valid) return
-    const nextUntil = Date.now() - 1000
+    const nextUntil = nowMs() - 1000
     setPausedAt(null)
     setTestUntil(nextUntil)
     setSkewMs(target.getTime() - nextUntil)
@@ -444,7 +500,10 @@ export function OperatorConsole() {
     setTestUntil(null)
     setSkewMs(0)
     updateEvent(restored)
-    sendSave({ ...savePayload, event: { ...event, ...restored }, testUntil: null, pausedAt: null })
+    // A transport action: the restored date goes live straight away (not a draft).
+    const nextEvent = { ...(published?.event ?? event), ...restored }
+    setPublished((current) => (current ? { ...current, event: { ...current.event, ...restored } } : current))
+    sendSave({ ...savePayload, event: nextEvent, testUntil: null, pausedAt: null })
   }
 
   useEffect(() => {
@@ -514,6 +573,11 @@ export function OperatorConsole() {
                 {previewRemaining?.done ? "LIVE" : "Armed"}
               </span>
             </span>
+            {drafts.dirty.length ? (
+              <Pill size="sm" tone="live" data-testid="save-all" disabled={!token} title={drafts.dirty.map((id) => SECTIONS[id].label).join(", ")} onClick={() => saveSections(drafts.dirty)}>
+                Save all ({drafts.dirty.length})
+              </Pill>
+            ) : null}
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
@@ -664,15 +728,18 @@ export function OperatorConsole() {
               <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("live")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
-              <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
-              <Pill className="whitespace-nowrap" tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
+              <Pill className="whitespace-nowrap" onClick={() => showScreen("end")}>Show end card now</Pill>
+              <Pill className="whitespace-nowrap" tone="outline" data-testid="back-to-countdown" onClick={() => showScreen("countdown")}>Back to countdown</Pill>
+              <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
+              <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
             </div>
             <p className="font-mono text-[12px] leading-5 text-black/70">
-              Pause, play, go live, and restore apply to this preview and the live /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
+              Pause, play, go live, restore and the break/hold/end card buttons go to the live /stream straight away. On /stream a break or hold card beats the end card, which beats the countdown. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
             </p>
           </Panel>
 
-          <Panel id="event" title="Event" pill="Editable">
+          <Panel id="event" title="Event" pill="Editable" dirty={drafts.isDirty("event")}>
+            {draftBar("event")}
             <Field label="Session title" htmlFor="name">
               <GrowingText id="name" value={name} onChange={(value) => updateEvent({ name: value })} />
             </Field>
@@ -701,7 +768,8 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <Panel id="cta" title="Links & call to action">
+          <Panel id="cta" title="Links & call to action" dirty={drafts.isDirty("cta")}>
+            {draftBar("cta")}
             <Field label="RSVP URL" htmlFor="rsvp">
               <GrowingText id="rsvp" value={rsvpUrl} onChange={(value) => updateEvent({ rsvpUrl: value })} />
             </Field>
@@ -725,7 +793,8 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <Panel id="look" title="Look">
+          <Panel id="look" title="Look" dirty={drafts.isDirty("look")}>
+            {draftBar("look")}
             <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={showMeta} onChange={(event) => setShowMeta(event.target.checked)} />
               Show date and timezone
@@ -772,7 +841,8 @@ export function OperatorConsole() {
             </Field>
           </Panel>
 
-          <Panel id="socials" title="Socials" pill={`${[xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl].filter((url) => url.trim()).length}/5 links set`} defaultOpen={false}>
+          <Panel id="socials" title="Socials" pill={`${[xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl].filter((url) => url.trim()).length}/5 links set`} defaultOpen={false} dirty={drafts.isDirty("socials")}>
+            {draftBar("socials")}
               <Field label="X URL" htmlFor="x"><GrowingText id="x" value={xUrl} onChange={(value) => updateEvent({ xUrl: value })} /></Field>
               <Field label="Facebook URL" htmlFor="fb"><GrowingText id="fb" value={facebookUrl} onChange={(value) => updateEvent({ facebookUrl: value })} /></Field>
               <Field label="LinkedIn URL" htmlFor="li"><GrowingText id="li" value={linkedinUrl} onChange={(value) => updateEvent({ linkedinUrl: value })} /></Field>
@@ -801,7 +871,7 @@ export function OperatorConsole() {
                   void fetch("/api/encoder", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ mode: "rtmp", rtmpUrl, eventName: name, dateLine, targetUnix, refreshSeconds: 0 }),
+                    body: JSON.stringify({ mode: "rtmp", rtmpUrl, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
                   })
                     .then(async (response) => {
                       if (handleUnauthorized(response)) return
@@ -927,9 +997,9 @@ export function OperatorConsole() {
                 {Array.from({ length: 9 }, (_, index) => <div key={index} className="border border-white/35" />)}
               </div>
             ) : null}
-            {speakersDirty && speakers.length > 0 ? (
-              <span data-testid="speaker-draft-label" className="absolute right-3 bottom-3 z-30 rounded-full bg-[#b45309] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
-                Speakers: draft
+            {drafts.dirty.length ? (
+              <span data-testid="draft-tag" className="absolute right-3 bottom-3 z-30 max-w-[70%] truncate rounded-full bg-[#b45309] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
+                Draft · {drafts.dirty.map((id) => SECTIONS[id].label).join(", ")}
               </span>
             ) : null}
             {previewFlash ? (
@@ -937,7 +1007,17 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            {forceEnd || (!holdCountdown && previewNow ? wallTimeInZone(date, endAt || endTime, timeZone).getTime() <= previewNow.getTime() : false) ? (
+            {previewScreen === "break" || previewScreen === "hold" ? (
+              <OverlayCard
+                kind={previewScreen}
+                title={previewScreen === "break" ? breakTitle : holdTitle}
+                message={previewScreen === "break" ? breakMessage : holdMessage}
+                image={previewScreen === "break" ? breakImage : holdImage}
+                fit={previewScreen === "break" ? breakFit : holdFit}
+                since={overlayAt}
+                clock={now}
+              />
+            ) : previewScreen === "end" ? (
               <EndStreamPage card={{
                 title: endTitle,
                 subtitle: endSubtitle,
@@ -984,8 +1064,9 @@ export function OperatorConsole() {
             — Changes save to this server automatically and go live on /stream within a second. For OBS, add a Browser Source at 1920×1080 and paste the copied link. Countdown runs off this computer’s clock.
             {transparent ? " Transparent background is on: in OBS leave the browser source CSS empty so the page can show through." : ""}
           </p>
-          <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
-          <Panel id="end-card" title="End card">
+          <EncodedPreview eventName={pubLine.name} dateLine={pubLine.dateLine} targetUnix={pubLine.targetUnix} valid={pubLine.valid} />
+          <Panel id="end-card" title="End card" dirty={drafts.isDirty("endCard")}>
+            {draftBar("endCard")}
             <p className="font-mono text-[13px] leading-5 break-all text-black/70">OBS browser source: {operator.origin}{endHref}. This page is separate from the countdown.</p>
             <Field label="Title" htmlFor="end-title"><GrowingText id="end-title" value={endTitle} onChange={setEndTitle} /></Field>
             <Field label="Subtitle" htmlFor="end-subtitle"><GrowingText id="end-subtitle" value={endSubtitle} onChange={setEndSubtitle} /></Field>
@@ -995,12 +1076,53 @@ export function OperatorConsole() {
             <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
-              <Pill className="whitespace-nowrap" tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
+              <Pill className="whitespace-nowrap" onClick={() => showScreen("end")}>Show end card now</Pill>
+              <Pill className="whitespace-nowrap" tone="outline" data-testid="back-to-countdown" onClick={() => showScreen("countdown")}>Back to countdown</Pill>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
-          <Panel id="speakers" title="Speakers" pill={speakersDirty ? "Unsaved changes" : `${savedSpeakers.length} live`}>
+          <Panel id="break-card" title="Break card" defaultOpen={false} dirty={drafts.isDirty("breakCard")} pill={overlay === "break" ? "On air" : undefined}>
+            {draftBar("breakCard")}
+            <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show break card. Edits here are a draft until you Save.</p>
+            <Field label="Title" htmlFor="break-title"><GrowingText id="break-title" value={breakTitle} onChange={setBreakTitle} /></Field>
+            <Field label="Message (optional)" htmlFor="break-message"><GrowingText id="break-message" value={breakMessage} onChange={setBreakMessage} /></Field>
+            <Field label="Image (optional): URL or upload" htmlFor="break-image">
+              <GrowingText id="break-image" value={breakImage} onChange={setBreakImage} />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label className={`${pillClass("outline", "sm")} cursor-pointer`}>
+                  Upload image
+                  <input data-testid="break-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setBreakImage); event.target.value = "" }} />
+                </label>
+                {breakImage ? <Pill size="sm" tone="outline" onClick={() => setBreakImage("")}>Remove image</Pill> : null}
+                <select aria-label="Image fit" value={breakFit} onChange={(event) => setBreakFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
+                  <option value="cover">Fill frame (cover)</option>
+                  <option value="contain">Fit inside (contain)</option>
+                </select>
+              </div>
+            </Field>
+          </Panel>
+          <Panel id="hold-card" title="Hold card" defaultOpen={false} dirty={drafts.isDirty("holdCard")} pill={overlay === "hold" ? "On air" : undefined}>
+            {draftBar("holdCard")}
+            <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show hold card. Edits here are a draft until you Save.</p>
+            <Field label="Title" htmlFor="hold-title"><GrowingText id="hold-title" value={holdTitle} onChange={setHoldTitle} /></Field>
+            <Field label="Message (optional)" htmlFor="hold-message"><GrowingText id="hold-message" value={holdMessage} onChange={setHoldMessage} /></Field>
+            <Field label="Image (optional): URL or upload" htmlFor="hold-image">
+              <GrowingText id="hold-image" value={holdImage} onChange={setHoldImage} />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label className={`${pillClass("outline", "sm")} cursor-pointer`}>
+                  Upload image
+                  <input data-testid="hold-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setHoldImage); event.target.value = "" }} />
+                </label>
+                {holdImage ? <Pill size="sm" tone="outline" onClick={() => setHoldImage("")}>Remove image</Pill> : null}
+                <select aria-label="Image fit" value={holdFit} onChange={(event) => setHoldFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
+                  <option value="cover">Fill frame (cover)</option>
+                  <option value="contain">Fit inside (contain)</option>
+                </select>
+              </div>
+            </Field>
+          </Panel>
+          <Panel id="speakers" title="Speakers" pill={`${published?.stage.speakers.length ?? 0} live`} dirty={drafts.isDirty("speakers")}>
+            {draftBar("speakers")}
             <p className="font-mono text-[13px] leading-5 text-black/70">Plays over the logo on the OBS page during the countdown, then clears so the logo shows. It stops when the event is live. The encoded slate is unchanged.</p>
             <Field label="Seconds on each speaker" htmlFor="gallery-seconds">
               <Input id="gallery-seconds" type="number" min={2} max={30} value={gallerySeconds} onChange={(event) => setGallerySeconds(Math.min(30, Math.max(2, Number(event.target.value) || 4)))} />
@@ -1029,13 +1151,7 @@ export function OperatorConsole() {
               </div>
             ))}
             <Pill onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</Pill>
-            <div data-testid="speaker-actions" className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-[#F6F6F3] p-3">
-              <span className={`font-mono text-[12px] ${speakersDirty ? "font-bold text-[#b45309]" : "text-black/70"}`}>
-                {speakersDirty ? "Draft: not on /stream until you save." : "Saved: /stream shows this list."}
-              </span>
-              <Pill size="sm" tone="live" disabled={!speakersDirty || !token} onClick={publishSpeakers}>Save speakers</Pill>
-              <Pill size="sm" tone="outline" disabled={!speakersDirty} onClick={() => setSpeakers(savedSpeakers)}>Discard</Pill>
-            </div>
+
           </Panel>
         </section>
       </main>
@@ -1135,14 +1251,15 @@ function useSectionOpen<D extends boolean | null>(id: string | undefined, defaul
   return [id ? open : true, (next) => { if (id) setSectionOpen(id, next) }]
 }
 
-function Panel({ id, title, pill, defaultOpen = true, children }: { id?: string; title: string; pill?: string; defaultOpen?: boolean; children: ReactNode }) {
+function Panel({ id, title, pill, dirty = false, defaultOpen = true, children }: { id?: string; title: string; pill?: string; dirty?: boolean; defaultOpen?: boolean; children: ReactNode }) {
   const [open, setOpen] = useSectionOpen(id, defaultOpen)
   const bodyId = id ? `section-${id}` : undefined
   const heading = (
     <>
       <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
       <span className="flex items-center gap-2">
-        {pill ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
+        {dirty ? <span data-testid={`unsaved-${id}`} className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[12px] font-bold text-white">Unsaved changes</span> : null}
+        {pill && !dirty ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
         {id ? (
           <svg viewBox="0 0 24 24" className={`size-4 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="m6 9 6 6 6-6" />
@@ -1270,4 +1387,22 @@ function useMediaQuery(query: string) {
   )
 }
 
-const SPEAKER_DRAFT_KEY = "hyphen-countdown-speakers-draft"
+
+function eventLine(ev: { name: string; date: string; time: string; timeZone: string }) {
+  const target = wallTimeInZone(ev.date, ev.time, ev.timeZone)
+  const valid = Number.isFinite(target.getTime())
+  const dateLine = valid
+    ? `${new Intl.DateTimeFormat("en-GB", { timeZone: ev.timeZone, day: "numeric", month: "long", year: "numeric" }).format(target)}  •  ${ev.time}`
+    : `${ev.date}  •  ${ev.time}`
+  return { name: ev.name, valid, targetUnix: valid ? Math.floor(target.getTime() / 1000) : 0, dateLine }
+}
+
+/** Same object for the same JSON, so effects keyed on the draft only run when it really changes. */
+function useParsedJson<T>(json: string): T {
+  return useMemo(() => JSON.parse(json) as T, [json])
+}
+
+/** Click-time clock for event handlers. */
+function nowMs() {
+  return Date.now()
+}

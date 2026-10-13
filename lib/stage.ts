@@ -30,7 +30,22 @@ export type StageOptions = {
   endAt: string
   forceEnd: boolean
   holdCountdown: boolean
+  /** Break / hold overlay cards. `overlay` is the live switch; it beats the end card and countdown. */
+  breakTitle: string
+  breakMessage: string
+  breakImage: string
+  breakFit: ImageFit
+  holdTitle: string
+  holdMessage: string
+  holdImage: string
+  holdFit: ImageFit
+  overlay: Overlay
+  /** When the current overlay went up (ms), for the "on break" timer. */
+  overlayAt: number | null
 }
+
+export type ImageFit = "cover" | "contain"
+export type Overlay = "none" | "break" | "hold"
 
 export const DEFAULT_STAGE: StageOptions = {
   checker: 6,
@@ -56,6 +71,16 @@ export const DEFAULT_STAGE: StageOptions = {
   endAt: "",
   forceEnd: false,
   holdCountdown: false,
+  breakTitle: "We'll be right back",
+  breakMessage: "",
+  breakImage: "",
+  breakFit: "cover",
+  holdTitle: "Please stand by",
+  holdMessage: "",
+  holdImage: "",
+  holdFit: "cover",
+  overlay: "none",
+  overlayAt: null,
 }
 
 export const TEXT_MAX = 200
@@ -127,6 +152,16 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     endAt: pick("endAt", (v, f) => parseEndAt(v, f)),
     forceEnd: pick("forceEnd", (v) => v === true),
     holdCountdown: pick("holdCountdown", (v) => v === true),
+    breakTitle: pick("breakTitle", (v) => text(v, DEFAULT_STAGE.breakTitle)),
+    breakMessage: pick("breakMessage", (v) => (typeof v === "string" ? v.slice(0, BODY_MAX) : "")),
+    breakImage: pick("breakImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
+    breakFit: pick("breakFit", (v) => (v === "contain" ? "contain" : "cover")),
+    holdTitle: pick("holdTitle", (v) => text(v, DEFAULT_STAGE.holdTitle)),
+    holdMessage: pick("holdMessage", (v) => (typeof v === "string" ? v.slice(0, BODY_MAX) : "")),
+    holdImage: pick("holdImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
+    holdFit: pick("holdFit", (v) => (v === "contain" ? "contain" : "cover")),
+    overlay: pick("overlay", (v) => (v === "break" || v === "hold" ? v : "none")),
+    overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
   }
 }
 
@@ -147,4 +182,14 @@ export function testClockStale(testSetAt: number | null, now = Date.now()): bool
 /** Same speakers in the same order (used to tell a desk draft from the published list). */
 export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[]): boolean {
   return a.length === b.length && a.every((item, i) => item.image === b[i].image && item.name === b[i].name && item.description === b[i].description)
+}
+
+/**
+ * What /stream shows, in order of precedence:
+ * break/hold overlay  >  end card (forced, or past the end time unless held)  >  countdown.
+ */
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown">, pastEnd: boolean): "break" | "hold" | "end" | "countdown" {
+  if (stage.overlay !== "none") return stage.overlay
+  if (stage.forceEnd || (!stage.holdCountdown && pastEnd)) return "end"
+  return "countdown"
 }

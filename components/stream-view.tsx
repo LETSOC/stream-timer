@@ -8,7 +8,8 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
-import { clampChecker, effectiveEndTime, parseStage, type StageOptions } from "@/lib/stage"
+import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
+import { OverlayCard } from "@/components/overlay-card"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
@@ -122,7 +123,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   }, [transparent])
 
   const clock = testClock ?? now
-  const ended = stage.forceEnd || (!stage.holdCountdown && Boolean(clock && wallTimeInZone(event.date, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime()))
+  const pastEnd = Boolean(clock && wallTimeInZone(event.date, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
+  const screen = stageScreen(stage, pastEnd)
+  const ended = screen === "end"
 
   if (blocked) {
     return (
@@ -134,7 +137,18 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
 
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
-      {ended ? (
+      {screen === "break" || screen === "hold" ? (
+        <OverlayCard
+          kind={screen}
+          title={screen === "break" ? stage.breakTitle : stage.holdTitle}
+          message={screen === "break" ? stage.breakMessage : stage.holdMessage}
+          image={screen === "break" ? stage.breakImage : stage.holdImage}
+          fit={screen === "break" ? stage.breakFit : stage.holdFit}
+          since={stage.overlayAt}
+          clock={now}
+          className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
+        />
+      ) : ended ? (
         <EndStreamPage className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
           subtitle: stage.endSubtitle,
