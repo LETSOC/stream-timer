@@ -116,7 +116,29 @@ export function OperatorConsole() {
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
+  // One toast at a time; each kind has its own title, duration and timer. Polling never touches it.
+  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error"; text: string }
+  const [toast, setToastState] = useState<Toast | null>(null)
+  const toastTimer = useRef<number | null>(null)
+  const toastSeq = useRef(0)
+  const lastSyncToastAt = useRef(0)
+  const dismissToast = useCallback(() => {
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+    toastTimer.current = null
+    setToastState(null)
+  }, [])
+  const showToast = useCallback((kind: Toast["kind"], text: string) => {
+    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000 }[kind]
+    const id = ++toastSeq.current
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+    setToastState({ id, kind, text })
+    toastTimer.current = window.setTimeout(() => {
+      toastTimer.current = null
+      setToastState((current) => (current?.id === id ? null : current))
+    }, ms)
+  }, [])
+  /** Errors and messages that aren't copies or sync. */
+  const setToast = useCallback((text: string | null) => (text ? showToast("error", text) : dismissToast()), [showToast, dismissToast])
   // Preview-only aids (never sent to /stream), remembered in localStorage.
   const [trueObs, setTrueObs] = useSectionOpen("aid-true-obs", false)
   const [safeZone, setSafeZone] = useSectionOpen("aid-safe-zone", false)
@@ -388,8 +410,14 @@ export function OperatorConsole() {
     })
     setSyncState("saved")
     setSyncError("")
-    setToast(plan.conflicts.length ? `Changed on another device: ${plan.conflicts.map((id) => SECTIONS[id].label).join(", ")}. Choose Load theirs or Keep mine.` : "Synced from another device")
-  }, [updateEvent, applyStage])
+    if (plan.conflicts.length) {
+      showToast("conflict", `${plan.conflicts.map((id) => SECTIONS[id].label).join(", ")}: choose Load theirs or Keep mine.`)
+    } else if (Date.now() - lastSyncToastAt.current > 10_000) {
+      // Throttled: a busy other desk would otherwise toast on every change.
+      lastSyncToastAt.current = Date.now()
+      showToast("sync", "Settings updated from another device.")
+    }
+  }, [updateEvent, applyStage, showToast])
   useEffect(() => {
     syncNowRef.current = () => void pullRemote(true)
   }, [pullRemote])
@@ -636,15 +664,13 @@ export function OperatorConsole() {
     // navigator.clipboard is missing on plain-http non-localhost origins (e.g. LAN IP).
     const copiedOk = await navigator.clipboard?.writeText(value).then(() => true, () => false)
     if (!copiedOk) {
-      setToast(value)
-      window.setTimeout(() => setToast((current) => (current === value ? null : current)), 6000)
+      showToast("copy-failed", value)
       return
     }
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
     if (kind === "link" || kind === "params") {
-      setToast(value)
-      window.setTimeout(() => setToast((current) => (current === value ? null : current)), 2500)
+      showToast("copy", value)
     }
   }
 
@@ -1311,13 +1337,24 @@ export function OperatorConsole() {
         <a href="#top" className="font-bold text-black underline underline-offset-4" onClick={(event) => { event.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }) }}>↑ Back to top</a>
       </footer>
       {toast ? (
-        <div role="status" aria-live="polite" className="fixed right-4 bottom-4 z-50 flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
-          <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-[#D9FF43]" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d="m5 12 5 5 9-11" /></svg>
+        <button
+          type="button"
+          key={toast.id}
+          role="status"
+          aria-live="polite"
+          data-testid="toast"
+          data-kind={toast.kind}
+          title="Tap to dismiss"
+          onClick={toast.kind === "copy-failed" ? undefined : dismissToast}
+          onTouchMove={toast.kind === "copy-failed" ? undefined : dismissToast}
+          className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-left text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]"
+        >
+          <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
           <span className="min-w-0">
-            <span className="block text-[13px] font-bold">Copied to clipboard</span>
-            <span className="block truncate font-mono text-[12px] text-white/75">{toast}</span>
+            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up" }[toast.kind]}</span>
+            <span className={`block font-mono text-[12px] text-white/75 ${toast.kind === "copy-failed" ? "break-all select-all" : "truncate"}`}>{toast.text}</span>
           </span>
-        </div>
+        </button>
       ) : null}
       {showHelp ? (
         <div role="dialog" aria-modal="false" aria-label="Keyboard shortcuts" className="fixed left-4 bottom-4 z-50 w-72 rounded-2xl border border-black/10 bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.2)]">
