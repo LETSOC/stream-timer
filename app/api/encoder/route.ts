@@ -12,6 +12,7 @@ import {
   type RtmpSource,
 } from "@/lib/encoder"
 import { getViewKey } from "@/lib/view-key"
+import { CAPTURE_BITRATES } from "@/lib/capture-options"
 import { RELAY_TARGET, resolveDestination } from "@/lib/rtmp-destinations"
 import { relayPublishUrl, startRelay, stopRelay } from "@/lib/relay"
 
@@ -58,13 +59,17 @@ export async function POST(request: Request) {
       if (!destination) return Response.json({ ...readStatus(), error: "That destination no longer exists. Pick another." }, { status: 404 })
       rtmpUrl = destination.url
     }
-    const rec = body as { source?: unknown; captureSize?: unknown }
+    const rec = body as { source?: unknown; captureSize?: unknown; captureBitrate?: unknown; captureEncoder?: unknown }
     let source: RtmpSource = { kind: "slate" }
     if (rec.source === "capture") {
       // Capture loads /stream from this server on loopback with the view key (never leaves the machine).
       const port = new URL(request.url).port || "43211"
       const origin = process.env.CAPTURE_ORIGIN || `http://127.0.0.1:${port}`
       source = { kind: "capture", pageUrl: `${origin}/stream?k=${encodeURIComponent(getViewKey())}`, size: rec.captureSize === "1920x1080" ? "1920x1080" : "1280x720" }
+      const allowed: readonly number[] = CAPTURE_BITRATES[source.size]
+      const asked = Number(rec.captureBitrate)
+      source.bitrateK = allowed.includes(asked) ? asked : allowed[1]
+      source.encoder = rec.captureEncoder === "libx264" || rec.captureEncoder === "videotoolbox" ? rec.captureEncoder : "auto"
     }
     if (viaRelay) {
       source = { ...source, relay: true }

@@ -12,8 +12,9 @@ import crypto from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
-import { destinationFingerprint, directChannelDests, killGroup, pidRunsScript, redact, relayChildEnv } from "@/lib/encoder"
+import { destinationFingerprint, directChannelDests, readChannelStatus, killGroup, pidRunsScript, redact, relayChildEnv } from "@/lib/encoder"
 import { listDestinations, resolveDestination } from "@/lib/rtmp-destinations"
+import { diagnose, EMPTY_HEALTH, healthFromSamples, parseProgressBlocks, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 
 export const RELAY_PATHS = ["slate", "capture"] as const
 export type RelayPath = (typeof RELAY_PATHS)[number]
@@ -420,9 +421,9 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
   return "forwarding"
 }
 
-export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; error: string | null; adopted: boolean }
-export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[] }
-export type RelayStatus = { installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
+export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; error: string | null; adopted: boolean; health: HealthStats }
+export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
+export type RelayStatus = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 export async function relayStatus(): Promise<RelayStatus> {
   await reconcileRelay().catch(() => undefined)
@@ -435,6 +436,9 @@ export async function relayStatus(): Promise<RelayStatus> {
   const paths = {} as Record<RelayPath, RelayPathStatus>
   for (const name of RELAY_PATHS) {
     const info = api?.get(name)
+    const channel = readChannelStatus(name)
+    const source = channel.running && channel.relay ? channel.health : null
+    const expect = { fps: 30, kbps: channel.running && channel.relay && channel.bitrateK ? channel.bitrateK + 128 : null }
     const forwards = settings.forwards[name].filter((id) => dests.has(id)).map((destId): RelayForwardStatus => {
       const key = forwardKey(name, destId)
       const meta = loopAlive(key)
@@ -446,13 +450,19 @@ export async function relayStatus(): Promise<RelayStatus> {
       const dest = dests.get(destId)!
       const resolved = resolveDestination(destId)
       const blocked = !meta && resolved ? forwardConflict({ path: name, dest: destinationFingerprint(resolved.url) }, [], directChannelDests()) : null
-      if (blocked && settings.enabled) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, error: blocked, adopted: false }
-      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true }
+      if (blocked && settings.enabled) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
+      const health = meta && info?.ready ? healthFromSamples(parseProgressBlocks(tailOf(key, 32768)).slice(-13), 5, logAgeMs(key), expect) : EMPTY_HEALTH
+      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true, health }
     })
-    paths[name] = { name, ready: info?.ready === true, publisher: info?.source?.type ?? null, tracks: info?.tracks ?? [], readers: info?.readers.length ?? 0, bytesReceived: info?.bytesReceived ?? 0, forwards }
+    const outKbps = forwards.reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
+    const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : "Browser capture", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
+    paths[name] = { name, ready: info?.ready === true, publisher: info?.source?.type ?? null, tracks: info?.tracks ?? [], readers: info?.readers.length ?? 0, bytesReceived: info?.bytesReceived ?? 0, forwards, source, outKbps, diagnosis }
   }
   const lastLines = tailOf("mediamtx").split("\n").filter((line) => /ERR|FATAL/.test(line))
+  // Upload estimate: every forward plus any channel publishing straight to a destination.
+  const direct = RELAY_PATHS.map((name) => readChannelStatus(name)).filter((item) => item.running && !item.relay).reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
   return {
+    totalOutKbps: RELAY_PATHS.reduce((sum, name) => sum + paths[name].outKbps, 0) + direct,
     installed: bin !== null,
     bin,
     version: bin ? mediamtxVersion(bin) : null,

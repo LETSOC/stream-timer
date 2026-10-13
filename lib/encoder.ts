@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { EncoderStatus } from "@/lib/encoder-status";
 import { relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
+import { captureSourceHealth, EMPTY_HEALTH, healthFromSamples, parseStatsLines, type CaptureSourceStats, type HealthStats, type SourceHealth } from "@/lib/stream-health";
 
 export const ROOT = process.cwd();
 // Overridable so the lifecycle tests can use a temp dir and fake scripts.
@@ -350,10 +351,11 @@ export function rtmpFiles(ch: RtmpChannel) {
     log: path.join(DATA_DIR, "rtmp-capture.log"),
     state: path.join(DATA_DIR, "rtmp-capture-supervisor.json"),
     fail: path.join(DATA_DIR, "rtmp-capture-failed.json"),
+    stats: path.join(DATA_DIR, "rtmp-capture-stats.json"),
   }
 }
 
-type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean }
+type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean; bitrateK?: number; encoder?: string }
 
 function readRtmpMeta(ch: RtmpChannel = "slate"): RtmpMeta | null {
   try {
@@ -387,6 +389,32 @@ function writeFailure(error: string, ch: RtmpChannel = "slate") {
 
 function clearFailure(ch: RtmpChannel = "slate") {
   try { fs.unlinkSync(rtmpFiles(ch).fail) } catch { /* already gone */ }
+}
+
+/** Slate: 2500k video + 128k audio (stream-countdown.sh). Capture: its chosen bitrate + 128k. */
+const SLATE_KBPS = 2628
+/** Live encoder health for a channel (slate: its ffmpeg stats lines; capture: the capture process's stats file). */
+function channelHealth(ch: RtmpChannel, running: boolean, meta: RtmpMeta | null): SourceHealth | HealthStats {
+  if (!running) return EMPTY_HEALTH
+  const files = rtmpFiles(ch)
+  if (ch === "slate") return healthFromSamples(parseStatsLines(readTail(files.log, 32768)), 5, fileAgeMs(files.log), { fps: 30, kbps: SLATE_KBPS })
+  let stats: (CaptureSourceStats & { enc?: { fps: number; kbps: number; speed: number; dup: number; drop: number; bytes: number } }) | null = null
+  try { stats = JSON.parse(fs.readFileSync((files as { stats: string }).stats, "utf8")) } catch { /* not yet */ }
+  if (!stats) return EMPTY_HEALTH
+  const enc = stats.enc
+  const expectKbps = (meta?.bitrateK ?? stats.bitrateK) + 128
+  const encoder: HealthStats = enc
+    ? (() => {
+        const warnings: string[] = []
+        let level: HealthStats["level"] = "ok"
+        const flag = (bad: boolean, text: string) => { warnings.push(text); if (bad) level = "bad"; else if (level === "ok") level = "warn" }
+        if (enc.speed < 0.97) flag(enc.speed < 0.9, `encoder speed ${enc.speed.toFixed(2)}x`)
+        if (enc.fps < stats!.fps - 2) flag(enc.fps < stats!.fps * 0.8, `${enc.fps.toFixed(1)} fps (want ${stats!.fps})`)
+        if (enc.kbps < expectKbps * 0.6) flag(enc.kbps < expectKbps * 0.4, `bitrate ${enc.kbps}k (set ${expectKbps}k)`)
+        return { fps: enc.fps, kbps: enc.kbps, speed: enc.speed, dup: enc.dup, drop: enc.drop, bytes: enc.bytes, ageMs: Math.round(Date.now() - stats!.at), level, warnings }
+      })()
+    : { ...EMPTY_HEALTH, ageMs: Date.now() - stats.at }
+  return captureSourceHealth(encoder, stats)
 }
 
 function forgetChannel(ch: RtmpChannel) {
@@ -457,6 +485,9 @@ export type RtmpChannelStatus = {
   host: string | null
   size: string | null
   relay: boolean
+  bitrateK: number | null
+  encoder: string | null
+  health: SourceHealth | HealthStats
   connectError: string | null
   failure: string | null
   logTail: string
@@ -477,6 +508,9 @@ export function readChannelStatus(ch: RtmpChannel): RtmpChannelStatus {
     host: meta?.host ?? null,
     size: typeof meta?.size === "string" ? meta.size : null,
     relay: running && meta?.relay === true,
+    bitrateK: running ? (meta?.bitrateK ?? (ch === "slate" ? 2500 : null)) : null,
+    encoder: running ? (meta?.encoder ?? (ch === "slate" ? "libx264" : null)) : null,
+    health: channelHealth(ch, running, meta),
     connectError: running ? parseConnectError(readTail(files.log, 32768), readRtmpHost(ch)) : null,
     failure: running ? null : readFailure(ch),
     logTail: redact(readTail(files.log).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
@@ -663,7 +697,8 @@ type RtmpStopResult = (StopResult & { ok: true; note?: string }) | { ok: false; 
 
 /** Slate = ffmpeg drawtext countdown; capture = headless Chromium rendering the real /stream page. */
 /** `relay: true` = publishing to the local MediaMTX relay path (lib/relay.ts) instead of a destination. */
-export type RtmpSource = ({ kind: "slate" } | { kind: "capture"; pageUrl: string; size: "1280x720" | "1920x1080" }) & { relay?: boolean }
+export type CaptureEncoder = "auto" | "libx264" | "videotoolbox"
+export type RtmpSource = ({ kind: "slate" } | { kind: "capture"; pageUrl: string; size: "1280x720" | "1920x1080"; bitrateK?: number; encoder?: CaptureEncoder }) & { relay?: boolean }
 
 /** What each channel publishes to right now (fingerprints only), for the relay's same-destination guard. */
 export function directChannelDests(): { channel: RtmpChannel; running: boolean; dest?: string; relay?: boolean }[] {
@@ -726,6 +761,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   // ffmpegs never push to the same stream key at once.
   await stopRtmpStreamUnlocked(ch)
   clearFailure(ch)
+  if (ch === "capture") fs.rmSync((files as { stats: string }).stats, { force: true })
   strayCache = { at: 0, value: [] }
   fs.mkdirSync(DATA_DIR, { recursive: true })
   // The raw log may hold the ingest URL (key + password): owner-only.
@@ -745,7 +781,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
       RTMP_LOG_FILE: files.log,
       RTMP_FAIL_FILE: files.fail,
       ...(source.kind === "capture"
-        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_SIZE: source.size, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
+        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
         : {}),
     }),
   })
@@ -754,7 +790,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
   let host = ""
   try { host = new URL(url).hostname } catch { /* validated above */ }
-  fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, dest: destinationFingerprint(url), ...(source.relay ? { relay: true } : {}) }))
+  fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, ...(source.kind === "capture" ? { bitrateK: source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500), encoder: source.encoder ?? "auto" } : {}), dest: destinationFingerprint(url), ...(source.relay ? { relay: true } : {}) }))
 
   // Wait for the first connection. "Output #0" means ffmpeg opened the RTMP output.
   // A supervisor "exited" line this early means the URL or script is wrong, so stop

@@ -43,6 +43,9 @@ export type EncoderStatus = {
     size: string | null
     /** Publishing to the local MediaMTX relay, not straight to a destination. */
     relay: boolean
+    bitrateK?: number | null
+    encoder?: string | null
+    health?: import("@/lib/stream-health").SourceHealth | import("@/lib/stream-health").HealthStats
     connectError: string | null
     failure: string | null
     logTail: string

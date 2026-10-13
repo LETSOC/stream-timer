@@ -17,6 +17,8 @@ import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
 import { StreamPlayer } from "@/components/stream-player"
+import { diagnose, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
+import { CAPTURE_BITRATES } from "@/lib/capture-options"
 import { EndStreamPage } from "@/app/end/page"
 import {
   formatClock,
@@ -1692,7 +1694,7 @@ function hostOf(url: string, fallback: string): string {
 
 type RtmpChannelId = "slate" | "capture"
 type RtmpPhase = "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
-type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; connectError: string | null; failure: string | null }
+type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; connectError: string | null; failure: string | null }
 const STOPPED_CHANNEL: RtmpChannelView = { running: false, state: "stopped", reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null }
 
 /** One independent RTMP output (Slate or Browser capture): its own destination, Start/Stop, status and messages. */
@@ -1713,9 +1715,19 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
   // Optimistic override until the next status poll lands.
   const [override, setOverride] = useState<{ running: boolean; state: RtmpPhase } | null>(null)
   const [captureSize, setCaptureSizeState] = useState<"1280x720" | "1920x1080">("1280x720")
+  const [bitrates, setBitrates] = useState<Record<"1280x720" | "1920x1080", number>>({ "1280x720": 2500, "1920x1080": 4500 })
+  const [captureEncoder, setCaptureEncoderState] = useState<"auto" | "libx264" | "videotoolbox">("auto")
+  const captureBitrate = bitrates[captureSize]
   useEffect(() => {
     const id = window.setTimeout(() => {
       if (window.localStorage.getItem("rtmp-capture-size") === "1920x1080") setCaptureSizeState("1920x1080")
+      const saved = (size: "1280x720" | "1920x1080") => {
+        const value = Number(window.localStorage.getItem(`rtmp-capture-bitrate-${size}`))
+        return (CAPTURE_BITRATES[size] as readonly number[]).includes(value) ? value : CAPTURE_BITRATES[size][1]
+      }
+      setBitrates({ "1280x720": saved("1280x720"), "1920x1080": saved("1920x1080") })
+      const enc = window.localStorage.getItem("rtmp-capture-encoder")
+      if (enc === "libx264" || enc === "videotoolbox") setCaptureEncoderState(enc)
     }, 0)
     return () => window.clearTimeout(id)
   }, [])
@@ -1739,7 +1751,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
     void fetch("/api/encoder", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "rtmp", source: channel, destinationId: selected.id, captureSize, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
+      body: JSON.stringify({ mode: "rtmp", source: channel, destinationId: selected.id, captureSize, captureBitrate, captureEncoder, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
     })
       .then(async (response) => {
         if (handleUnauthorized(response)) return
@@ -1801,10 +1813,23 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
               <option value="1280x720">1280×720</option>
               <option value="1920x1080">1920×1080</option>
             </select>
+            <label htmlFor="capture-bitrate">Bitrate</label>
+            <select id="capture-bitrate" data-testid="capture-bitrate" disabled={live} value={captureBitrate} onChange={(event) => { const v = Number(event.target.value); setBitrates((b) => ({ ...b, [captureSize]: v })); window.localStorage.setItem(`rtmp-capture-bitrate-${captureSize}`, String(v)) }} className="h-8 border px-2">
+              {CAPTURE_BITRATES[captureSize].map((value) => <option key={value} value={value}>{value}k</option>)}
+            </select>
+            <label htmlFor="capture-encoder">Encoder</label>
+            <select id="capture-encoder" data-testid="capture-encoder" disabled={live} value={captureEncoder} onChange={(event) => { const v = event.target.value === "libx264" || event.target.value === "videotoolbox" ? event.target.value : "auto"; setCaptureEncoderState(v); window.localStorage.setItem("rtmp-capture-encoder", v) }} className="h-8 border px-2">
+              <option value="auto">Auto (VideoToolbox on Mac)</option>
+              <option value="libx264">libx264 (CPU)</option>
+              <option value="videotoolbox">VideoToolbox</option>
+            </select>
+            <span className="basis-full">Keyframe every 2s, constant bitrate (maxrate = bitrate, 2s buffer), + 128k audio.</span>
           </>
         ) : null}
       </div>
       {live && status.relay ? <p data-testid={tid("via-relay")} className="font-mono text-[12px] text-black/70">Publishing to relay /{channel}{status.size ? ` · ${status.size}` : ""}. Forwards are set in the Relay card.</p> : live && status.host ? <p className="font-mono text-[12px] text-black/70">Sending to {status.host}{status.size ? ` · ${status.size}` : ""}</p> : null}
+      {live && status.health ? <SourceHealthLine channel={channel} health={status.health} /> : null}
+      {live && status.health && !status.relay ? <DiagnosisLine testid={tid("diagnosis")} value={diagnose({ source: { label: label, health: status.health }, forwards: [], totalKbps: status.health.kbps })} /> : null}
       {sameAsOther && !live ? <p role="alert" data-testid={tid("same-dest")} className="font-mono text-[12px] font-bold text-[#b42318]">The other channel is already live on this destination. One stream key takes one publisher; choose a different destination.</p> : null}
       <div className="flex gap-2">
         <Pill data-testid={tid("start")} disabled={!canStart || !selected || busy !== null || live} aria-busy={busy === "starting"} onClick={start}>{busy === "starting" ? "Starting…" : `Start ${label.toLowerCase()}`}</Pill>
@@ -1819,9 +1844,9 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
   )
 }
 
-type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; error: string | null; adopted: boolean }
-type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[] }
-type RelayView = { installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; error: string | null; adopted: boolean; health: HealthStats }
+type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
+type RelayView = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Off", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -1859,6 +1884,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
     <div data-testid="relay-card" className="space-y-3 rounded-2xl border border-black/10 bg-white p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Relay (MediaMTX)</p>
+        {running && relay?.totalOutKbps ? <span data-testid="relay-total-out" title="Sum of all forwards plus direct channels: roughly your upload use" className="font-mono text-[12px] text-black/70">↑ {(relay.totalOutKbps / 1000).toFixed(1)} Mbps out</span> : null}
         <span data-testid="relay-status" data-state={!relay ? "loading" : !relay.installed ? "missing" : running ? (relay.apiUp ? "running" : "starting") : "off"} className={`rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${running && relay?.apiUp ? "bg-[#128a3e] text-white" : running ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>
           {!relay ? "…" : !relay.installed ? "Not installed" : running ? (relay.apiUp ? (relay.adopted ? "On (found running)" : "On") : "Starting…") : "Off"}
         </span>
@@ -1891,11 +1917,13 @@ function RelayCard({ dests }: { dests: Dest[] }) {
                       <span className="truncate">{dest.name} · {dest.host}</span>
                     </label>
                     {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}{fwd.restarts > 0 ? ` · ${fwd.restarts}` : ""}</span> : null}
+                    {fwd && fwd.state === "forwarding" ? <HealthChip testid={`relay-fwd-health-${name}-${dest.name}`} health={fwd.health} /> : null}
                     {fwd?.error && fwd.state !== "waiting" ? <span className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
                   </li>
                 )
               })}
             </ul>
+            {info && (info.forwards.length > 0 || info.source) && info.ready ? <DiagnosisLine testid={`relay-diagnosis-${name}`} value={info.diagnosis} /> : null}
             <Pill size="sm" tone="outline" data-testid={`relay-preview-${name}`} aria-pressed={preview === name} disabled={!info?.ready} onClick={() => setPreview(preview === name ? null : name)}>{preview === name ? "Hide preview" : "Preview what the relay receives"}</Pill>
             {preview === name && info?.ready ? (
               <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
@@ -1907,5 +1935,45 @@ function RelayCard({ dests }: { dests: Dest[] }) {
       })}
       {message ? <p role="status" data-testid="relay-message" className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
     </div>
+  )
+}
+
+const LEVEL_DOT: Record<Level, string> = { ok: "bg-[#128a3e]", warn: "bg-[#d97706]", bad: "bg-[#d93200]", idle: "bg-black/25" }
+const LEVEL_TEXT: Record<Level, string> = { ok: "text-[#0f6b31]", warn: "text-[#8a4b06]", bad: "text-[#a32600]", idle: "text-black/60" }
+
+/** "30.0 fps · 2510k · 1.00x" with a green/amber/red dot; warnings and counters on hover. */
+function HealthChip({ health, testid }: { health: HealthStats; testid?: string }) {
+  const parts = [health.fps !== null ? `${health.fps.toFixed(1)} fps` : null, health.kbps !== null ? `${health.kbps}k` : null, health.speed !== null ? `${health.speed.toFixed(2)}x` : null].filter(Boolean)
+  const extra = [health.dup ? `dup ${health.dup}` : null, health.drop ? `drop ${health.drop}` : null, health.bytes ? `${(health.bytes / 1e6).toFixed(0)} MB sent` : null, health.ageMs !== null ? `updated ${Math.round(health.ageMs / 1000)}s ago` : null].filter(Boolean).join(" · ")
+  return (
+    <span data-testid={testid} data-level={health.level} title={[...health.warnings, extra].filter(Boolean).join("\n")} className={`inline-flex items-center gap-1 font-mono text-[11px] ${LEVEL_TEXT[health.level]}`}>
+      <span className={`size-2 rounded-full ${LEVEL_DOT[health.level]}`} />
+      {parts.length ? parts.join(" · ") : "measuring…"}
+      {health.warnings.length ? <span className="font-bold"> · {health.warnings[0]}</span> : null}
+    </span>
+  )
+}
+
+function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health: SourceHealth | HealthStats }) {
+  const cap = "capture" in health ? health.capture : null
+  return (
+    <div data-testid={`rtmp-health-${channel}`} data-level={health.level} className="space-y-0.5 rounded-lg bg-black/[0.03] px-2 py-1">
+      <p className="font-mono text-[11px] text-black/60">Encoder {cap ? (cap.encoder === "h264_videotoolbox" ? "VideoToolbox" : "libx264") : "libx264"}</p>
+      <HealthChip health={health} />
+      {cap ? (
+        <p className="font-mono text-[11px] text-black/60" title="Chrome only sends a frame when /stream repaints (≥1/s for the countdown); the writer repeats the last one to keep a constant frame rate. Backlog = frames skipped because the encoder fell behind.">
+          Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function DiagnosisLine({ value, testid }: { value: { level: Level; text: string }; testid: string }) {
+  return (
+    <p data-testid={testid} data-level={value.level} className={`flex items-start gap-1.5 font-mono text-[12px] ${LEVEL_TEXT[value.level]}`}>
+      <span className={`mt-1 size-2 shrink-0 rounded-full ${LEVEL_DOT[value.level]}`} />
+      <span>{value.text}</span>
+    </p>
   )
 }
