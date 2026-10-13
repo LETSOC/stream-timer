@@ -16,6 +16,7 @@ import { NumberField } from "@/components/number-field"
 import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
+import { StreamPlayer } from "@/components/stream-player"
 import { EndStreamPage } from "@/app/end/page"
 import {
   formatClock,
@@ -1043,6 +1044,7 @@ export function OperatorConsole() {
                     }} />
                 )
               })}
+              <RelayCard dests={dests.items} />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
               <div className="space-y-2">
@@ -1690,7 +1692,7 @@ function hostOf(url: string, fallback: string): string {
 
 type RtmpChannelId = "slate" | "capture"
 type RtmpPhase = "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
-type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; connectError: string | null; failure: string | null }
+type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; connectError: string | null; failure: string | null }
 const STOPPED_CHANNEL: RtmpChannelView = { running: false, state: "stopped", reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null }
 
 /** One independent RTMP output (Slate or Browser capture): its own destination, Start/Stop, status and messages. */
@@ -1723,8 +1725,9 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
   }, [status])
   const live = override ? override.running : status.running
   const phase = override ? override.state : status.state
-  const selected = dests.find((item) => item.id === selectedId) ?? null
-  const sameAsOther = Boolean(selected && otherRunning && otherSelectedId === selected.id)
+  const viaRelay = selectedId === "relay"
+  const selected = viaRelay ? { id: "relay", name: `relay /${channel}` } : (dests.find((item) => item.id === selectedId) ?? null)
+  const sameAsOther = Boolean(selected && !viaRelay && otherRunning && otherSelectedId === selected.id)
   const label = channel === "slate" ? "Slate" : "Browser capture"
   const tid = (name: string) => `rtmp-${name}-${channel}`
 
@@ -1782,9 +1785,15 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
         {dests.length ? (
           <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
             <option value="">Choose…</option>
+            <option value="relay">Relay (MediaMTX) → /{channel}</option>
             {dests.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.host}</option>)}
           </select>
-        ) : <span>Add a destination below first.</span>}
+        ) : (
+          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
+            <option value="">Add a destination below, or…</option>
+            <option value="relay">Relay (MediaMTX) → /{channel}</option>
+          </select>
+        )}
         {channel === "capture" ? (
           <>
             <label htmlFor="capture-size">Size</label>
@@ -1795,7 +1804,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
           </>
         ) : null}
       </div>
-      {live && status.host ? <p className="font-mono text-[12px] text-black/70">Sending to {status.host}{status.size ? ` · ${status.size}` : ""}</p> : null}
+      {live && status.relay ? <p data-testid={tid("via-relay")} className="font-mono text-[12px] text-black/70">Publishing to relay /{channel}{status.size ? ` · ${status.size}` : ""}. Forwards are set in the Relay card.</p> : live && status.host ? <p className="font-mono text-[12px] text-black/70">Sending to {status.host}{status.size ? ` · ${status.size}` : ""}</p> : null}
       {sameAsOther && !live ? <p role="alert" data-testid={tid("same-dest")} className="font-mono text-[12px] font-bold text-[#b42318]">The other channel is already live on this destination. One stream key takes one publisher; choose a different destination.</p> : null}
       <div className="flex gap-2">
         <Pill data-testid={tid("start")} disabled={!canStart || !selected || busy !== null || live} aria-busy={busy === "starting"} onClick={start}>{busy === "starting" ? "Starting…" : `Start ${label.toLowerCase()}`}</Pill>
@@ -1806,6 +1815,97 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
       {status.adopted && live ? <p data-testid={tid("adopted")} className="font-mono text-[13px] text-black/70">Found this stream already running (started before the server restarted). Stop works on it.</p> : null}
       {status.failure && !live ? <p role="alert" data-testid={tid("failure")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">Failed: {status.failure.split("\n").filter(Boolean).slice(-3).join(" · ").slice(0, 400)}</p> : null}
       {message ? <p role="status" data-testid={tid("message")} className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
+    </div>
+  )
+}
+
+type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; error: string | null; adopted: boolean }
+type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[] }
+type RelayView = { installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+
+const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Off", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
+const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
+
+/** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
+function RelayCard({ dests }: { dests: Dest[] }) {
+  const [relay, setRelay] = useState<RelayView | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
+  const [preview, setPreview] = useState<RtmpChannelId | null>(null)
+  const load = useCallback(async () => {
+    const response = await fetch("/api/relay", { cache: "no-store" }).catch(() => null)
+    if (!response || !response.ok) return
+    const body = (await response.json().catch(() => null)) as RelayView | null
+    if (body?.paths) setRelay(body)
+  }, [])
+  useEffect(() => {
+    const first = window.setTimeout(() => void load(), 0)
+    const id = window.setInterval(() => void load(), 2000)
+    return () => { window.clearTimeout(first); window.clearInterval(id) }
+  }, [load])
+  async function act(payload: Record<string, unknown>, okText?: string) {
+    setBusy(true)
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
+    setBusy(false)
+    if (!response) return setMessage({ tone: "error", text: "Could not reach the server." })
+    if (handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as (RelayView & { error?: string }) | null
+    if (body?.paths) setRelay(body)
+    if (!response.ok) return setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` })
+    setMessage(okText ? { tone: "info", text: okText } : null)
+  }
+  const running = relay?.running === true
+  return (
+    <div data-testid="relay-card" className="space-y-3 rounded-2xl border border-black/10 bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Relay (MediaMTX)</p>
+        <span data-testid="relay-status" data-state={!relay ? "loading" : !relay.installed ? "missing" : running ? (relay.apiUp ? "running" : "starting") : "off"} className={`rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${running && relay?.apiUp ? "bg-[#128a3e] text-white" : running ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>
+          {!relay ? "…" : !relay.installed ? "Not installed" : running ? (relay.apiUp ? (relay.adopted ? "On (found running)" : "On") : "Starting…") : "Off"}
+        </span>
+      </div>
+      <p className="font-mono text-[12px] text-black/70">Optional. Pick “Relay” as a channel’s destination, then choose where each path forwards. One encode, many destinations (ffmpeg -c copy each, restarted on failure).{relay?.version ? ` MediaMTX ${relay.version}.` : ""}</p>
+      {relay && !relay.installed ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">MediaMTX not found. On the Mac: brew install mediamtx, or run scripts/install-mediamtx.sh, or set MEDIAMTX_BIN.</p> : null}
+      {relay?.error ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">{relay.error}</p> : null}
+      <div className="flex gap-2">
+        <Pill size="sm" data-testid="relay-start" disabled={busy || running || !relay?.installed} onClick={() => void act({ action: "start" }, "Relay started.")}>Start relay</Pill>
+        <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !running} confirmLabel="Stop relay, its forwards and channels on it? · confirm" onConfirm={() => void act({ action: "stop" }, "Relay stopped.")}>Stop relay</ConfirmButton>
+      </div>
+      {(["slate", "capture"] as const).map((name) => {
+        const info = relay?.paths[name]
+        const enabled = new Map((info?.forwards ?? []).map((item) => [item.destId, item]))
+        return (
+          <div key={name} data-testid={`relay-path-${name}`} className="space-y-2 rounded-xl border border-black/10 p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[12px]">
+              <span className="font-bold">/{name}</span>
+              <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (set ${name === "slate" ? "Slate" : "Browser capture"} → Relay)`}</span>
+            </div>
+            {dests.length === 0 ? <p className="font-mono text-[12px] text-black/60">Add a destination below to forward to.</p> : null}
+            <ul className="space-y-1">
+              {dests.map((dest) => {
+                const fwd = enabled.get(dest.id)
+                const on = Boolean(fwd)
+                return (
+                  <li key={dest.id} className="flex flex-wrap items-center gap-2 font-mono text-[12px]">
+                    <label className="flex min-w-0 flex-1 items-center gap-2">
+                      <input type="checkbox" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked })} />
+                      <span className="truncate">{dest.name} · {dest.host}</span>
+                    </label>
+                    {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}{fwd.restarts > 0 ? ` · ${fwd.restarts}` : ""}</span> : null}
+                    {fwd?.error && fwd.state !== "waiting" ? <span className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
+                  </li>
+                )
+              })}
+            </ul>
+            <Pill size="sm" tone="outline" data-testid={`relay-preview-${name}`} aria-pressed={preview === name} disabled={!info?.ready} onClick={() => setPreview(preview === name ? null : name)}>{preview === name ? "Hide preview" : "Preview what the relay receives"}</Pill>
+            {preview === name && info?.ready ? (
+              <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
+                <StreamPlayer src={`/api/relay/hls/${name}/index.m3u8`} />
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+      {message ? <p role="status" data-testid="relay-message" className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
     </div>
   )
 }

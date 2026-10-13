@@ -29,7 +29,7 @@ const emptyStatus: EncoderStatus = {
   rtmpConnectError: null,
   rtmpFailure: null,
   rtmpLogTail: "",
-  strayPublishers: [], rtmpAdopted: false, rtmpSource: null, rtmpChannels: { slate: { running: false, state: "stopped" as const, reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null, logTail: "" }, capture: { running: false, state: "stopped" as const, reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null, logTail: "" } }, rtmpOwnProcesses: 0,
+  strayPublishers: [], rtmpAdopted: false, rtmpSource: null, rtmpChannels: { slate: { running: false, state: "stopped" as const, reconnecting: false, restarts: 0, adopted: false, host: null, size: null, relay: false, connectError: null, failure: null, logTail: "" }, capture: { running: false, state: "stopped" as const, reconnecting: false, restarts: 0, adopted: false, host: null, size: null, relay: false, connectError: null, failure: null, logTail: "" } }, rtmpOwnProcesses: 0,
 };
 
 const ENCODER_LABEL: Record<EncoderStatus["encoderState"], string> = {

@@ -8,6 +8,9 @@ import { allowedRtmpHost, DATA_DIR, validateRtmpUrl } from "@/lib/encoder"
  * The full URL (server + key) never leaves this module except via reveal()/resolve():
  * not in public state, /stream, logs or event.json.
  */
+/** Pseudo-destination a channel can select: publish to the local MediaMTX relay path instead. */
+export const RELAY_TARGET = "relay"
+
 export type Destination = { id: string; name: string; url: string; createdAt: number }
 export type MaskedDestination = { id: string; name: string; host: string; masked: string; createdAt: number }
 /** selectedId = Slate channel (kept for compatibility), selectedCaptureId = Browser capture channel. */
@@ -25,7 +28,7 @@ function read(): Store {
     const items = Array.isArray(parsed.items)
       ? parsed.items.filter((item): item is Destination => Boolean(item && typeof item.id === "string" && typeof item.name === "string" && typeof item.url === "string"))
       : []
-    const valid = (id: unknown) => (typeof id === "string" && items.some((item) => item.id === id) ? id : null)
+    const valid = (id: unknown) => (typeof id === "string" && (id === RELAY_TARGET || items.some((item) => item.id === id)) ? id : null)
     return { selectedId: valid(parsed.selectedId), selectedCaptureId: valid(parsed.selectedCaptureId), items }
   } catch {
     return { selectedId: null, selectedCaptureId: null, items: [] }
@@ -108,7 +111,7 @@ export function deleteDestination(id: unknown): Result<null> {
 
 export function selectDestination(id: unknown, channel: "slate" | "capture" = "slate"): Result<null> {
   const store = read()
-  if (id !== null && !store.items.some((entry) => entry.id === id)) return { ok: false, error: "No such destination.", status: 404 }
+  if (id !== null && id !== RELAY_TARGET && !store.items.some((entry) => entry.id === id)) return { ok: false, error: "No such destination.", status: 404 }
   if (channel === "capture") store.selectedCaptureId = id as string | null
   else store.selectedId = id as string | null
   write(store)

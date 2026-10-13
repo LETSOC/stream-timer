@@ -12,7 +12,8 @@ import {
   type RtmpSource,
 } from "@/lib/encoder"
 import { getViewKey } from "@/lib/view-key"
-import { resolveDestination } from "@/lib/rtmp-destinations"
+import { RELAY_TARGET, resolveDestination } from "@/lib/rtmp-destinations"
+import { relayPublishUrl, startRelay, stopRelay } from "@/lib/relay"
 
 export async function GET(request: Request) {
   await connection()
@@ -47,7 +48,12 @@ export async function POST(request: Request) {
   if (record.mode === "rtmp") {
     // The desk sends a saved destination id; the URL (with key) is resolved here and never round-trips.
     let rtmpUrl = typeof record.rtmpUrl === "string" ? record.rtmpUrl : ""
-    if (typeof record.destinationId === "string") {
+    const viaRelay = record.destinationId === RELAY_TARGET
+    if (viaRelay) {
+      // Publish to the local MediaMTX path for this channel; start the relay if it is off.
+      const relay = await startRelay()
+      if (!relay.ok) return Response.json({ ...readStatus(), error: relay.error }, { status: relay.status })
+    } else if (typeof record.destinationId === "string") {
       const destination = resolveDestination(record.destinationId)
       if (!destination) return Response.json({ ...readStatus(), error: "That destination no longer exists. Pick another." }, { status: 404 })
       rtmpUrl = destination.url
@@ -59,6 +65,10 @@ export async function POST(request: Request) {
       const port = new URL(request.url).port || "43211"
       const origin = process.env.CAPTURE_ORIGIN || `http://127.0.0.1:${port}`
       source = { kind: "capture", pageUrl: `${origin}/stream?k=${encodeURIComponent(getViewKey())}`, size: rec.captureSize === "1920x1080" ? "1920x1080" : "1280x720" }
+    }
+    if (viaRelay) {
+      source = { ...source, relay: true }
+      rtmpUrl = relayPublishUrl(source.kind)
     }
     const result = await startRtmpStream(input, rtmpUrl, Date.now(), source)
     if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
@@ -80,7 +90,8 @@ export async function DELETE(request: Request) {
   const channel = params.get("source") === "capture" || params.get("mode") === "capture" ? "capture" : "slate"
   if (target === "rtmp-all") {
     const result = await stopAllRtmp()
-    return Response.json({ ...readStatus(), note: `Stopped ${result.stopped.length} stream supervisor(s) and ${result.strays.length} stray ffmpeg publisher(s).` })
+    await stopRelay() // forwards + MediaMTX too; forward choices are kept
+    return Response.json({ ...readStatus(), note: `Stopped ${result.stopped.length} stream supervisor(s), the relay, and ${result.strays.length} stray ffmpeg publisher(s).` })
   }
   if (target === "rtmp") {
     const result = await stopRtmpStream(Date.now(), channel)

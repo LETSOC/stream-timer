@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { EncoderStatus } from "@/lib/encoder-status";
+import { relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
 
 export const ROOT = process.cwd();
 // Overridable so the lifecycle tests can use a temp dir and fake scripts.
@@ -49,6 +50,10 @@ export function redact(text: string): string {
 }
 
 /** Child processes never need the encoder token. */
+export function relayChildEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+  return childEnv(extra)
+}
+
 function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
   delete env.ENCODER_TOKEN;
@@ -70,7 +75,7 @@ export function pidRunsScript(pid: number, scriptPath: string): boolean {
 export type StopResult = { forced: boolean; survived: boolean }
 
 /** SIGTERM the process group, wait up to `graceMs`, then SIGKILL whatever is left. */
-async function killGroup(pid: number, graceMs = STOP_GRACE_MS): Promise<StopResult> {
+export async function killGroup(pid: number, graceMs = STOP_GRACE_MS): Promise<StopResult> {
   const signal = (sig: NodeJS.Signals) => {
     try { process.kill(-pid, sig) } catch { try { process.kill(pid, sig) } catch { /* already gone */ } }
   };
@@ -112,7 +117,7 @@ function noteStop(kind: string, result: StopResult): StopResult {
   return result
 }
 
-function groupAlive(pgid: number): boolean {
+export function groupAlive(pgid: number): boolean {
   try {
     process.kill(-pgid, 0);
     return true;
@@ -348,7 +353,7 @@ export function rtmpFiles(ch: RtmpChannel) {
   }
 }
 
-type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string }
+type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean }
 
 function readRtmpMeta(ch: RtmpChannel = "slate"): RtmpMeta | null {
   try {
@@ -451,6 +456,7 @@ export type RtmpChannelStatus = {
   adopted: boolean
   host: string | null
   size: string | null
+  relay: boolean
   connectError: string | null
   failure: string | null
   logTail: string
@@ -470,6 +476,7 @@ export function readChannelStatus(ch: RtmpChannel): RtmpChannelStatus {
     adopted: running && meta?.adopted === true,
     host: meta?.host ?? null,
     size: typeof meta?.size === "string" ? meta.size : null,
+    relay: running && meta?.relay === true,
     connectError: running ? parseConnectError(readTail(files.log, 32768), readRtmpHost(ch)) : null,
     failure: running ? null : readFailure(ch),
     logTail: redact(readTail(files.log).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
@@ -478,7 +485,7 @@ export function readChannelStatus(ch: RtmpChannel): RtmpChannelStatus {
 
 // ---------- re-attaching to a stream that outlived the server (restart, rebuild, crash) ----------
 
-export type OwnSupervisor = { pid: number; channel: RtmpChannel; dest?: string }
+export type OwnSupervisor = { pid: number; channel: RtmpChannel; dest?: string; relay?: boolean }
 
 /**
  * Supervisor processes of THIS project: `bash <absolute path to our rtmp-supervisor.sh> [channel]`,
@@ -501,7 +508,8 @@ export function parseOwnSupervisorList(psOutput: string, supervisorPath: string)
     // argv: SUPERVISOR <channel> dest=<fingerprint>. The fingerprint is a hash, never the key; it lets an
     // adopted stream (pidfile gone after a restart) still block a second publisher on the same destination.
     const destArg = parts.slice(at + 1).find((part) => /^dest=[0-9a-f]{16}$/.test(part))
-    found.push({ pid, channel: parts[at + 1] === "capture" ? "capture" : "slate", ...(destArg ? { dest: destArg.slice(5) } : {}) })
+    const relay = parts.slice(at + 1).includes("via=relay")
+    found.push({ pid, channel: parts[at + 1] === "capture" ? "capture" : "slate", ...(destArg ? { dest: destArg.slice(5) } : {}), ...(relay ? { relay: true } : {}) })
   }
   return found
 }
@@ -537,7 +545,7 @@ function adoptRunningSupervisor(ch: RtmpChannel = "slate") {
   const found = findOwnSupervisorList().filter((item) => item.channel === ch)
   if (found.length !== 1) return
   fs.mkdirSync(DATA_DIR, { recursive: true })
-  fs.writeFileSync(rtmpFiles(ch).meta, JSON.stringify({ pid: found[0].pid, startedAt: Date.now(), adopted: true, source: ch, ...(found[0].dest ? { dest: found[0].dest } : {}) }))
+  fs.writeFileSync(rtmpFiles(ch).meta, JSON.stringify({ pid: found[0].pid, startedAt: Date.now(), adopted: true, source: ch, ...(found[0].dest ? { dest: found[0].dest } : {}), ...(found[0].relay ? { relay: true } : {}) }))
   strayCache = { at: 0, value: [] }
 }
 
@@ -596,7 +604,7 @@ let strayCache: { at: number; value: StrayPublisher[] } = { at: 0, value: [] }
 export function findStrayPublishers(): StrayPublisher[] {
   if (Date.now() - strayCache.at < 5000) return strayCache.value
   const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
-  const own = [...RTMP_CHANNELS.map((ch) => readRtmpPid(ch)), ...findOwnSupervisors()].filter((item): item is number => item !== null)
+  const own = [...RTMP_CHANNELS.map((ch) => readRtmpPid(ch)), ...findOwnSupervisors(), ...relayProcessGroups()].filter((item): item is number => item !== null)
   const value = result.status === 0 ? parseStrayPublishers(result.stdout, own, process.pid) : []
   strayCache = { at: Date.now(), value }
   return value
@@ -654,7 +662,17 @@ type RtmpStartResult = { ok: true; note?: string } | { ok: false; error: string;
 type RtmpStopResult = (StopResult & { ok: true; note?: string }) | { ok: false; error: string; status: number }
 
 /** Slate = ffmpeg drawtext countdown; capture = headless Chromium rendering the real /stream page. */
-export type RtmpSource = { kind: "slate" } | { kind: "capture"; pageUrl: string; size: "1280x720" | "1920x1080" }
+/** `relay: true` = publishing to the local MediaMTX relay path (lib/relay.ts) instead of a destination. */
+export type RtmpSource = ({ kind: "slate" } | { kind: "capture"; pageUrl: string; size: "1280x720" | "1920x1080" }) & { relay?: boolean }
+
+/** What each channel publishes to right now (fingerprints only), for the relay's same-destination guard. */
+export function directChannelDests(): { channel: RtmpChannel; running: boolean; dest?: string; relay?: boolean }[] {
+  return RTMP_CHANNELS.map((channel) => {
+    const running = rtmpAlive(channel)
+    const meta = running ? readRtmpMeta(channel) : null
+    return { channel, running, dest: meta?.dest, relay: meta?.relay === true }
+  })
+}
 
 /** Pure: may this channel start to `fingerprint`? Castr (and most ingests) take one publisher per key. */
 const pendingDest: Record<RtmpChannel, string | null> = { slate: null, capture: null }
@@ -675,6 +693,10 @@ export function startRtmpStream(input: StartInput, rtmpUrl: string, now = Date.n
     { channel: other, running: rtmpAlive(other), dest: readRtmpMeta(other)?.dest },
     { channel: other, running: pendingDest[other] !== null, dest: pendingDest[other] ?? undefined },
   ])
+  const relayClash = source.relay ? undefined : relayForwardFingerprints().find((item) => item.dest === fingerprint)
+  if (relayClash) {
+    return Promise.resolve({ ok: false, status: 409, error: `The relay (/${relayClash.path}) is forwarding to this destination. One stream key takes one publisher: turn that forward off or pick another destination.` })
+  }
   if (clash) {
     return Promise.resolve({ ok: false, status: 409, error: `The ${clash === "capture" ? "Browser capture" : "Slate"} stream is already publishing to this destination. One stream key takes one publisher: pick another destination or stop that stream first.` })
   }
@@ -693,7 +715,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   const checked = validateRtmpUrl(rtmpUrl)
   if (!checked.ok) return { ok: false, error: checked.error, status: 400 }
   const url = checked.url
-  if (!allowedRtmpHost(url)) {
+  if (!source.relay && !allowedRtmpHost(url)) {
     return { ok: false, error: "That RTMP host is not in RTMP_ALLOWED_HOSTS.", status: 400 }
   }
   if (!ffmpegAvailable({ fresh: true })) return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 }
@@ -710,7 +732,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   fs.writeFileSync(files.log, "", { mode: 0o600 })
   fs.chmodSync(files.log, 0o600)
   const logFd = fs.openSync(files.log, "a")
-  const child = spawn("bash", [SUPERVISOR, ch, `dest=${destinationFingerprint(url)}`], {
+  const child = spawn("bash", [SUPERVISOR, ch, `dest=${destinationFingerprint(url)}`, ...(source.relay ? ["via=relay"] : [])], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
     cwd: ROOT,
@@ -732,7 +754,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
   let host = ""
   try { host = new URL(url).hostname } catch { /* validated above */ }
-  fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, dest: destinationFingerprint(url) }))
+  fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, dest: destinationFingerprint(url), ...(source.relay ? { relay: true } : {}) }))
 
   // Wait for the first connection. "Output #0" means ffmpeg opened the RTMP output.
   // A supervisor "exited" line this early means the URL or script is wrong, so stop

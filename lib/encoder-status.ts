@@ -41,6 +41,8 @@ export type EncoderStatus = {
     adopted: boolean
     host: string | null
     size: string | null
+    /** Publishing to the local MediaMTX relay, not straight to a destination. */
+    relay: boolean
     connectError: string | null
     failure: string | null
     logTail: string
