@@ -8,7 +8,7 @@ import {
   startEncoder,
   startRtmpStream,
   stopEncoder,
-  stopRtmpStream,
+  stopRtmpStream, stopAllRtmp,
 } from "@/lib/encoder"
 
 export async function GET(request: Request) {
@@ -52,7 +52,12 @@ export async function DELETE(request: Request) {
   await connection()
   const denied = authorizeMutation(request)
   if (denied) return denied
-  if (new URL(request.url).searchParams.get("target") === "rtmp") {
+  const target = new URL(request.url).searchParams.get("target")
+  if (target === "rtmp-all") {
+    const result = await stopAllRtmp()
+    return Response.json({ ...readStatus(), note: `Stopped ${result.stopped.length} stream supervisor(s) and ${result.strays.length} stray ffmpeg publisher(s).` })
+  }
+  if (target === "rtmp") {
     const result = await stopRtmpStream()
     if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
     await stopEncoder()

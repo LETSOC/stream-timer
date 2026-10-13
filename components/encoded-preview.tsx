@@ -29,7 +29,7 @@ const emptyStatus: EncoderStatus = {
   rtmpConnectError: null,
   rtmpFailure: null,
   rtmpLogTail: "",
-  strayPublishers: [],
+  strayPublishers: [], rtmpAdopted: false, rtmpOwnProcesses: 0,
 };
 
 const ENCODER_LABEL: Record<EncoderStatus["encoderState"], string> = {

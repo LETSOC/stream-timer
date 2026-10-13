@@ -43,7 +43,9 @@ export function OperatorConsole() {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
   const [rtmpLive, setRtmpLive] = useState(false)
-  const [rtmpPhase, setRtmpPhase] = useState<"stopped" | "starting" | "connected" | "reconnecting" | "failed">("stopped")
+  const [rtmpPhase, setRtmpPhase] = useState<"stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed">("stopped")
+  const [rtmpAdopted, setRtmpAdopted] = useState(false)
+  const [rtmpOwnCount, setRtmpOwnCount] = useState(0)
   const [rtmpReconnecting, setRtmpReconnecting] = useState(false)
   const [rtmpRestarts, setRtmpRestarts] = useState(0)
   // In-flight Start/Stop request: buttons are locked and clicks ignored until the server answers.
@@ -192,8 +194,10 @@ export function OperatorConsole() {
     const load = () => {
       void fetch("/api/encoder", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[]; rtmpConnectError?: string | null; rtmpFailure?: string | null }) => {
+        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[]; rtmpConnectError?: string | null; rtmpFailure?: string | null; rtmpAdopted?: boolean; rtmpOwnProcesses?: number }) => {
           if (cancelled) return
+          setRtmpAdopted(body.rtmpAdopted === true)
+          setRtmpOwnCount(typeof body.rtmpOwnProcesses === "number" ? body.rtmpOwnProcesses : 0)
           setRtmpConnectError(typeof body.rtmpConnectError === "string" ? body.rtmpConnectError : null)
           setRtmpFailure(typeof body.rtmpFailure === "string" ? body.rtmpFailure : null)
           if (body.rtmpState) setRtmpPhase(body.rtmpState)
@@ -852,9 +856,9 @@ export function OperatorConsole() {
 
           <Panel id="encoder" title="Encoder (FFmpeg)">
             <div className="flex items-center justify-between gap-3">
-              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpPhase === "connected" ? "bg-[#128a3e] text-white" : rtmpPhase === "reconnecting" || rtmpPhase === "starting" ? "bg-[#b45309] text-white" : rtmpPhase === "failed" ? "bg-[#d93200] text-white" : rtmpLive && !rtmpReconnecting ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpPhase === "connected" ? "bg-[#128a3e] text-white" : rtmpPhase === "reconnecting" || rtmpPhase === "starting" ? "bg-[#b45309] text-white" : rtmpPhase === "failed" || rtmpPhase === "stalled" ? "bg-[#d93200] text-white" : rtmpLive && !rtmpReconnecting ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
-                {rtmpBusy === "starting" ? "Starting…" : rtmpBusy === "stopping" ? "Stopping…" : rtmpConnectError && rtmpLive && rtmpPhase !== "connected" ? "Can't connect" : { stopped: rtmpLive ? "Stream live" : "Stream off", starting: "Connecting…", connected: "Stream live", reconnecting: "Reconnecting", failed: "Failed" }[rtmpPhase]}
+                {rtmpBusy === "starting" ? "Starting…" : rtmpBusy === "stopping" ? "Stopping…" : rtmpConnectError && rtmpLive && rtmpPhase !== "connected" ? "Can't connect" : { stopped: rtmpLive ? "Stream live" : "Stream off", starting: "Connecting…", connected: rtmpAdopted ? "Live (found running stream)" : "Stream live", reconnecting: "Reconnecting", stalled: "Stalled · no frames", failed: "Failed" }[rtmpPhase]}
                 {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
               </span>
             </div>
@@ -935,6 +939,24 @@ export function OperatorConsole() {
               <p role="alert" data-testid="rtmp-connect-error" className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">
                 {rtmpConnectError}{rtmpRestarts > 0 ? ` · retrying (${rtmpRestarts})` : ""}. Not live yet.
               </p>
+            ) : null}
+            {rtmpPhase === "stalled" && rtmpLive ? (
+              <p role="alert" data-testid="rtmp-stalled" className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">
+                ffmpeg is running but hasn&apos;t reported sending video recently. Check the ingest dashboard; Stop and Start again if it&apos;s not live.
+              </p>
+            ) : null}
+            {rtmpAdopted && rtmpLive ? <p data-testid="rtmp-adopted" className="font-mono text-[13px] text-black/70">Found a stream that was already running (started before this server restarted). Stop works on it.</p> : null}
+            {rtmpOwnCount > 1 || (rtmpLive && strayPids.length > 0) || (!rtmpLive && rtmpOwnCount + strayPids.length > 1) ? (
+              <div role="alert" data-testid="rtmp-multiple" className="flex flex-wrap items-center gap-2 rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">
+                <span>More than one stream process is running ({rtmpOwnCount} desk supervisor{rtmpOwnCount === 1 ? "" : "s"}, {strayPids.length} other ffmpeg). Viewers may see the wrong picture.</span>
+                <ConfirmButton data-testid="rtmp-stop-all" className={pillClass("danger")} confirmLabel="Stop ALL streams? · confirm" onConfirm={async () => {
+                  const response = await fetch("/api/encoder?target=rtmp-all", { method: "DELETE" })
+                  if (handleUnauthorized(response)) return
+                  const body = (await response.json().catch(() => null)) as { note?: string } | null
+                  setRtmpMessage(body?.note ?? "Stopped all.")
+                  setRtmpLive(false)
+                }}>Stop all</ConfirmButton>
+              </div>
             ) : null}
             {rtmpFailure && !rtmpLive ? (
               <p role="alert" data-testid="rtmp-failure" className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">
