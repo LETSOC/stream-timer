@@ -1,6 +1,5 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
-import { readStatus, stopRtmpStream } from "@/lib/encoder"
 import { RELAY_PATHS, relayStatus, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
@@ -13,7 +12,7 @@ export async function GET(request: Request) {
   return Response.json(await relayStatus(), { headers: NO_STORE })
 }
 
-/** Operator + same-origin. { action: "start" | "stop" } or { action: "forward", path, destinationId, on } */
+/** Operator + same-origin. { action: "start" | "stop" } (forwards on/off) or { action: "forward", path, destinationId, on } */
 export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
@@ -24,12 +23,9 @@ export async function POST(request: Request) {
   switch (body?.action) {
     case "start":
       return reply(await startRelay())
-    case "stop": {
-      // Channels publishing into the relay have nowhere to go once it stops: stop them first.
-      const channels = readStatus().rtmpChannels
-      for (const ch of RELAY_PATHS) if (channels[ch].running && channels[ch].relay) await stopRtmpStream(Date.now(), ch)
+    case "stop":
+      // Forwards off only. Channels keep publishing into the relay; the preview keeps working.
       return reply(await stopRelay())
-    }
     case "forward": {
       if (!RELAY_PATHS.includes(body.path as RelayPath) || typeof body.destinationId !== "string") return Response.json({ error: "Expected { path: slate|capture, destinationId, on }." }, { status: 400 })
       return reply(await setForward(body.path as RelayPath, body.destinationId, body.on === true))

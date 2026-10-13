@@ -1788,7 +1788,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">{label}</p>
         <span data-testid={tid("status")} data-state={live ? phase : "stopped"} className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${phase === "connected" || (live && phase === "stopped") ? "bg-[#128a3e] text-white" : phase === "reconnecting" || phase === "starting" ? "bg-[#b45309] text-white" : phase === "failed" || phase === "stalled" ? "bg-[#d93200] text-white" : "bg-black/5 text-black/70"}`}>
           <span className={`size-1.5 rounded-full ${live ? "animate-pulse bg-white" : "bg-black/30"}`} />
-          {pillText}{status.restarts > 0 ? ` · ${status.restarts}` : ""}
+          {pillText}{status.restarts > 0 ? <span title="Times the supervisor restarted the encoder after it exited (dropped connection, crash, or failed connect)"> · {status.restarts} {status.restarts === 1 ? "restart" : "restarts"}</span> : ""}
         </span>
       </div>
       <p className="font-mono text-[12px] text-black/70">{channel === "slate" ? "ffmpeg drawtext: light on CPU, countdown text only (no break/hold/welcome/end cards)." : "Headless Chromium streams exactly what /stream shows, cards included. More CPU."}</p>
@@ -1844,11 +1844,11 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
   )
 }
 
-type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; error: string | null; adopted: boolean; health: HealthStats }
+type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type RelayView = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
-const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Off", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
+const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Off (forwards stopped)", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
@@ -1885,16 +1885,21 @@ function RelayCard({ dests }: { dests: Dest[] }) {
       <div className="flex items-center justify-between gap-2">
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Relay (MediaMTX)</p>
         {running && relay?.totalOutKbps ? <span data-testid="relay-total-out" title="Sum of all forwards plus direct channels: roughly your upload use" className="font-mono text-[12px] text-black/70">↑ {(relay.totalOutKbps / 1000).toFixed(1)} Mbps out</span> : null}
-        <span data-testid="relay-status" data-state={!relay ? "loading" : !relay.installed ? "missing" : running ? (relay.apiUp ? "running" : "starting") : "off"} className={`rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${running && relay?.apiUp ? "bg-[#128a3e] text-white" : running ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>
-          {!relay ? "…" : !relay.installed ? "Not installed" : running ? (relay.apiUp ? (relay.adopted ? "On (found running)" : "On") : "Starting…") : "Off"}
+        <span className="flex flex-wrap items-center gap-1">
+          <span data-testid="relay-status" data-state={!relay ? "loading" : !relay.installed ? "missing" : running ? (relay.apiUp ? "running" : "starting") : "off"} title="The MediaMTX server. It runs while a channel publishes to it or forwards are on." className={`rounded-full px-2 py-1 font-mono text-[11px] font-bold tracking-[0.1em] uppercase ${running && relay?.apiUp ? "bg-[#128a3e] text-white" : running ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>
+            {!relay ? "…" : !relay.installed ? "Not installed" : running ? (relay.apiUp ? (relay.adopted ? "Server on (found running)" : "Server on") : "Server starting…") : "Server off"}
+          </span>
+          <span data-testid="relay-forwards-status" data-state={relay?.enabled ? "on" : "off"} className={`rounded-full px-2 py-1 font-mono text-[11px] font-bold tracking-[0.1em] uppercase ${relay?.enabled ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
+            Forwards {relay?.enabled ? "on" : "off"}
+          </span>
         </span>
       </div>
-      <p className="font-mono text-[12px] text-black/70">Optional. Pick “Relay” as a channel’s destination, then choose where each path forwards. One encode, many destinations (ffmpeg -c copy each, restarted on failure).{relay?.version ? ` MediaMTX ${relay.version}.` : ""}</p>
+      <p className="font-mono text-[12px] text-black/70">Optional. Pick “Relay” as a channel’s destination and start it: it publishes to the relay server (preview works) without going anywhere else. Tick destinations per path, then Start forwards to fan out (one ffmpeg -c copy each, restarted on failure). Stop forwards ends the fan-out only; channels keep publishing. The server stops by itself when nothing uses it.{relay?.version ? ` MediaMTX ${relay.version}.` : ""}</p>
       {relay && !relay.installed ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">MediaMTX not found. On the Mac: brew install mediamtx, or run scripts/install-mediamtx.sh, or set MEDIAMTX_BIN.</p> : null}
       {relay?.error ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">{relay.error}</p> : null}
       <div className="flex gap-2">
-        <Pill size="sm" data-testid="relay-start" disabled={busy || running || !relay?.installed} onClick={() => void act({ action: "start" }, "Relay started.")}>Start relay</Pill>
-        <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !running} confirmLabel="Stop relay, its forwards and channels on it? · confirm" onConfirm={() => void act({ action: "stop" }, "Relay stopped.")}>Stop relay</ConfirmButton>
+        <Pill size="sm" data-testid="relay-start" disabled={busy || relay?.enabled === true || !relay?.installed} onClick={() => void act({ action: "start" }, "Forwards started.")}>Start forwards</Pill>
+        <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !relay?.enabled} confirmLabel="Stop all forwards? Channels keep publishing · confirm" onConfirm={() => void act({ action: "stop" }, "Forwards stopped. Channels keep publishing to the relay.")}>Stop forwards</ConfirmButton>
       </div>
       {(["slate", "capture"] as const).map((name) => {
         const info = relay?.paths[name]
@@ -1916,7 +1921,8 @@ function RelayCard({ dests }: { dests: Dest[] }) {
                       <input type="checkbox" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked })} />
                       <span className="truncate">{dest.name} · {dest.host}</span>
                     </label>
-                    {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}{fwd.restarts > 0 ? ` · ${fwd.restarts}` : ""}</span> : null}
+                    {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}</span> : null}
+                    {fwd && fwd.reconnects > 0 ? <span data-testid={`relay-fwd-reconnects-${name}-${dest.name}`} title={`A working connection to ${dest.name} dropped and was re-made ${fwd.reconnects}×. Total relaunches incl. quick retries: ${fwd.restarts}.`} className="font-mono text-[11px] text-[#8a4b06]">{fwd.reconnects} {fwd.reconnects === 1 ? "reconnect" : "reconnects"}</span> : fwd && fwd.restarts > 0 && fwd.state !== "forwarding" ? <span title="Quick retries: the forward could not connect (or the source was not publishing) and was started again." className="font-mono text-[11px] text-black/60">{fwd.restarts} {fwd.restarts === 1 ? "retry" : "retries"}</span> : null}
                     {fwd && fwd.state === "forwarding" ? <HealthChip testid={`relay-fwd-health-${name}-${dest.name}`} health={fwd.health} /> : null}
                     {fwd?.error && fwd.state !== "waiting" ? <span className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
                   </li>

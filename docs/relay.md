@@ -23,12 +23,15 @@ The app looks in this order: `MEDIAMTX_BIN`, then `bin/mediamtx`, then the Homeb
 
 ## Use (desk → Encoder)
 
-1. Set a channel's destination to **Relay (MediaMTX) → /slate** (or **/capture**), then press Start. This starts the relay if it is off.
-2. In the **Relay** card, tick the saved destinations each path should forward to. Every forward has its own status: Waiting for source, Connecting, Forwarding, Retrying or Stalled. A failed forward restarts on its own (2s, doubling to 30s).
-3. **Preview what the relay receives** plays the actual published stream (LL-HLS, about 2s behind). It goes through the app with operator auth, so an iPhone on the LAN can watch it.
-4. **Stop relay** stops every forward, MediaMTX, and any channel publishing into the relay. Your forward ticks are kept for next time. **Stop all** also stops the relay.
+Channels and forwards are independent.
 
-**One publisher per stream key.** A destination can't be forwarded by both paths. It also can't be used by a direct channel while a relay forward uses it, or the other way round.
+1. Set a channel's destination to **Relay (MediaMTX) → /slate** (or **/capture**) and press Start. This starts the relay **server** if needed and publishes to it. Nothing goes out yet, but the preview works.
+2. In the **Relay** card, tick the destinations each path should forward to, then press **Start forwards** to fan out. Every forward has its own status (Waiting for source, Connecting, Forwarding, Retrying, Stalled, Blocked) and live health.
+   - **N reconnects:** times a working connection (10s or more) dropped and was made again.
+   - **N retries:** quick relaunches that never connected, for example while the source isn't publishing.
+3. **Stop forwards** ends the fan-out only. Channels keep publishing to the relay and the preview keeps playing. **Start forwards** resumes every ticked destination.
+4. Stopping a channel leaves its forwards waiting for the source. The server stops by itself once no channel publishes to it and forwards are off. If MediaMTX crashes, its loop restarts it and the channel's supervisor reconnects the publisher.
+5. **Stop all** stops every channel, every forward and the server. Ticks are kept.
 
 ## Files (data/relay/, files 0600, folder 0700, all gitignored)
 

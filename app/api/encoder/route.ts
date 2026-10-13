@@ -14,7 +14,7 @@ import {
 import { getViewKey } from "@/lib/view-key"
 import { CAPTURE_BITRATES } from "@/lib/capture-options"
 import { RELAY_TARGET, resolveDestination } from "@/lib/rtmp-destinations"
-import { relayPublishUrl, startRelay, stopRelay } from "@/lib/relay"
+import { ensureRelayServer, relayPublishUrl, stopRelayEverything, stopRelayServerIfIdle } from "@/lib/relay"
 
 export async function GET(request: Request) {
   await connection()
@@ -51,8 +51,8 @@ export async function POST(request: Request) {
     let rtmpUrl = typeof record.rtmpUrl === "string" ? record.rtmpUrl : ""
     const viaRelay = record.destinationId === RELAY_TARGET
     if (viaRelay) {
-      // Publish to the local MediaMTX path for this channel; start the relay if it is off.
-      const relay = await startRelay()
+      // Publish to the local MediaMTX path for this channel. Starts the relay server only; forwards stay as they are.
+      const relay = await ensureRelayServer()
       if (!relay.ok) return Response.json({ ...readStatus(), error: relay.error }, { status: relay.status })
     } else if (typeof record.destinationId === "string") {
       const destination = resolveDestination(record.destinationId)
@@ -95,13 +95,14 @@ export async function DELETE(request: Request) {
   const channel = params.get("source") === "capture" || params.get("mode") === "capture" ? "capture" : "slate"
   if (target === "rtmp-all") {
     const result = await stopAllRtmp()
-    await stopRelay() // forwards + MediaMTX too; forward choices are kept
+    await stopRelayEverything() // forwards + MediaMTX too; forward ticks are kept
     return Response.json({ ...readStatus(), note: `Stopped ${result.stopped.length} stream supervisor(s), the relay, and ${result.strays.length} stray ffmpeg publisher(s).` })
   }
   if (target === "rtmp") {
     const result = await stopRtmpStream(Date.now(), channel)
     if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
     if (channel === "slate") await stopEncoder() // as before; stopping the capture leaves the HLS preview alone
+    await stopRelayServerIfIdle() // nothing publishing and forwards off → MediaMTX can go
     return Response.json({ ...readStatus(), note: result.note ?? null })
   }
   await stopEncoder()

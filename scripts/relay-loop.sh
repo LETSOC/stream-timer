@@ -14,13 +14,14 @@ umask 077
 TAG="$1"; shift
 [[ "$1" == "--" ]] && shift
 STATE_FILE="${LOOP_STATE_FILE:-}"
-restarts=0
+restarts=0     # every relaunch (includes quick retries, e.g. while the source is not publishing yet)
+reconnects=0   # relaunches after a run that lasted 10s+ (a working connection dropped)
 delay=2
 child=""
 
 write_state() {
   [[ -z "$STATE_FILE" ]] && return
-  printf '{"tag":"%s","state":"%s","restarts":%s,"lastExit":%s,"updatedAt":%s}\n' "$TAG" "$1" "$restarts" "${2:-null}" "$(date +%s)" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+  printf '{"tag":"%s","state":"%s","restarts":%s,"reconnects":%s,"lastExit":%s,"updatedAt":%s}\n' "$TAG" "$1" "$restarts" "$reconnects" "${2:-null}" "$(date +%s)" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
 }
 stop() {
   echo "[relay-loop $(date '+%H:%M:%S')] stop requested"
@@ -46,6 +47,7 @@ while true; do
   child=""
   ran=$(( $(date +%s) - started ))
   restarts=$(( restarts + 1 ))
+  if (( ran >= 10 )); then reconnects=$(( reconnects + 1 )); fi
   if (( ran >= 30 )); then delay=2; fi
   echo "[relay-loop $(date '+%H:%M:%S')] exited (code $code after ${ran}s); restarting in ${delay}s"
   write_state waiting "$code"

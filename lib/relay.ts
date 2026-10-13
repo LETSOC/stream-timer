@@ -54,6 +54,7 @@ function readJson<T>(target: string): T | null {
   }
 }
 
+/** `enabled` = forwards on (fan-out). The MediaMTX server itself runs whenever a channel publishes to it or forwards are on. */
 export type RelaySettings = { enabled: boolean; forwards: Record<RelayPath, string[]> }
 export function readSettings(): RelaySettings {
   const raw = readJson<Partial<RelaySettings>>(file("settings.json"))
@@ -164,7 +165,7 @@ export function isRelayUrl(url: string): boolean {
 // ---------- processes ----------
 
 type Pidfile = { pid: number; startedAt: number; tag: string; adopted?: boolean }
-type LoopState = { state: "running" | "waiting"; restarts: number; updatedAt: number; lastExit: number | null }
+type LoopState = { state: "running" | "waiting"; restarts: number; reconnects?: number; updatedAt: number; lastExit: number | null }
 
 const forwardKey = (name: RelayPath, destId: string) => `fwd-${name}-${destId.replace(/[^a-zA-Z0-9-]/g, "")}`
 function forwardTag(name: RelayPath, destId: string, fingerprint: string) {
@@ -223,7 +224,6 @@ export function relayProcessGroups(): number[] {
 
 /** Pidfile gone (or stale) but the loop still runs (server restarted): take it back. */
 function adopt(loops: OwnRelayLoop[]) {
-  const settings = readSettings()
   for (const loop of loops) {
     let key: string | null = null
     if (loop.tag === "mediamtx") key = "mediamtx"
@@ -232,7 +232,6 @@ function adopt(loops: OwnRelayLoop[]) {
     if (!key || loopAlive(key)?.pid === loop.pid) continue
     if (loopAlive(key)) continue // a different live one owns the key; the reconcile pass will clean up
     writePrivate(file(`${key}.json`), JSON.stringify({ pid: loop.pid, startedAt: Date.now(), tag: loop.tag, adopted: true } satisfies Pidfile))
-    if (key === "mediamtx" && !settings.enabled) writeSettings({ ...settings, enabled: true })
   }
 }
 
@@ -261,25 +260,70 @@ function withLock<T>(task: () => Promise<T>): Promise<T> {
 
 export type RelayResult = { ok: true; note?: string } | { ok: false; error: string; status: number }
 
+async function ensureServerUnlocked(): Promise<RelayResult> {
+  const bin = findMediamtxBin()
+  if (!bin) return { ok: false, status: 500, error: "MediaMTX is not installed. Run scripts/install-mediamtx.sh (or brew install mediamtx), or set MEDIAMTX_BIN." }
+  if (!loopAlive("mediamtx")) {
+    writePrivate(file("mediamtx.yml"), buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials() }))
+    spawnLoop("mediamtx", "mediamtx", [bin, file("mediamtx.yml")])
+  }
+  const deadline = Date.now() + 6000
+  while (Date.now() < deadline && !(await apiPaths())) await new Promise((resolve) => setTimeout(resolve, 150))
+  if (!(await apiPaths())) return { ok: false, status: 500, error: `MediaMTX did not come up. Ports in use? ${tailOf("mediamtx").split("\n").slice(-3).join(" · ")}` }
+  return { ok: true }
+}
+
+/** Channel start (destination "relay"): make sure the MediaMTX server is up. Does not touch forwards. */
+export function ensureRelayServer(): Promise<RelayResult> {
+  return withLock(ensureServerUnlocked)
+}
+
+/** "Start forwards": fan-out on for every ticked destination (server started if needed). */
 export function startRelay(): Promise<RelayResult> {
   return withLock(async () => {
-    const bin = findMediamtxBin()
-    if (!bin) return { ok: false, status: 500, error: "MediaMTX is not installed. Run scripts/install-mediamtx.sh (or brew install mediamtx), or set MEDIAMTX_BIN." }
+    const up = await ensureServerUnlocked()
+    if (!up.ok) return up
     writeSettings({ ...readSettings(), enabled: true })
-    if (!loopAlive("mediamtx")) {
-      writePrivate(file("mediamtx.yml"), buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials() }))
-      spawnLoop("mediamtx", "mediamtx", [bin, file("mediamtx.yml")])
-      const deadline = Date.now() + 6000
-      while (Date.now() < deadline && !(await apiPaths())) await new Promise((resolve) => setTimeout(resolve, 150))
-      if (!(await apiPaths())) return { ok: false, status: 500, error: `MediaMTX did not come up. Ports in use? ${tailOf("mediamtx").split("\n").slice(-3).join(" · ")}` }
-    }
     await reconcileUnlocked()
     return { ok: true }
   })
 }
 
-/** Stops every forward and MediaMTX. Forward choices are kept for next time. */
+async function killForwardsUnlocked() {
+  for (const loop of findRelayLoops()) if (loop.tag !== "mediamtx") await killGroup(loop.pid)
+  for (const name of fs.existsSync(relayDir()) ? fs.readdirSync(relayDir()) : []) {
+    if (/^fwd-.*\.json$/.test(name)) fs.rmSync(file(name), { force: true })
+  }
+}
+const publishingChannels = () => directChannelDests().filter((item) => item.running && item.relay)
+
+async function stopServerIfIdleUnlocked() {
+  if (readSettings().enabled || publishingChannels().length > 0) return false
+  for (const loop of findRelayLoops()) if (loop.tag === "mediamtx") await killGroup(loop.pid)
+  for (const name of ["mediamtx.json", "mediamtx-state.json"]) fs.rmSync(file(name), { force: true })
+  return true
+}
+
+/**
+ * "Stop forwards": fan-out off. Channels keep publishing to the relay and the preview keeps
+ * working; the server only stops if nothing publishes to it. Ticks are kept for next time.
+ */
 export function stopRelay(): Promise<RelayResult> {
+  return withLock(async () => {
+    writeSettings({ ...readSettings(), enabled: false })
+    await killForwardsUnlocked()
+    const stopped = await stopServerIfIdleUnlocked()
+    return { ok: true, note: stopped ? "Forwards stopped; relay server stopped (nothing publishing)." : "Forwards stopped. Channels keep publishing to the relay." }
+  })
+}
+
+/** After a channel stops: stop the server if nothing uses it any more. */
+export function stopRelayServerIfIdle(): Promise<boolean> {
+  return withLock(stopServerIfIdleUnlocked)
+}
+
+/** Stop all: forwards off, every relay process gone. */
+export function stopRelayEverything(): Promise<RelayResult> {
   return withLock(async () => {
     writeSettings({ ...readSettings(), enabled: false })
     for (const loop of findRelayLoops()) await killGroup(loop.pid)
@@ -344,6 +388,8 @@ async function reconcileUnlocked() {
   const loops = findRelayLoops()
   adopt(loops)
   const settings = readSettings()
+  // The server must run while a channel publishes into it or forwards are on (e.g. pidfile lost).
+  if (!relayRunning() && (settings.enabled || publishingChannels().length > 0) && findMediamtxBin()) await ensureServerUnlocked()
   const on = settings.enabled && relayRunning()
   const wanted = new Map<string, { name: RelayPath; destId: string; url: string; tag: string }>()
   if (on) {
@@ -421,9 +467,10 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
   return "forwarding"
 }
 
-export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; error: string | null; adopted: boolean; health: HealthStats }
+/** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
+export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-export type RelayStatus = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
+export type RelayStatus = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 export async function relayStatus(): Promise<RelayStatus> {
   await reconcileRelay().catch(() => undefined)
@@ -450,9 +497,9 @@ export async function relayStatus(): Promise<RelayStatus> {
       const dest = dests.get(destId)!
       const resolved = resolveDestination(destId)
       const blocked = !meta && resolved ? forwardConflict({ path: name, dest: destinationFingerprint(resolved.url) }, [], directChannelDests()) : null
-      if (blocked && settings.enabled) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
+      if (blocked && settings.enabled) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, reconnects: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
       const health = meta && info?.ready ? healthFromSamples(parseProgressBlocks(tailOf(key, 32768)).slice(-13), 5, logAgeMs(key), expect) : EMPTY_HEALTH
-      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true, health }
+      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true, health }
     })
     const outKbps = forwards.reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
     const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : "Browser capture", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
@@ -467,6 +514,7 @@ export async function relayStatus(): Promise<RelayStatus> {
     bin,
     version: bin ? mediamtxVersion(bin) : null,
     enabled: settings.enabled,
+    publishing: RELAY_PATHS.filter((name) => directChannelDests().some((item) => item.channel === name && item.running && item.relay)),
     running: mtx !== null,
     apiUp: api !== null,
     adopted: mtx?.adopted === true,
