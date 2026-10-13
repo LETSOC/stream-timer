@@ -1209,6 +1209,7 @@ export function OperatorConsole() {
             <Field label="Portrait size (%)" htmlFor="gallery-scale">
               <Input id="gallery-scale" type="number" min={40} max={200} value={galleryScale} onChange={(event) => setGalleryScale(Math.min(200, Math.max(40, Number(event.target.value) || 80)))} />
             </Field>
+            {speakers.length > 0 ? <div><Pill data-testid="add-speaker-top" tone="outline" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>+ Add speaker</Pill></div> : null}
             {speakers.map((speaker, index) => (
               <div key={index} className="space-y-2 rounded-xl border border-black/10 p-3">
                 <Field label="Image URL" htmlFor={`speaker-image-${index}`}>
@@ -1223,11 +1224,21 @@ export function OperatorConsole() {
                 <Pill tone="outline" size="sm" onClick={() => setSpeakers((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Remove</Pill>
               </div>
             ))}
-            <Pill onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>Add speaker</Pill>
+            <Pill data-testid="add-speaker" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>+ Add speaker</Pill>
 
           </Panel>
         </section>
       </main>
+      <footer
+        id="desk-footer"
+        data-testid="desk-footer"
+        className="mx-auto mt-2 flex w-full max-w-[1600px] flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-black/10 px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] font-mono text-[12px] text-black/60 sm:px-6 lg:pb-6"
+      >
+        <span className="font-bold tracking-[0.12em] text-black/80 uppercase">Stream timer desk</span>
+        <span data-testid="footer-saved">{drafts.dirty.length ? `${drafts.dirty.length} section${drafts.dirty.length === 1 ? "" : "s"} unsaved` : "All changes saved"}</span>
+        <span>v{process.env.APP_VERSION || "0"} · build {(process.env.APP_BUILD ?? "dev").slice(-6)}</span>
+        <a href="#top" className="font-bold text-black underline underline-offset-4" onClick={(event) => { event.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }) }}>↑ Back to top</a>
+      </footer>
       {toast ? (
         <div role="status" aria-live="polite" className="fixed right-4 bottom-4 z-50 flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]">
           <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-[#D9FF43]" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d="m5 12 5 5 9-11" /></svg>
@@ -1484,7 +1495,13 @@ function nowMs() {
 function BackToTop() {
   const [show, setShow] = useState(false)
   useEffect(() => {
-    const update = () => setShow(window.scrollY > Math.max(600, window.innerHeight * 1.2))
+    // Hidden once the footer is on screen: the footer has its own Back to top link, and the
+    // floating button would otherwise sit over the last section's Save / Add buttons.
+    const update = () => {
+      const footer = document.getElementById("desk-footer")
+      const footerVisible = footer ? footer.getBoundingClientRect().top < window.innerHeight : false
+      setShow(window.scrollY > Math.max(600, window.innerHeight * 1.2) && !footerVisible)
+    }
     update()
     window.addEventListener("scroll", update, { passive: true })
     window.addEventListener("resize", update)
