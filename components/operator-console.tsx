@@ -39,6 +39,7 @@ export function OperatorConsole() {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const [rtmpUrl, setRtmpUrl] = useState("")
   const [rtmpLive, setRtmpLive] = useState(false)
+  const [rtmpPhase, setRtmpPhase] = useState<"stopped" | "starting" | "connected" | "reconnecting" | "failed">("stopped")
   const [rtmpReconnecting, setRtmpReconnecting] = useState(false)
   const [rtmpRestarts, setRtmpRestarts] = useState(0)
   const [strayPids, setStrayPids] = useState<number[]>([])
@@ -150,8 +151,9 @@ export function OperatorConsole() {
     const load = () => {
       void fetch("/api/encoder", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; strayPublishers?: { pid: number }[] }) => {
+        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[] }) => {
           if (cancelled) return
+          if (body.rtmpState) setRtmpPhase(body.rtmpState)
           setRtmpLive(body.rtmpRunning === true)
           setRtmpReconnecting(body.rtmpReconnecting === true)
           setRtmpRestarts(typeof body.rtmpRestarts === "number" ? body.rtmpRestarts : 0)
@@ -653,9 +655,9 @@ export function OperatorConsole() {
 
           <Panel id="encoder" title="Encoder (FFmpeg)">
             <div className="flex items-center justify-between gap-3">
-              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpLive ? (rtmpReconnecting ? "bg-[#b45309] text-white" : "bg-[#128a3e] text-white") : "bg-black/5 text-black/70"}`}>
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpPhase === "connected" ? "bg-[#128a3e] text-white" : rtmpPhase === "reconnecting" || rtmpPhase === "starting" ? "bg-[#b45309] text-white" : rtmpPhase === "failed" ? "bg-[#ff3c00] text-white" : rtmpLive && !rtmpReconnecting ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
-                {rtmpLive ? (rtmpReconnecting ? "Reconnecting" : "Stream live") : "Stream off"}
+                {{ stopped: rtmpLive ? "Stream live" : "Stream off", starting: "Connecting…", connected: "Stream live", reconnecting: "Reconnecting", failed: "Failed" }[rtmpPhase]}
                 {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
               </span>
             </div>

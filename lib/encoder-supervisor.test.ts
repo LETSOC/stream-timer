@@ -25,7 +25,8 @@ test("flags an ffmpeg publisher that is outside this app's supervisor group", ()
 test("never leaks the stream password", () => {
   const [stray] = parseStrayPublishers(ps, 500, 1)
   assert.ok(!stray.command.includes("secret"))
-  assert.ok(stray.command.includes("password=••••"))
+  assert.ok(!stray.command.includes("live_x"))
+  assert.ok(stray.command.includes("rtmp://uk.castr.io/••••"))
 })
 
 test("with no supervisor running, every publisher is a stray", () => {

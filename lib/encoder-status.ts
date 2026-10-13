@@ -11,6 +11,11 @@ export type EncoderStatus = {
   slateAgeSeconds: number | null
   burnedRemainingAtStart: number | null
   refreshSeconds: number | null
+  /** HLS preview: stopped, starting (no playlist yet), running (playlist advancing), stalled. */
+  encoderState: "stopped" | "starting" | "running" | "stalled"
+  rtmpState: "stopped" | "starting" | "connected" | "reconnecting" | "failed"
+  /** Set when the last stop had to SIGKILL, or could not kill at all. */
+  stopNote: string | null
   rtmpRunning: boolean
   /** The supervisor is waiting to relaunch ffmpeg after it exited. */
   rtmpReconnecting: boolean
