@@ -190,3 +190,14 @@
   0%, 72%, 100% { transform: scale(1); }
   82% { transform: scale(1.045); }
 }
+/* Desk: the page itself is light, so no overscroll bounce, short content or
+   breakpoint change can ever reveal the dark html background (/stream stays dark for OBS). */
+html:has([data-desk-root]),
+html:has([data-desk-root]) body {
+  background-color: #f6f6f3;
+  color-scheme: light;
+  overscroll-behavior: none;
+}
+html:has([data-desk-root]) body {
+  min-height: 100dvh;
+}
