@@ -28,7 +28,7 @@ import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { DEFAULT_STAGE, parseStage, stageScreen, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
-import { pickSection, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
+import { IMMEDIATE_STAGE, pickSection, planRemoteSync, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
@@ -136,7 +136,8 @@ export function OperatorConsole() {
   const revRef = useRef<number | undefined>(undefined)
   const [recovered, setRecovered] = useState<"backup" | "defaults" | null>(null)
   // Live mode: test-clock buttons and keyboard shortcuts are locked so nothing rehearsal-only reaches /stream by accident.
-  const [liveMode, setLiveMode] = useSectionOpen("live-mode", false)
+  // Shared via the server (stage.deskLive) so every desk agrees on Rehearsal vs Live.
+  const [liveMode, setLiveMode] = useState(false)
   const liveModeRef = useRef(liveMode)
   useEffect(() => {
     liveModeRef.current = liveMode
@@ -268,29 +269,26 @@ export function OperatorConsole() {
     if (stage.welcomeFit === "cover" || stage.welcomeFit === "contain") setWelcomeFit(stage.welcomeFit)
     if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
-  }, [])
+    if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
+  }, [setLiveMode])
 
   useEffect(() => {
+    // The server is the source of truth. The browser keeps only section drafts, the RTMP URL and
+    // per-device UI prefs; its cached stage/clock are used only if the server has nothing yet or is unreachable.
     const stageRaw = window.localStorage.getItem("hyphen-countdown-stage")
-    if (stageRaw) {
+    const clockRaw = window.localStorage.getItem("hyphen-countdown-clock")
+    const applyLocalFallback = () => {
       try {
-        applyStage(JSON.parse(stageRaw) as Partial<StageOptions>)
+        if (stageRaw) applyStage(JSON.parse(stageRaw) as Partial<StageOptions>)
+        const clock = clockRaw ? (JSON.parse(clockRaw) as { testUntil?: number | null; pausedAt?: number | null }) : null
+        if (typeof clock?.testUntil === "number") setTestUntil(clock.testUntil)
+        if (typeof clock?.pausedAt === "number") setPausedAt(new Date(clock.pausedAt))
       } catch {
-        /* ignore a bad local draft */
+        /* ignore a bad local cache */
       }
     }
     const savedRtmp = window.localStorage.getItem("hyphen-countdown-rtmp")
     if (savedRtmp) setRtmpUrl(savedRtmp)
-    const clockRaw = window.localStorage.getItem("hyphen-countdown-clock")
-    if (clockRaw) {
-      try {
-        const clock = JSON.parse(clockRaw) as { testUntil?: number | null; pausedAt?: number | null }
-        if (typeof clock.testUntil === "number") setTestUntil(clock.testUntil)
-        if (typeof clock.pausedAt === "number") setPausedAt(new Date(clock.pausedAt))
-      } catch {
-        /* ignore a bad clock draft */
-      }
-    }
     void fetch("/api/event", { cache: "no-store" })
       .then((response) => response.json())
       .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; hasSaved?: boolean; rev?: unknown; recovered?: unknown }) => {
@@ -300,11 +298,11 @@ export function OperatorConsole() {
         // data/event.json is the source of truth once it exists; localStorage is only a fallback draft.
         const serverWins = body.hasSaved === true
         if (saved && (serverWins || !window.localStorage.getItem("hyphen-countdown-event"))) updateEvent(saved)
-        if (serverWins || !clockRaw) {
+        if (serverWins) {
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
           setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
-        }
-        if ((serverWins || !stageRaw) && body.stage) applyStage(body.stage)
+          if (body.stage) applyStage(body.stage)
+        } else applyLocalFallback()
         setPublished({ event: saved ?? { ...DEFAULT_EVENT }, stage: parseStage(body.stage) })
         // Unsaved section drafts from before a reload stay drafts on top of what /stream has.
         for (const values of Object.values(readStoredDrafts())) {
@@ -312,10 +310,11 @@ export function OperatorConsole() {
           if (values?.stage) applyStage(values.stage)
         }
       })
+      .catch(applyLocalFallback)
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, deskLive: liveMode }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -348,6 +347,64 @@ export function OperatorConsole() {
   const saveChain = useRef<Promise<void>>(Promise.resolve())
   const saveSeq = useRef(0)
   const lastSent = useRef("")
+  const pendingSaves = useRef(0)
+
+  // ---------- live sync between desks (MacBook, iPhone, other tabs) ----------
+  const [conflicts, setConflicts] = useState<Partial<Record<SectionId, SectionValues>>>({})
+  const syncNowRef = useRef<() => void>(() => undefined)
+  const syncStateRef = useRef({ published, draftSnap })
+  useEffect(() => {
+    syncStateRef.current = { published, draftSnap }
+  })
+  const pullRemote = useCallback(async (force = false) => {
+    if (pendingSaves.current > 0 || saveTimer.current !== null) return // our own save is on its way; check next tick
+    const response = await fetch("/api/event", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return
+    const body = (await response.json().catch(() => null)) as { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; rev?: unknown } | null
+    if (!body || typeof body.rev !== "number") return
+    if (!force && body.rev === revRef.current) return
+    if (pendingSaves.current > 0) return
+    const { published: current, draftSnap: draft } = syncStateRef.current
+    if (!current) return
+    const remote: DeskSnapshot = { event: asEventConfig(body.event) ?? current.event, stage: parseStage(body.stage) }
+    const plan = planRemoteSync(draft, current, remote)
+    for (const id of plan.take) {
+      const values = pickSection(id, remote)
+      if (values.event) updateEvent(values.event)
+      if (values.stage) applyStage(values.stage)
+    }
+    // Live switches and the test clock always follow the server.
+    applyStage(Object.fromEntries(IMMEDIATE_STAGE.map((key) => [key, remote.stage[key]])) as Partial<StageOptions>)
+    setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
+    setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
+    setPublished(remote)
+    revRef.current = body.rev
+    lastSent.current = ""
+    setConflicts((existing) => {
+      const next = { ...existing }
+      for (const id of plan.conflicts) next[id] = pickSection(id, remote)
+      for (const id of plan.take) delete next[id]
+      return next
+    })
+    setSyncState("saved")
+    setSyncError("")
+    setToast(plan.conflicts.length ? `Changed on another device: ${plan.conflicts.map((id) => SECTIONS[id].label).join(", ")}. Choose Load theirs or Keep mine.` : "Synced from another device")
+  }, [updateEvent, applyStage])
+  useEffect(() => {
+    syncNowRef.current = () => void pullRemote(true)
+  }, [pullRemote])
+  useEffect(() => {
+    if (!hydrated) return
+    const id = window.setInterval(() => void pullRemote(), 2000)
+    const onFocus = () => void pullRemote()
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onFocus)
+    return () => {
+      window.clearInterval(id)
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onFocus)
+    }
+  }, [hydrated, pullRemote])
 
   /** Serialised save: one PUT at a time, in order; only the newest response updates the badge. */
   function sendSave(payload: typeof savePayload, after?: (ok: boolean) => void) {
@@ -360,6 +417,7 @@ export function OperatorConsole() {
     if (json === lastSent.current) return
     lastSent.current = json
     const seq = ++saveSeq.current
+    pendingSaves.current += 1
     saveChain.current = saveChain.current.then(async () => {
       try {
         const response = await fetch("/api/event", {
@@ -375,8 +433,11 @@ export function OperatorConsole() {
         }
         if (seq !== saveSeq.current) return
         if (response.status === 409) {
+          // Someone else saved first: pull their version in (drafts kept, conflicts flagged), then autosave retries.
+          lastSent.current = ""
           setSyncState("conflict")
-          setSyncError("Changed in another tab or device. Reload to get the latest.")
+          setSyncError("Changed on another device. Pulled the latest; check any flagged sections.")
+          window.setTimeout(() => syncNowRef.current(), 0)
           return
         }
         if (response.ok) {
@@ -394,6 +455,8 @@ export function OperatorConsole() {
         lastSent.current = ""
         setSyncState("local")
         setSyncError("Could not reach the server.")
+      } finally {
+        pendingSaves.current -= 1
       }
     })
   }
@@ -419,7 +482,15 @@ export function OperatorConsole() {
   }
 
   function draftBar(id: SectionId) {
-    return <DraftBar id={id} dirty={drafts.isDirty(id)} canSave={Boolean(token)} onSave={() => saveSections([id])} onDiscard={() => discardSection(id)} pillClass={(tone, size) => pillClass(tone, size)} />
+    const theirs = conflicts[id]
+    const notice = theirs ? (
+      <div role="alert" data-testid={`conflict-${id}`} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">
+        <span className="mr-auto">Changed on another device</span>
+        <button type="button" data-testid={`load-theirs-${id}`} className={pillClass("outline", "sm")} onClick={() => { applyDraft(theirs); setConflicts((c) => { const n = { ...c }; delete n[id]; return n }) }}>Load theirs</button>
+        <button type="button" data-testid={`keep-mine-${id}`} className={pillClass("live", "sm")} onClick={() => { setConflicts((c) => { const n = { ...c }; delete n[id]; return n }); saveSections([id]) }}>Keep mine</button>
+      </div>
+    ) : null
+    return <>{notice}<DraftBar id={id} dirty={drafts.isDirty(id)} canSave={Boolean(token)} onSave={() => saveSections([id])} onDiscard={() => discardSection(id)} pillClass={(tone, size) => pillClass(tone, size)} /></>
   }
 
   /** Live switch for /stream: break, hold, end card or countdown (mutually exclusive). */

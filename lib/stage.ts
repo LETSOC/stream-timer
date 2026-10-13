@@ -43,6 +43,8 @@ export type StageOptions = {
   welcomeMessage: string
   welcomeImage: string
   welcomeFit: ImageFit
+  /** Desk Rehearsal/Live switch, shared so every desk agrees. Not used by /stream. */
+  deskLive: boolean
   overlay: Overlay
   /** When the current overlay went up (ms), for the "on break" timer. */
   overlayAt: number | null
@@ -87,6 +89,7 @@ export const DEFAULT_STAGE: StageOptions = {
   welcomeMessage: "",
   welcomeImage: "",
   welcomeFit: "cover",
+  deskLive: false,
   overlay: "none",
   overlayAt: null,
 }
@@ -172,6 +175,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     welcomeMessage: pick("welcomeMessage", (v) => (typeof v === "string" ? v.slice(0, BODY_MAX) : "")),
     welcomeImage: pick("welcomeImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
     welcomeFit: pick("welcomeFit", (v) => (v === "contain" ? "contain" : "cover")),
+    deskLive: pick("deskLive", (v) => v === true),
     overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" ? v : "none")),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
   }

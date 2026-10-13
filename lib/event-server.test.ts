@@ -20,11 +20,13 @@ beforeEach(() => {
 test("rev increments and a stale rev is rejected (O)", () => {
   const first = writeServerEvent(DEFAULT_EVENT)
   assert.equal(first?.rev, 1)
-  const second = writeServerEvent(DEFAULT_EVENT, undefined, undefined, undefined, 1)
+  const second = writeServerEvent({ ...DEFAULT_EVENT, name: "Two" }, undefined, undefined, undefined, 1)
   assert.equal(second?.rev, 2)
-  assert.throws(() => writeServerEvent(DEFAULT_EVENT, undefined, undefined, undefined, 1), RevConflict)
+  assert.throws(() => writeServerEvent({ ...DEFAULT_EVENT, name: "Three" }, undefined, undefined, undefined, 1), RevConflict)
   // No rev (scripts, old clients) still writes.
-  assert.equal(writeServerEvent(DEFAULT_EVENT)?.rev, 3)
+  assert.equal(writeServerEvent({ ...DEFAULT_EVENT, name: "Three" })?.rev, 3)
+  // Identical content: no write, no conflict, rev unchanged.
+  assert.equal(writeServerEvent({ ...DEFAULT_EVENT, name: "Three" }, undefined, undefined, undefined, 1)?.rev, 3)
 })
 
 test("partial stage PUT merges with saved stage (B)", () => {

@@ -114,9 +114,19 @@ export function writeServerEvent(
   fs.mkdirSync(dataDir(), { recursive: true })
   const file = eventFile()
   const current = readServerState()
-  if (expectedRev !== undefined && expectedRev !== current.rev) throw new RevConflict(current.rev)
   const nextUntil = testUntil === undefined ? current.testUntil : testUntil
   const nextPaused = pausedAt === undefined ? current.pausedAt : pausedAt
+  const nextStage = stage === undefined ? current.stage : parseStage(stage, current.stage)
+  // Same content as what's saved: nothing to write and nothing to conflict with. Keeps rev still,
+  // so two synced desks echoing the same values never ping-pong revisions.
+  if (
+    !current.recovered &&
+    fs.existsSync(file) &&
+    JSON.stringify([event, nextUntil, nextPaused, nextStage]) === JSON.stringify([current.event, current.testUntil, current.pausedAt, current.stage])
+  ) {
+    return { event, rev: current.rev }
+  }
+  if (expectedRev !== undefined && expectedRev !== current.rev) throw new RevConflict(current.rev)
   const clockChanged = nextUntil !== current.testUntil || nextPaused !== current.pausedAt
   const testSetAt = nextUntil === null && nextPaused === null ? null : clockChanged ? now : current.testSetAt ?? now
   const rev = current.rev + 1
@@ -127,7 +137,7 @@ export function writeServerEvent(
       testUntil: nextUntil,
       pausedAt: nextPaused,
       testSetAt,
-      stage: stage === undefined ? current.stage : parseStage(stage, current.stage),
+      stage: nextStage,
     },
     null,
     2,

@@ -85,3 +85,24 @@ test("welcome back card: parsed, defaulted, beats end card", () => {
   assert.equal(s.welcomeImage, "")
   assert.equal(stageScreen({ overlay: "welcome", forceEnd: true, holdCountdown: false }, true), "welcome")
 })
+
+test("planRemoteSync: clean sections follow the server, dirty ones conflict", async () => {
+  const { planRemoteSync } = await import("@/lib/desk-sections")
+  const published: DeskSnapshot = { event: { ...DEFAULT_EVENT }, stage: { ...DEFAULT_STAGE } }
+  const remote: DeskSnapshot = { event: { ...DEFAULT_EVENT, name: "Remote name" }, stage: { ...DEFAULT_STAGE, breakTitle: "Remote break", endTitle: "Remote end" } }
+  const draft: DeskSnapshot = { event: { ...DEFAULT_EVENT }, stage: { ...DEFAULT_STAGE, breakTitle: "My break", endTitle: "Remote end" } }
+  const plan = planRemoteSync(draft, published, remote)
+  assert.deepEqual(plan.conflicts, ["breakCard"])
+  assert.ok(plan.take.includes("event"))
+  assert.ok(plan.take.includes("endCard"), "my draft already equals theirs")
+  assert.ok(!plan.take.includes("look"))
+})
+
+test("server save with identical content keeps rev (no ping-pong between synced desks)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-sync-"))
+  process.env.STREAM_DATA_DIR = dir
+  const es = await import("@/lib/event-server")
+  const first = es.writeServerEvent({ ...DEFAULT_EVENT }, null, null, {}, undefined)!
+  const again = es.writeServerEvent({ ...DEFAULT_EVENT }, null, null, {}, first.rev - 5)!
+  assert.equal(again.rev, first.rev)
+})

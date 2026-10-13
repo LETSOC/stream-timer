@@ -26,7 +26,7 @@ export const SECTIONS: Record<SectionId, { label: string; event?: (keyof EventCo
 export const SECTION_IDS = Object.keys(SECTIONS) as SectionId[]
 
 /** Stage fields that are live switches, always taken from the desk's current state. */
-export const IMMEDIATE_STAGE: (keyof StageOptions)[] = ["forceEnd", "holdCountdown", "overlay", "overlayAt"]
+export const IMMEDIATE_STAGE: (keyof StageOptions)[] = ["forceEnd", "holdCountdown", "overlay", "overlayAt", "deskLive"]
 
 export type SectionValues = { event?: Partial<EventConfig>; stage?: Partial<StageOptions> }
 
@@ -61,4 +61,20 @@ export function savePayloadStage(published: DeskSnapshot, draft: DeskSnapshot): 
   const stage = { ...published.stage }
   for (const key of IMMEDIATE_STAGE) (stage as Record<string, unknown>)[key] = draft.stage[key]
   return stage
+}
+
+/**
+ * Another device saved. For every section whose saved values changed remotely:
+ * - not dirty here (or my draft already equals theirs): take theirs silently;
+ * - dirty here with a different draft: conflict, the operator picks "Load theirs" / "Keep mine".
+ */
+export function planRemoteSync(draft: DeskSnapshot, published: DeskSnapshot, remote: DeskSnapshot): { take: SectionId[]; conflicts: SectionId[] } {
+  const take: SectionId[] = []
+  const conflicts: SectionId[] = []
+  for (const id of SECTION_IDS) {
+    if (!sectionDirty(id, remote, published)) continue
+    if (sectionDirty(id, draft, published) && sectionDirty(id, draft, remote)) conflicts.push(id)
+    else take.push(id)
+  }
+  return { take, conflicts }
 }
