@@ -48,6 +48,19 @@ export function OperatorConsole() {
   const [destError, setDestError] = useState("")
   const [revealed, setRevealed] = useState<{ id: string; url: string } | null>(null)
   const [legacyRtmp, setLegacyRtmp] = useState<string | null>(null)
+  // Per-device choice: what Start stream publishes. Remembered in this browser only.
+  const [rtmpSource, setRtmpSourceState] = useState<"slate" | "capture">("slate")
+  const [captureSize, setCaptureSizeState] = useState<"1280x720" | "1920x1080">("1280x720")
+  const [runningSource, setRunningSource] = useState<"slate" | "capture" | null>(null)
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      if (window.localStorage.getItem("rtmp-source") === "capture") setRtmpSourceState("capture")
+      if (window.localStorage.getItem("rtmp-capture-size") === "1920x1080") setCaptureSizeState("1920x1080")
+    }, 0)
+    return () => window.clearTimeout(id)
+  }, [])
+  const setRtmpSource = (value: "slate" | "capture") => { setRtmpSourceState(value); window.localStorage.setItem("rtmp-source", value) }
+  const setCaptureSize = (value: "1280x720" | "1920x1080") => { setCaptureSizeState(value); window.localStorage.setItem("rtmp-capture-size", value) }
   const selectedDest = dests.items.find((item) => item.id === dests.selectedId) ?? null
   const rtmpUrl = selectedDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
   const [rtmpLive, setRtmpLive] = useState(false)
@@ -239,7 +252,8 @@ export function OperatorConsole() {
     const load = () => {
       void fetch("/api/encoder", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[]; rtmpConnectError?: string | null; rtmpFailure?: string | null; rtmpAdopted?: boolean; rtmpOwnProcesses?: number }) => {
+        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[]; rtmpConnectError?: string | null; rtmpFailure?: string | null; rtmpAdopted?: boolean; rtmpOwnProcesses?: number; rtmpSource?: "slate" | "capture" | null }) => {
+          setRunningSource(body.rtmpSource ?? null)
           if (cancelled) return
           setRtmpAdopted(body.rtmpAdopted === true)
           setRtmpOwnCount(typeof body.rtmpOwnProcesses === "number" ? body.rtmpOwnProcesses : 0)
@@ -1047,6 +1061,24 @@ export function OperatorConsole() {
                 {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
               </span>
             </div>
+            <div role="radiogroup" aria-label="What to stream" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1 rounded-full border border-black/10 bg-white p-1">
+              {([["slate", "Slate (ffmpeg drawtext)"], ["capture", "Browser capture (exact /stream)"]] as const).map(([value, label]) => (
+                <button key={value} type="button" role="radio" aria-checked={rtmpSource === value} data-testid={`rtmp-source-${value}`} disabled={rtmpLive} onClick={() => setRtmpSource(value)} className={`min-h-8 rounded-full px-2 font-mono text-[12px] leading-tight ${rtmpSource === value ? "bg-black text-white" : "text-black/70"}`}>{label}</button>
+              ))}
+            </div>
+            {rtmpSource === "capture" ? (
+              <div className="flex flex-wrap items-center gap-2 font-mono text-[12px] text-black/70">
+                <label htmlFor="capture-size">Size</label>
+                <select id="capture-size" data-testid="capture-size" disabled={rtmpLive} value={captureSize} onChange={(event) => setCaptureSize(event.target.value === "1920x1080" ? "1920x1080" : "1280x720")} className="h-8 border px-2">
+                  <option value="1280x720">1280×720 (lighter)</option>
+                  <option value="1920x1080">1920×1080</option>
+                </select>
+                <span className="basis-full">Streams exactly what /stream shows, cards included, via headless Chromium on this server. Uses more CPU than the slate.</span>
+              </div>
+            ) : (
+              <p className="font-mono text-[12px] text-black/70">Slate: light on CPU, countdown text only. Break/hold/welcome/end cards are not in it.</p>
+            )}
+            {rtmpLive && runningSource ? <p data-testid="rtmp-running-source" className="font-mono text-[12px] text-black/70">Running: {runningSource === "capture" ? "browser capture" : "slate"}</p> : null}
             <Field label="Destination" htmlFor="rtmp">
               <div className="space-y-2">
                 {dests.items.length ? (
@@ -1128,7 +1160,7 @@ export function OperatorConsole() {
                   void fetch("/api/encoder", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ mode: "rtmp", destinationId: selectedDest?.id, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
+                    body: JSON.stringify({ mode: "rtmp", destinationId: selectedDest?.id, source: rtmpSource, captureSize, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
                   })
                     .then(async (response) => {
                       if (handleUnauthorized(response)) return

@@ -257,6 +257,7 @@ export function readStatus(): EncoderStatus {
     encoderState: hls,
     rtmpState: deriveRtmpState(rtmpRunning, supervisor.state, readTail(RTMP_LOG_FILE, 32768), readFailure(), { logAgeMs: fileAgeMs(RTMP_LOG_FILE), runAgeMs: supervisor.updatedAt ? Date.now() - supervisor.updatedAt : null }),
     rtmpAdopted: rtmpRunning && readRtmpMeta()?.adopted === true,
+    rtmpSource: rtmpRunning ? (readRtmpMeta()?.source === "capture" ? "capture" : "slate") : null,
     rtmpOwnProcesses: ownSupervisorCount(),
     stopNote: lastStopNote,
     rtmpRunning,
@@ -419,9 +420,9 @@ function fileAgeMs(file: string): number | null {
   }
 }
 
-function readRtmpMeta(): { pid?: number; adopted?: boolean; host?: string } | null {
+function readRtmpMeta(): { pid?: number; adopted?: boolean; host?: string; source?: string } | null {
   try {
-    return JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number; adopted?: boolean; host?: string }
+    return JSON.parse(fs.readFileSync(RTMP_META_FILE, "utf8")) as { pid?: number; adopted?: boolean; host?: string; source?: string }
   } catch {
     return null
   }
@@ -579,18 +580,21 @@ export function rtmpInFlightCommand(): RtmpCommand | null {
 type RtmpStartResult = { ok: true; note?: string } | { ok: false; error: string; status: number }
 type RtmpStopResult = (StopResult & { ok: true; note?: string }) | { ok: false; error: string; status: number }
 
-export function startRtmpStream(input: StartInput, rtmpUrl: string, now = Date.now()): Promise<RtmpStartResult> {
+/** Slate = ffmpeg drawtext countdown; capture = headless Chromium rendering the real /stream page. */
+export type RtmpSource = { kind: "slate" } | { kind: "capture"; pageUrl: string; size: "1280x720" | "1920x1080" }
+
+export function startRtmpStream(input: StartInput, rtmpUrl: string, now = Date.now(), source: RtmpSource = { kind: "slate" }): Promise<RtmpStartResult> {
   const gate = decideRtmpCommand({ kind: "start", inFlight: rtmpInFlight, running: rtmpAlive(), last: lastRtmpCommand, now })
   if (gate.action === "reject") return Promise.resolve({ ok: false, error: gate.error, status: gate.status })
   if (gate.action === "noop") return Promise.resolve({ ok: true, note: gate.note })
   rtmpInFlight = "start"
-  return withRtmpLock(() => startRtmpStreamUnlocked(input, rtmpUrl)).finally(() => {
+  return withRtmpLock(() => startRtmpStreamUnlocked(input, rtmpUrl, source)).finally(() => {
     rtmpInFlight = null
     lastRtmpCommand = { kind: "start", at: Date.now() }
   })
 }
 
-async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, source: RtmpSource = { kind: "slate" }): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const checked = validateRtmpUrl(rtmpUrl)
   if (!checked.ok) return { ok: false, error: checked.error, status: 400 }
   const url = checked.url
@@ -623,6 +627,9 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Prom
       RTMP_STATE_FILE,
       RTMP_LOG_FILE,
       RTMP_FAIL_FILE,
+      ...(source.kind === "capture"
+        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_SIZE: source.size, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
+        : {}),
     }),
   })
   child.unref()
@@ -630,12 +637,13 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string): Prom
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
   let host = ""
   try { host = new URL(url).hostname } catch { /* validated above */ }
-  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host }))
+  fs.writeFileSync(RTMP_META_FILE, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: source.kind, size: source.kind === "capture" ? source.size : null }))
 
   // Wait for the first connection. "Output #0" means ffmpeg opened the RTMP output.
   // A supervisor "exited" line this early means the URL or script is wrong, so stop
   // retrying and show the error instead of looping silently.
-  const deadline = Date.now() + 8000
+  // Browser capture needs a few extra seconds to launch Chromium and load /stream.
+  const deadline = Date.now() + (source.kind === "capture" ? 15000 : 8000)
   while (Date.now() < deadline) {
     await delay(400)
     if (!alive(child.pid)) break

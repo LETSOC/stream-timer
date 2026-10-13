@@ -9,7 +9,9 @@ import {
   startRtmpStream,
   stopEncoder,
   stopRtmpStream, stopAllRtmp,
+  type RtmpSource,
 } from "@/lib/encoder"
+import { getViewKey } from "@/lib/view-key"
 import { resolveDestination } from "@/lib/rtmp-destinations"
 
 export async function GET(request: Request) {
@@ -46,7 +48,15 @@ export async function POST(request: Request) {
       if (!destination) return Response.json({ ...readStatus(), error: "That destination no longer exists. Pick another." }, { status: 404 })
       rtmpUrl = destination.url
     }
-    const result = await startRtmpStream(input, rtmpUrl)
+    const rec = body as { source?: unknown; captureSize?: unknown }
+    let source: RtmpSource = { kind: "slate" }
+    if (rec.source === "capture") {
+      // Capture loads /stream from this server on loopback with the view key (never leaves the machine).
+      const port = new URL(request.url).port || "43211"
+      const origin = process.env.CAPTURE_ORIGIN || `http://127.0.0.1:${port}`
+      source = { kind: "capture", pageUrl: `${origin}/stream?k=${encodeURIComponent(getViewKey())}`, size: rec.captureSize === "1920x1080" ? "1920x1080" : "1280x720" }
+    }
+    const result = await startRtmpStream(input, rtmpUrl, Date.now(), source)
     if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
     return Response.json({ ...readStatus(), note: result.note ?? null })
   }

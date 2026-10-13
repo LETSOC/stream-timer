@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Keeps the RTMP stream up. Runs stream-countdown.sh and starts it again
+# Keeps the RTMP stream up. Runs stream-countdown.sh (or, with RTMP_RUNNER=capture,
+# capture-stream.mjs) and starts it again
 # whenever ffmpeg exits (network drop, Castr reset, crash).
 #
 # - Every relaunch recomputes the remaining time, so the countdown stays right.
@@ -66,7 +67,12 @@ while true; do
   trim_log
   started=$(date +%s)
   write_state running
-  bash "$DIR/stream-countdown.sh" &
+  if [[ "${RTMP_RUNNER:-slate}" == "capture" ]]; then
+    # Browser capture of the real /stream page (scripts/capture-stream.mjs).
+    "${NODE_BIN:-node}" "$DIR/capture-stream.mjs" &
+  else
+    bash "$DIR/stream-countdown.sh" &
+  fi
   child=$!
   wait "$child"
   code=$?

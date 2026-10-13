@@ -23,6 +23,8 @@ export type EncoderStatus = {
   rtmpRestarts: number
   /** True when this server re-attached to a stream it found running (e.g. after a restart). */
   rtmpAdopted: boolean
+  /** What the running RTMP stream is publishing: the drawtext slate or a browser capture of /stream. */
+  rtmpSource: "slate" | "capture" | null
   /** How many of this project's supervisors are running; more than 1 needs "Stop all". */
   rtmpOwnProcesses: number
   /** Why the latest run failed to connect, e.g. "Can't connect to ingest (host): End of file". */
