@@ -1,7 +1,7 @@
 import { cookies } from "next/headers"
 import { connection } from "next/server"
 import { StreamClient, type StreamInitial } from "@/components/stream-view"
-import { readServerState } from "@/lib/event-server"
+import { publicState, readServerState } from "@/lib/event-server"
 import { VIEW_COOKIE } from "@/lib/auth"
 import { viewKeyMatches, viewKeyRequired } from "@/lib/view-key"
 
@@ -17,7 +17,7 @@ export default async function StreamPage({ searchParams }: { searchParams: Promi
   const cookieKey = (await cookies()).get(VIEW_COOKIE)?.value
   let initial: StreamInitial | null = null
   if (!viewKeyRequired() || viewKeyMatches(k) || viewKeyMatches(cookieKey)) {
-    const { event, testUntil, pausedAt, stage } = readServerState()
+    const { event, testUntil, pausedAt, stage } = publicState(readServerState())
     initial = { event, testUntil, pausedAt, stage }
   }
   return <StreamClient initial={initial} />

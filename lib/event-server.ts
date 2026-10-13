@@ -1,10 +1,16 @@
 import fs from "node:fs"
 import path from "node:path"
-import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { DATA_DIR } from "@/lib/encoder"
-import { asEventConfig, DEFAULT_EVENT, safeUrl, sanitizeSpeakers, type EventConfig, type SpeakerCard } from "@/lib/event"
+import { asEventConfig, DEFAULT_EVENT, type EventConfig, type SpeakerCard } from "@/lib/event"
+import { DEFAULT_STAGE, parseStage, testClockStale, type StageOptions } from "@/lib/stage"
 
-const EVENT_FILE = path.join(DATA_DIR, "event.json")
+// Read at call time so tests can point STREAM_DATA_DIR at a temp folder.
+function dataDir() {
+  return process.env.STREAM_DATA_DIR || DATA_DIR
+}
+function eventFile() {
+  return path.join(dataDir(), "event.json")
+}
 
 export function readServerEvent(): EventConfig {
   return readServerState().event
@@ -12,130 +18,86 @@ export function readServerEvent(): EventConfig {
 
 export type { SpeakerCard }
 
-export type StageOptions = {
-  checker: number
-  showMeta: boolean
-  showLink: boolean
-  transparent: boolean
-  lineSpacing: number
-  blockGap: number
-  clockScale: number
-  clockText: number
-  logoUrl: string
-  speakers: SpeakerCard[]
-  gallerySeconds: number
-  galleryPause: number
-  galleryOffset: number
-  galleryScale: number
-  endTitle: string
-  endSubtitle: string
-  endDate: string
-  endBody: string
-  endQrUrl: string
-  endButton: string
-  endAt: string
-  forceEnd: boolean
-  holdCountdown: boolean
+export type { StageOptions }
+
+export type ServerState = {
+  event: EventConfig
+  testUntil: number | null
+  pausedAt: number | null
+  /** When the current test clock was set (ms). Null when no test clock is active. */
+  testSetAt: number | null
+  stage: StageOptions
+  /** Bumped on every write; the desk sends it back so stale tabs get a 409. */
+  rev: number
+  /** Set when event.json could not be read: "backup" = restored from event.json.bak, "defaults" = nothing usable. */
+  recovered?: "backup" | "defaults"
 }
 
-const DEFAULT_STAGE: StageOptions = {
-  checker: 6,
-  showMeta: true,
-  showLink: true,
-  transparent: false,
-  lineSpacing: 1.14,
-  blockGap: 1.2,
-  clockScale: 1,
-  clockText: 1,
-  logoUrl: "",
-  speakers: [],
-  gallerySeconds: 4,
-  galleryPause: 6,
-  galleryOffset: -86,
-  galleryScale: 80,
-  endTitle: "Thank you for joining",
-  endSubtitle: "Hyphen Festival 2026",
-  endDate: "Wed, 04 Nov, 2026",
-  endBody: "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.",
-  endQrUrl: "https://linktr.ee/onlinehyphen",
-  endButton: "Watch replay — coming soon",
-  endAt: "16:15",
-  forceEnd: false,
-  holdCountdown: false,
+/** Test clock values must sit within this window around now (rejects garbage like 0 or year 3000). */
+const CLOCK_PAST_MS = 2 * 365 * 24 * 3600_000
+const CLOCK_FUTURE_MS = 400 * 24 * 3600_000
+
+export function validClockValue(value: number, now = Date.now()): boolean {
+  return Number.isFinite(value) && value >= now - CLOCK_PAST_MS && value <= now + CLOCK_FUTURE_MS
 }
 
-function readStage(value: unknown): StageOptions {
-  if (!value || typeof value !== "object") return { ...DEFAULT_STAGE }
-  const record = value as Record<string, unknown>
-  const checker = Number(record.checker)
+function parseFile(file: string): Omit<ServerState, "recovered"> {
+  const raw = fs.readFileSync(file, "utf8")
+  const parsed = JSON.parse(raw) as Record<string, unknown>
+  if (!parsed || typeof parsed !== "object") throw new Error("event.json is not an object")
+  const event = asEventConfig(parsed.event ?? parsed)
+  if (!event) throw new Error("event.json has no valid event")
+  const testUntil = typeof parsed.testUntil === "number" ? parsed.testUntil : null
+  const pausedAt = typeof parsed.pausedAt === "number" ? parsed.pausedAt : null
+  let testSetAt = typeof parsed.testSetAt === "number" ? parsed.testSetAt : null
+  // Files from before testSetAt existed: date the clock by the file's last write.
+  if (testSetAt === null && (testUntil !== null || pausedAt !== null)) testSetAt = fs.statSync(file).mtimeMs
+  if (testUntil === null && pausedAt === null) testSetAt = null
   return {
-    checker: Number.isFinite(checker) ? Math.min(12, Math.max(4, Math.round(checker))) : 6,
-    showMeta: record.showMeta !== false,
-    showLink: record.showLink !== false,
-    transparent: record.transparent === true,
-    lineSpacing: Number.isFinite(Number(record.lineSpacing)) ? Math.min(2.4, Math.max(0.8, Number(record.lineSpacing))) : 1.14,
-    blockGap: Number.isFinite(Number(record.blockGap)) ? Math.min(8, Math.max(0, Number(record.blockGap))) : 1.2,
-    clockScale: clampSize(record.clockScale, CLOCK_SCALE_RANGE),
-    clockText: clampSize(record.clockText, CLOCK_TEXT_RANGE),
-    logoUrl: safeUrl(record.logoUrl, "", { relative: true, dataImage: true }),
-    speakers: sanitizeSpeakers(record.speakers),
-    gallerySeconds: clampSeconds(record.gallerySeconds, 4),
-    galleryPause: clampSeconds(record.galleryPause, 6),
-    galleryOffset: clampOffset(record.galleryOffset),
-    galleryScale: clampScale(record.galleryScale),
-    endTitle: textOr(record.endTitle, "Thank you for joining"),
-    endSubtitle: textOr(record.endSubtitle, "Hyphen Festival 2026"),
-    endDate: textOr(record.endDate, "Wed, 04 Nov, 2026"),
-    endBody: textOr(record.endBody, "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly."),
-    endQrUrl: safeUrl(record.endQrUrl, "https://linktr.ee/onlinehyphen"),
-    endButton: textOr(record.endButton, "Watch replay — coming soon"),
-    endAt: textOr(record.endAt, "16:15"),
-    forceEnd: record.forceEnd === true,
-    holdCountdown: record.holdCountdown === true,
+    event,
+    testUntil,
+    pausedAt,
+    testSetAt,
+    stage: parseStage(parsed.stage),
+    rev: typeof parsed.rev === "number" && Number.isInteger(parsed.rev) ? parsed.rev : 0,
   }
 }
 
-function textOr(value: unknown, fallback: string) {
-  return typeof value === "string" && value.trim() ? value : fallback
+function defaults(): Omit<ServerState, "recovered"> {
+  return { event: { ...DEFAULT_EVENT }, testUntil: null, pausedAt: null, testSetAt: null, stage: { ...DEFAULT_STAGE }, rev: 0 }
 }
 
-function clampScale(value: unknown) {
-  const number = Number(value)
-  if (!Number.isFinite(number)) return 80
-  return Math.min(200, Math.max(40, Math.round(number)))
-}
-
-function clampOffset(value: unknown) {
-  const number = Number(value)
-  if (!Number.isFinite(number)) return -86
-  return Math.min(400, Math.max(-600, Math.round(number)))
-}
-
-function clampSeconds(value: unknown, fallback: number) {
-  const number = Number(value)
-  if (!Number.isFinite(number)) return fallback
-  return Math.min(30, Math.max(2, Math.round(number)))
-}
-
-
-export function readServerState(): { event: EventConfig; testUntil: number | null; pausedAt: number | null; stage: StageOptions } {
+export function readServerState(): ServerState {
+  const file = eventFile()
+  if (!fs.existsSync(file)) return defaults()
   try {
-    const parsed = JSON.parse(fs.readFileSync(EVENT_FILE, "utf8")) as {
-      event?: unknown
-      testUntil?: unknown
-      pausedAt?: unknown
-      stage?: unknown
-    }
-    const event = asEventConfig(parsed.event ?? parsed) ?? { ...DEFAULT_EVENT }
-    return {
-      event,
-      testUntil: typeof parsed.testUntil === "number" ? parsed.testUntil : null,
-      pausedAt: typeof parsed.pausedAt === "number" ? parsed.pausedAt : null,
-      stage: readStage(parsed.stage),
-    }
+    return parseFile(file)
   } catch (error) {
-    console.warn("Could not read event.json, using the default event.", error)
-    return { event: { ...DEFAULT_EVENT }, testUntil: null, pausedAt: null, stage: { ...DEFAULT_STAGE } }
+    console.warn("Could not read event.json; trying event.json.bak.", error)
+  }
+  try {
+    return { ...parseFile(`${file}.bak`), recovered: "backup" }
+  } catch {
+    console.warn("event.json.bak is missing or unreadable too; using the default event.")
+    return { ...defaults(), recovered: "defaults" }
+  }
+}
+
+/** What OBS pages see: a test clock older than 2 hours is dropped so a forgotten rehearsal can't go out live. */
+export function publicState(state: ServerState, now = Date.now()) {
+  const stale = testClockStale(state.testSetAt, now)
+  return {
+    event: state.event,
+    testUntil: stale ? null : state.testUntil,
+    pausedAt: stale ? null : state.pausedAt,
+    stage: state.stage,
+    rev: state.rev,
+  }
+}
+
+export class RevConflict extends Error {
+  constructor(public current: number) {
+    super("The desk was changed in another tab or device.")
   }
 }
 
@@ -144,28 +106,41 @@ export function writeServerEvent(
   testUntil?: number | null,
   pausedAt?: number | null,
   stage?: unknown,
-): EventConfig | null {
+  expectedRev?: number,
+  now = Date.now(),
+): { event: EventConfig; rev: number } | null {
   const event = asEventConfig(value)
   if (!event) return null
-  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.mkdirSync(dataDir(), { recursive: true })
+  const file = eventFile()
   const current = readServerState()
+  if (expectedRev !== undefined && expectedRev !== current.rev) throw new RevConflict(current.rev)
+  const nextUntil = testUntil === undefined ? current.testUntil : testUntil
+  const nextPaused = pausedAt === undefined ? current.pausedAt : pausedAt
+  const clockChanged = nextUntil !== current.testUntil || nextPaused !== current.pausedAt
+  const testSetAt = nextUntil === null && nextPaused === null ? null : clockChanged ? now : current.testSetAt ?? now
+  const rev = current.rev + 1
   const payload = JSON.stringify(
     {
+      rev,
       event,
-      testUntil: testUntil === undefined ? current.testUntil : testUntil,
-      pausedAt: pausedAt === undefined ? current.pausedAt : pausedAt,
-      stage: stage === undefined ? current.stage : readStage(stage),
+      testUntil: nextUntil,
+      pausedAt: nextPaused,
+      testSetAt,
+      stage: stage === undefined ? current.stage : parseStage(stage, current.stage),
     },
     null,
     2,
   )
-  const temporary = `${EVENT_FILE}.tmp`
+  // Keep the last good file as event.json.bak (never overwrite a good backup with a broken file).
+  if (!current.recovered && fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`)
+  const temporary = `${file}.tmp`
   fs.writeFileSync(temporary, payload)
-  fs.renameSync(temporary, EVENT_FILE)
-  return event
+  fs.renameSync(temporary, file)
+  return { event, rev }
 }
 
 /** True once an operator has saved at least once (data/event.json exists). */
 export function hasServerEvent(): boolean {
-  return fs.existsSync(EVENT_FILE)
+  return fs.existsSync(eventFile())
 }

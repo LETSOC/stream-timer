@@ -27,7 +27,7 @@ import { useNow } from "@/lib/use-now"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
-import type { StageOptions } from "@/lib/event-server"
+import type { StageOptions } from "@/lib/stage"
 import { ConfirmButton } from "@/components/confirm-button"
 import {
   buildLocalTestCommand,
@@ -66,13 +66,13 @@ export function OperatorConsole() {
   const [endBody, setEndBody] = useState("The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.")
   const [endQrUrl, setEndQrUrl] = useState("https://linktr.ee/onlinehyphen")
   const [endButton, setEndButton] = useState("Watch replay — coming soon")
-  const [endAt, setEndAt] = useState("16:15")
+  const [endAt, setEndAt] = useState("")
   const [forceEnd, setForceEnd] = useState(false)
   const [holdCountdown, setHoldCountdown] = useState(false)
   const [operator, setOperator] = useOperator()
   // Truthy once the session is confirmed; gates autosave like the old encoder token did.
   const token = operator.operator ? "session" : ""
-  const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error">("idle")
+  const [syncState, setSyncState] = useState<"idle" | "saved" | "local" | "error" | "conflict">("idle")
   const [syncError, setSyncError] = useState("")
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
   const [skewMs, setSkewMs] = useState(0)
@@ -94,6 +94,15 @@ export function OperatorConsole() {
   const goLiveRef = useRef<HTMLButtonElement>(null)
   const resetRef = useRef<HTMLButtonElement>(null)
   const [hydrated, setHydrated] = useState(false)
+  // Server revision this tab last saw; sent with each save so a stale tab gets a 409 instead of overwriting.
+  const revRef = useRef<number | undefined>(undefined)
+  const [recovered, setRecovered] = useState<"backup" | "defaults" | null>(null)
+  // Live mode: test-clock buttons and keyboard shortcuts are locked so nothing rehearsal-only reaches /stream by accident.
+  const [liveMode, setLiveMode] = useSectionOpen("live-mode", false)
+  const liveModeRef = useRef(liveMode)
+  useEffect(() => {
+    liveModeRef.current = liveMode
+  })
   const previewReady = useRef(false)
   const now = useNow()
 
@@ -224,7 +233,9 @@ export function OperatorConsole() {
     }
     void fetch("/api/event", { cache: "no-store" })
       .then((response) => response.json())
-      .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; hasSaved?: boolean }) => {
+      .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; hasSaved?: boolean; rev?: unknown; recovered?: unknown }) => {
+        if (typeof body.rev === "number") revRef.current = body.rev
+        if (body.recovered === "backup" || body.recovered === "defaults") setRecovered(body.recovered)
         const saved = asEventConfig(body.event)
         // data/event.json is the source of truth once it exists; localStorage is only a fallback draft.
         const serverWins = body.hasSaved === true
@@ -282,10 +293,19 @@ export function OperatorConsole() {
         const response = await fetch("/api/event", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: json,
+          body: JSON.stringify({ ...JSON.parse(json), rev: revRef.current }),
         })
         if (handleUnauthorized(response)) return
+        if (response.ok) {
+          const saved = (await response.json().catch(() => null)) as { rev?: number } | null
+          if (typeof saved?.rev === "number") revRef.current = saved.rev
+        }
         if (seq !== saveSeq.current) return
+        if (response.status === 409) {
+          setSyncState("conflict")
+          setSyncError("Changed in another tab or device. Reload to get the latest.")
+          return
+        }
         if (response.ok) {
           setSyncState("saved")
           setSyncError("")
@@ -396,6 +416,7 @@ export function OperatorConsole() {
         setShowHelp(false)
         return
       }
+      if (liveModeRef.current) return // Live mode: no keyboard shortcuts touch /stream
       // Buttons handle Space themselves when focused; only take it when focus is elsewhere.
       if (event.key === " " && target?.tagName !== "BUTTON" && target?.tagName !== "A") {
         event.preventDefault()
@@ -460,6 +481,32 @@ export function OperatorConsole() {
           </div>
         </div>
       </header>
+      {syncState === "conflict" ? (
+        <div role="alert" data-testid="conflict-banner" className="border-b border-[#b42318]/40 bg-[#b42318]/10 px-4 py-3 font-mono text-[13px] text-[#8a1c13] sm:px-6">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3">
+            <span>Changed in another tab or device. This tab is not saving, so it can&apos;t overwrite those changes.</span>
+            <Pill size="sm" onClick={() => window.location.reload()}>Reload latest</Pill>
+          </div>
+        </div>
+      ) : null}
+      {recovered ? (
+        <div role="alert" data-testid="recovered-banner" className="border-b border-[#b45309]/40 bg-[#b45309]/10 px-4 py-3 font-mono text-[13px] text-[#7a3b06] sm:px-6">
+          <div className="mx-auto max-w-[1600px]">
+            {recovered === "backup"
+              ? "data/event.json was unreadable, so the last good copy (event.json.bak) is loaded. Check the event, then any change saves a fresh file."
+              : "data/event.json and its backup were unreadable, so defaults are showing. Re-enter the event before going live."}
+          </div>
+        </div>
+      ) : null}
+      {testUntil !== null || pausedAt ? (
+        <div role="status" data-testid="test-clock-banner" className="border-b border-black bg-[#D9FF43] px-4 py-2 font-mono text-[13px] font-bold text-black sm:px-6">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3">
+            <span className="tracking-[0.12em] uppercase">Test clock active</span>
+            <span className="font-normal">/stream shows the {pausedAt ? "paused" : "test"} clock, not the real countdown. It expires on /stream after 2 hours.</span>
+            <Pill size="sm" onClick={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Clear test clock</Pill>
+          </div>
+        </div>
+      ) : null}
       {!valid ? (
         <div role="alert" className="border-b border-[#ff3c00]/40 bg-[#ff3c00]/10 px-4 py-3 font-mono text-[13px] text-[#a32600] sm:px-6">
           <div className="mx-auto max-w-[1600px]">
@@ -533,7 +580,12 @@ export function OperatorConsole() {
             )}
           </div>
 
-          <Panel title="Transport" pill="Preview test">
+          <Panel title="Transport" pill={liveMode ? "Live · locked" : "Rehearsal"}>
+            <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-2 gap-1 rounded-full bg-black/5 p-1">
+              <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => setLiveMode(false)} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
+              <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => setLiveMode(true)} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
+            </div>
+            {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <div className="flex flex-wrap gap-2">
               {[
                 [15, "15s"],
@@ -541,11 +593,11 @@ export function OperatorConsole() {
                 [1800, "30min"],
                 [3600, "1 hour"],
               ].map(([seconds, label]) => (
-                <Pill key={label} size="sm" onClick={() => void jumpPreview(Number(seconds))}>{label} left</Pill>
+                <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => void jumpPreview(Number(seconds))}>{label} left</Pill>
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Pill ref={pauseRef} aria-keyshortcuts="Space" onClick={() => {
+              <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => {
                 if (pausedAt) {
                   // Resume from the paused value: shift the test clock by the paused duration.
                   const resumeNow = Date.now()
@@ -563,15 +615,15 @@ export function OperatorConsole() {
               }}>
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
-              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
+              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
               <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("live")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
-              <ConfirmButton className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
+              <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
               <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
               <Pill className="whitespace-nowrap" tone="outline" onClick={() => { setForceEnd(false); setHoldCountdown(true) }}>Back to countdown</Pill>
             </div>
             <p className="font-mono text-[12px] leading-5 text-black/70">
-              Pause, play, go live, and restore apply to this preview and /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
+              Pause, play, go live, and restore apply to this preview and the live /stream. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
             </p>
           </Panel>
 
@@ -704,6 +756,7 @@ export function OperatorConsole() {
                     body: JSON.stringify({ mode: "rtmp", rtmpUrl, eventName: name, dateLine, targetUnix, refreshSeconds: 0 }),
                   })
                     .then(async (response) => {
+                      if (handleUnauthorized(response)) return
                       const body = await response.json().catch(() => null)
                       if (!response.ok) {
                         setRtmpState("error")
@@ -723,16 +776,29 @@ export function OperatorConsole() {
                 Start stream
               </Pill>
               <ConfirmButton className={pillClass("danger")} onConfirm={() => {
-                  void fetch("/api/encoder?target=rtmp", { method: "DELETE" }).then(() => {
-                    setRtmpState("idle")
-                    setRtmpLive(false)
-                    setRtmpMessage("Stream stopped.")
-                  })
+                  void fetch("/api/encoder?target=rtmp", { method: "DELETE" })
+                    .then(async (response) => {
+                      if (handleUnauthorized(response)) return
+                      if (!response.ok) {
+                        const body = (await response.json().catch(() => null)) as { error?: string } | null
+                        setRtmpState("error")
+                        setRtmpMessage(body?.error || `Stop failed (server returned ${response.status}). The stream may still be live.`)
+                        return
+                      }
+                      setRtmpState("idle")
+                      setRtmpLive(false)
+                      setRtmpMessage("Stream stopped.")
+                    })
+                    .catch(() => {
+                      setRtmpState("error")
+                      setRtmpMessage("Could not reach the encoder to stop. The stream may still be live.")
+                    })
                 }}
               >
                 Stop stream
               </ConfirmButton>
             </div>
+            {rtmpMessage ? <p role="status" data-testid="rtmp-message" className={`font-mono text-[13px] ${rtmpState === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{rtmpMessage}</p> : null}
             {strayPids.length > 0 ? <p className="font-mono text-[13px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
             <p className="font-mono text-[13px] leading-5 text-black/70">
               Start stream sends 1280×720, 30 fps, H.264 2500 kbps, yuv420p, AAC stereo 128 kbps, silent audio, FLV over RTMP. The local player is the same picture as 2-second HLS segments.
@@ -837,7 +903,7 @@ export function OperatorConsole() {
             ) : null}
           </div>
           <p className="font-mono text-[13px] leading-5 text-black/70">
-            — This is a local draft preview. No data leaves the browser. For OBS, add a Browser Source at 1920×1080 and paste the copied link. Countdown runs off this computer’s clock.
+            — Changes save to this server automatically and go live on /stream within a second. For OBS, add a Browser Source at 1920×1080 and paste the copied link. Countdown runs off this computer’s clock.
             {transparent ? " Transparent background is on: in OBS leave the browser source CSS empty so the page can show through." : ""}
           </p>
           <EncodedPreview eventName={name} dateLine={dateLine} targetUnix={targetUnix} valid={valid} />
@@ -848,7 +914,7 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="Show end card at" htmlFor="end-at"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} /></Field>
+            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
               <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
@@ -1079,8 +1145,10 @@ function CommandBlock({
   )
 }
 
-function SyncBadge({ state, hasToken, error }: { state: "idle" | "saved" | "local" | "error"; hasToken: boolean; error?: string }) {
-  const view = state === "saved"
+function SyncBadge({ state, hasToken, error }: { state: "idle" | "saved" | "local" | "error" | "conflict"; hasToken: boolean; error?: string }) {
+  const view = state === "conflict"
+    ? { label: "Changed elsewhere · reload", tone: "border-[#b42318] bg-[#b42318] text-white", dot: "bg-white" }
+    : state === "saved"
     ? { label: "Saved · /stream in sync", tone: "border-[#128a3e]/30 bg-[#128a3e]/10 text-[#0b5e2a]", dot: "bg-[#128a3e]" }
     : state === "error"
       ? { label: `Save failed · ${error || "server rejected the change"}`, tone: "border-[#d93200] bg-[#d93200] text-white", dot: "bg-white" }

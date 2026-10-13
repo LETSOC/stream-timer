@@ -115,3 +115,10 @@ test("view key: optional in local mode, required in password mode, rotation inva
   assert.equal(view.canView(req(`http://127.0.0.1:43211/api/public/state?k=${key}`)), false)
   assert.equal(fs.statSync(path.join(tmp, "view-key")).mode & 0o777, 0o600)
 })
+
+test("readCookie: malformed escape is ignored, not thrown (E)", async () => {
+  const { readCookie } = await import("@/lib/auth")
+  const request = new Request("http://127.0.0.1/", { headers: { cookie: "st_view=%E0%A4%A; other=1" } })
+  assert.equal(readCookie(request, "st_view"), undefined)
+  assert.equal(readCookie(request, "other"), "1")
+})

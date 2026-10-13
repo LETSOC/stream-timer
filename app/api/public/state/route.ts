@@ -1,6 +1,6 @@
 import { connection } from "next/server"
 import { VIEW_COOKIE } from "@/lib/auth"
-import { readServerState } from "@/lib/event-server"
+import { publicState, readServerState } from "@/lib/event-server"
 import { canView, viewKeyMatches } from "@/lib/view-key"
 
 /**
@@ -10,10 +10,9 @@ import { canView, viewKeyMatches } from "@/lib/view-key"
 export async function GET(request: Request) {
   await connection()
   if (!canView(request)) return Response.json({ error: "View key required. Copy the OBS URL from the desk." }, { status: 401 })
-  const { event, testUntil, pausedAt, stage } = readServerState()
   const key = new URL(request.url).searchParams.get("k")
   const headers: Record<string, string> = { "Cache-Control": "no-store" }
   // Lets the HLS player fetch /media segments (which carry no ?k=) on the same browser.
   if (viewKeyMatches(key)) headers["Set-Cookie"] = `${VIEW_COOKIE}=${key}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
-  return Response.json({ event, testUntil, pausedAt, stage }, { headers })
+  return Response.json(publicState(readServerState()), { headers })
 }
