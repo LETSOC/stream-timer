@@ -40,7 +40,7 @@ const ENCODER_TONE: Record<EncoderStatus["encoderState"], string> = {
   stopped: "bg-black/5 text-black/70",
   starting: "bg-black text-white",
   running: "bg-[#128a3e] text-white",
-  stalled: "bg-[#ff3c00] text-white",
+  stalled: "bg-[#d93200] text-white",
 }
 
 export function EncodedPreview({
@@ -214,7 +214,7 @@ function pill(tone: "solid" | "outline" | "danger") {
   const tones = {
     solid: "bg-black text-white hover:-translate-y-px hover:bg-[#222] hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)]",
     outline: "border border-black bg-white text-black hover:-translate-y-px hover:bg-black hover:text-white",
-    danger: "bg-[#ff3c00] text-white hover:-translate-y-px hover:bg-[#e03600] hover:shadow-[0_4px_12px_rgba(255,60,0,0.3)]",
+    danger: "border-2 border-[#b42318] bg-white text-[#b42318] before:mr-1.5 before:content-['⚠'] hover:-translate-y-px hover:bg-[#b42318] hover:text-white",
   }
   return `inline-flex h-9 items-center justify-center rounded-full px-5 text-[13px] font-medium whitespace-nowrap transition-all duration-150 select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 ${tones[tone]}`
 }

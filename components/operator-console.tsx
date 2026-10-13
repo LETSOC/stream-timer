@@ -84,8 +84,12 @@ export function OperatorConsole() {
   const [safeZone, setSafeZone] = useSectionOpen("aid-safe-zone", false)
   const [thirds, setThirds] = useSectionOpen("aid-thirds", false)
   const [footage, setFootage] = useSectionOpen("aid-footage", false)
-  const [pinPreview, setPinPreview] = useSectionOpen("aid-pin-preview", false)
+  const [pinStored, setPinPreview] = useSectionOpen("aid-pin-preview", null)
+  const wide = useMediaQuery("(min-width: 1400px)")
+  // No saved choice yet: pinned by default on wide desks only, off on phones/laptops.
+  const pinPreview = pinStored ?? wide
   const [showHelp, setShowHelp] = useState(false)
+  const [revealParams, setRevealParams] = useState(false)
   const pauseRef = useRef<HTMLButtonElement>(null)
   const goLiveRef = useRef<HTMLButtonElement>(null)
   const resetRef = useRef<HTMLButtonElement>(null)
@@ -428,7 +432,7 @@ export function OperatorConsole() {
 
   return (
     <div className="min-h-full bg-[#F6F6F3] text-black [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]">
-      <header className="sticky top-0 z-20 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
+      <header className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-mono text-[12px] tracking-[0.16em] text-black/70 uppercase">
@@ -440,7 +444,7 @@ export function OperatorConsole() {
             <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[13px] md:inline-flex">
               <span className="text-black/70">Target</span>
               <span>{valid ? formatClock(target, timeZone) : "—"}</span>
-              <span className={`rounded px-1.5 py-0.5 text-[12px] ${previewRemaining?.done ? "bg-[#ff3c00] text-white" : "bg-[#D9FF43]"}`}>
+              <span className={`rounded px-1.5 py-0.5 text-[12px] ${previewRemaining?.done ? "bg-[#d93200] text-white" : "bg-[#D9FF43]"}`}>
                 {previewRemaining?.done ? "LIVE" : "Armed"}
               </span>
             </span>
@@ -560,7 +564,7 @@ export function OperatorConsole() {
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
               <ConfirmButton ref={resetRef} aria-keyshortcuts="R" className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
-              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("danger")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
+              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("live")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
               <ConfirmButton className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
               <Pill className="whitespace-nowrap" onClick={() => { setForceEnd(true); setHoldCountdown(false) }}>Show end card now</Pill>
@@ -681,7 +685,7 @@ export function OperatorConsole() {
 
           <Panel id="encoder" title="Encoder (FFmpeg)">
             <div className="flex items-center justify-between gap-3">
-              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpPhase === "connected" ? "bg-[#128a3e] text-white" : rtmpPhase === "reconnecting" || rtmpPhase === "starting" ? "bg-[#b45309] text-white" : rtmpPhase === "failed" ? "bg-[#ff3c00] text-white" : rtmpLive && !rtmpReconnecting ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpPhase === "connected" ? "bg-[#128a3e] text-white" : rtmpPhase === "reconnecting" || rtmpPhase === "starting" ? "bg-[#b45309] text-white" : rtmpPhase === "failed" ? "bg-[#d93200] text-white" : rtmpLive && !rtmpReconnecting ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
                 {{ stopped: rtmpLive ? "Stream live" : "Stream off", starting: "Connecting…", connected: "Stream live", reconnecting: "Reconnecting", failed: "Failed" }[rtmpPhase]}
                 {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
@@ -739,31 +743,32 @@ export function OperatorConsole() {
         </section>
 
         <section className="space-y-4 lg:flex-1 lg:overflow-y-auto lg:pr-2 lg:pb-6 [scrollbar-width:thin]">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+              <h2 className="min-w-0 text-[13px] font-black tracking-[0.12em] uppercase">
                 Preview · 16:9 hero · {transparent ? "clear edition" : "black edition"}
               </h2>
-              <span className="rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
+              <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[12px] leading-none font-bold tracking-[0.12em] whitespace-nowrap text-white uppercase">
+                <span aria-hidden className="size-1.5 rounded-full bg-white" />
                 Live update
               </span>
             </div>
-            <span className="rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[12px] text-black/70">
+            <span className="max-w-full rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[12px] leading-4 text-black/70">
               1920×1080 · official logo · {transparent ? "transparent bg" : "black bg"} · {transparent ? "no chrome" : "hero"}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Preview aids (preview only, not sent to OBS)">
-            <span className="font-mono text-[12px] tracking-[0.12em] text-black/70 uppercase">Preview aids</span>
+          <div className="flex flex-wrap items-center gap-2 [&>button]:whitespace-nowrap" role="group" aria-label="Preview aids (preview only, not sent to OBS)">
+            <span className="w-full font-mono text-[12px] tracking-[0.12em] text-black/70 uppercase sm:w-auto">Preview aids</span>
             <Pill size="sm" tone={pinPreview ? "solid" : "outline"} aria-pressed={pinPreview} onClick={() => setPinPreview(!pinPreview)}>Pin preview</Pill>
             <Pill size="sm" tone={trueObs ? "solid" : "outline"} aria-pressed={trueObs} onClick={() => setTrueObs(!trueObs)}>True OBS frame</Pill>
             <Pill size="sm" tone={safeZone ? "solid" : "outline"} aria-pressed={safeZone} onClick={() => setSafeZone(!safeZone)}>Safe zone</Pill>
             <Pill size="sm" tone={thirds ? "solid" : "outline"} aria-pressed={thirds} onClick={() => setThirds(!thirds)}>3×3 grid</Pill>
             <Pill size="sm" tone={footage ? "solid" : "outline"} aria-pressed={footage} disabled={!transparent} title={transparent ? undefined : "Turn on transparent background to preview over footage"} onClick={() => setFootage(!footage)}>Game footage bg</Pill>
           </div>
-          <div data-testid="preview-pin" className={pinPreview ? "lg:sticky lg:top-0 lg:z-10 lg:-mx-1 lg:border-b lg:border-black/15 lg:bg-[#F6F6F3] lg:px-1 lg:pt-1 lg:pb-3 lg:shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)]" : ""}>
+          <div data-testid="preview-pin" data-pinned={pinPreview ? "true" : "false"} className={pinPreview ? "sticky top-0 z-30 -mx-4 border-b border-black/15 bg-[#F6F6F3]/95 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_10px_16px_-12px_rgba(0,0,0,0.35)] backdrop-blur sm:-mx-6 sm:px-6 lg:z-10 lg:-mx-1 lg:px-1 lg:pt-1 lg:pb-3" : ""}>
           <div
             data-testid="preview-frame"
-            className={`relative mx-auto overflow-hidden ${pinPreview ? "lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
+            className={`relative mx-auto overflow-hidden ${pinPreview ? "max-w-[calc(26svh*16/9)] lg:max-w-[calc(35dvh*16/9)]" : ""} ${trueObs ? "" : `rounded-[24px] border shadow-[0_20px_60px_rgba(0,0,0,0.18)] ${previewFlash ? "border-[#ff3c00]" : "border-black/10"}`}`}
             style={
               transparent && footage
                 ? { background: "#111" }
@@ -784,7 +789,7 @@ export function OperatorConsole() {
               </div>
             ) : null}
             {previewFlash ? (
-              <span className="absolute top-3 left-3 z-30 rounded-full bg-[#ff3c00] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
+              <span className="absolute top-3 left-3 z-30 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[12px] font-bold tracking-[0.12em] text-white uppercase">
                 Preview updated
               </span>
             ) : null}
@@ -809,11 +814,16 @@ export function OperatorConsole() {
             )}
           </div>
           </div>
-          <div className="grid items-center gap-3 rounded-2xl border border-black/10 bg-white px-4 py-3 md:grid-cols-[1fr_auto]">
-            <p className="font-mono text-[13px] leading-5 break-all">
-              <span className="text-black/70">Stream params preview: </span>
-              {streamHref}
-            </p>
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 [&>*:first-child]:basis-full xl:[&>*:first-child]:basis-0 xl:[&>*:first-child]:grow">
+            <div className="flex min-w-0 items-center gap-2 font-mono text-[13px] leading-5">
+              <span className="shrink-0 text-black/70">Stream URL</span>
+              <code data-testid="params-line" className="min-w-0 flex-1 truncate rounded-lg bg-[#F6F6F3] px-2 py-1">
+                {revealParams ? streamHref : maskKey(streamHref)}
+              </code>
+              <button type="button" className="shrink-0 underline underline-offset-2" aria-pressed={revealParams} onClick={() => setRevealParams(!revealParams)}>
+                {revealParams ? "Hide" : "Reveal"}
+              </button>
+            </div>
             <Button
               type="button"
               className={pillClass()}
@@ -827,7 +837,7 @@ export function OperatorConsole() {
               className={pillClass("outline")}
               onClick={() => copy("params", `${window.location.origin}${streamHref}`)}
             >
-              {copied === "params" ? "Copied" : "Copy full param URL"}
+              {copied === "params" ? "Copied" : "Copy"}
             </Button>
             {operator.viewKey && !operator.viewKeyFromEnv ? (
               <ConfirmButton className={pillClass("danger")} confirmLabel="Old OBS URLs stop working · confirm" onConfirm={() => void rotateViewKey()}>
@@ -916,11 +926,14 @@ export function OperatorConsole() {
 }
 
 
-function pillClass(tone: "solid" | "outline" | "danger" = "solid", size: "sm" | "md" = "md") {
+function pillClass(tone: "solid" | "outline" | "danger" | "live" = "solid", size: "sm" | "md" = "md") {
   const tones = {
     solid: "bg-black text-white hover:-translate-y-px hover:bg-[#222] hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)]",
     outline: "border border-black bg-white text-black hover:-translate-y-px hover:bg-black hover:text-white",
-    danger: "bg-[#ff3c00] text-white hover:-translate-y-px hover:bg-[#e03600] hover:shadow-[0_4px_12px_rgba(255,60,0,0.3)]",
+    // Go-live / primary action: deep orange, 4.77:1 with white text (brand #ff3c00 stays on /stream only).
+    live: "bg-[#d93200] text-white hover:-translate-y-px hover:bg-[#bf2c00] hover:shadow-[0_4px_12px_rgba(217,50,0,0.3)]",
+    // Destructive: outlined red with a warning glyph so it never looks like Go live.
+    danger: "border-2 border-[#b42318] bg-white text-[#b42318] before:mr-1.5 before:content-['⚠'] hover:-translate-y-px hover:bg-[#b42318] hover:text-white",
   }
   const sizes = {
     sm: "h-8 px-3.5 font-mono text-[13px] tracking-wide",
@@ -934,7 +947,7 @@ function Pill({
   size = "md",
   className = "",
   ...props
-}: React.ComponentProps<"button"> & { tone?: "solid" | "outline" | "danger"; size?: "sm" | "md" }) {
+}: React.ComponentProps<"button"> & { tone?: "solid" | "outline" | "danger" | "live"; size?: "sm" | "md" }) {
   return <button type="button" className={`${pillClass(tone, size)} ${className}`} {...props} />
 }
 
@@ -966,9 +979,9 @@ function setSectionOpen(id: string, open: boolean) {
 }
 
 /** Open/closed state per section, remembered in localStorage. */
-function useSectionOpen(id: string | undefined, defaultOpen: boolean): [boolean, (open: boolean) => void] {
+function useSectionOpen<D extends boolean | null>(id: string | undefined, defaultOpen: D): [boolean | D, (open: boolean) => void] {
   const raw = useSyncExternalStore(subscribeSections, readSections, () => "{}")
-  let open = defaultOpen
+  let open: boolean | D = defaultOpen
   if (id) {
     try {
       const value = (JSON.parse(raw) as Record<string, unknown>)[id]
@@ -1079,16 +1092,36 @@ function SyncBadge({ state, hasToken, error }: { state: "idle" | "saved" | "loca
   const view = state === "saved"
     ? { label: "Saved · /stream in sync", tone: "border-[#128a3e]/30 bg-[#128a3e]/10 text-[#0b5e2a]", dot: "bg-[#128a3e]" }
     : state === "error"
-      ? { label: `Save failed · ${error || "server rejected the change"}`, tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+      ? { label: `Save failed · ${error || "server rejected the change"}`, tone: "border-[#d93200] bg-[#d93200] text-white", dot: "bg-white" }
     : state === "local"
-      ? { label: "Local only · /stream not updated", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+      ? { label: "Local only · /stream not updated", tone: "border-[#d93200] bg-[#d93200] text-white", dot: "bg-white" }
       : hasToken
         ? { label: "Syncing…", tone: "border-black/15 bg-black/5 text-black/75", dot: "bg-black/40" }
-        : { label: "Out of sync · not logged in", tone: "border-[#ff3c00] bg-[#ff3c00] text-white", dot: "bg-white" }
+        : { label: "Out of sync · not logged in", tone: "border-[#d93200] bg-[#d93200] text-white", dot: "bg-white" }
   return (
     <span role="status" aria-live="polite" title={error || undefined} className={`max-w-[42ch] truncate inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[12px] font-bold tracking-[0.08em] uppercase ${view.tone}`}>
       <span className={`size-2 rounded-full ${view.dot}`} aria-hidden />
       {view.label}
     </span>
+  )
+}
+
+/** Shows the shape of the URL without the view key or param values (safe for screen-share). */
+function maskKey(href: string) {
+  const [path, query = ""] = href.split("?")
+  const keys = [...new URLSearchParams(query).keys()]
+  const shown = keys.slice(0, 4).map((k) => (k === "k" ? "k=••••••" : `${k}=…`))
+  return `${path}?${shown.join("&")}${keys.length > 4 ? `&… (+${keys.length - 4})` : ""}`
+}
+
+function useMediaQuery(query: string) {
+  return useSyncExternalStore(
+    (listener) => {
+      const list = window.matchMedia(query)
+      list.addEventListener("change", listener)
+      return () => list.removeEventListener("change", listener)
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
   )
 }
