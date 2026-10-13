@@ -98,6 +98,10 @@ export function OperatorConsole() {
   const [holdMessage, setHoldMessage] = useState("")
   const [holdImage, setHoldImage] = useState("")
   const [holdFit, setHoldFit] = useState<ImageFit>("cover")
+  const [welcomeTitle, setWelcomeTitle] = useState(DEFAULT_STAGE.welcomeTitle)
+  const [welcomeMessage, setWelcomeMessage] = useState("")
+  const [welcomeImage, setWelcomeImage] = useState("")
+  const [welcomeFit, setWelcomeFit] = useState<ImageFit>("cover")
   const [overlay, setOverlay] = useState<Overlay>("none")
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
   // What /stream has for the draft-managed sections (Event, Links, Look, Socials, End/Break/Hold card, Speakers).
@@ -258,7 +262,11 @@ export function OperatorConsole() {
     if (typeof stage.holdMessage === "string") setHoldMessage(stage.holdMessage)
     if (typeof stage.holdImage === "string") setHoldImage(stage.holdImage)
     if (stage.holdFit === "cover" || stage.holdFit === "contain") setHoldFit(stage.holdFit)
-    if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold") setOverlay(stage.overlay)
+    if (typeof stage.welcomeTitle === "string") setWelcomeTitle(stage.welcomeTitle)
+    if (typeof stage.welcomeMessage === "string") setWelcomeMessage(stage.welcomeMessage)
+    if (typeof stage.welcomeImage === "string") setWelcomeImage(stage.welcomeImage)
+    if (stage.welcomeFit === "cover" || stage.welcomeFit === "contain") setWelcomeFit(stage.welcomeFit)
+    if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
   }, [])
 
@@ -307,7 +315,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, overlay, overlayAt }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -415,8 +423,8 @@ export function OperatorConsole() {
   }
 
   /** Live switch for /stream: break, hold, end card or countdown (mutually exclusive). */
-  function showScreen(next: "break" | "hold" | "end" | "countdown") {
-    const nextOverlay: Overlay = next === "break" || next === "hold" ? next : "none"
+  function showScreen(next: "break" | "hold" | "welcome" | "end" | "countdown") {
+    const nextOverlay: Overlay = next === "break" || next === "hold" || next === "welcome" ? next : "none"
     const at = nextOverlay === "none" ? null : nowMs()
     const nextForceEnd = next === "end"
     const nextHold = next === "countdown"
@@ -571,6 +579,7 @@ export function OperatorConsole() {
 
   return (
     <div data-desk-root data-pin-spacer={pinPreview ? "true" : undefined} className={`min-h-dvh bg-[#F6F6F3] text-black ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
+      <BackToTop />
       <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -704,7 +713,7 @@ export function OperatorConsole() {
           </div>
 
           <Panel title="Transport" pill={liveMode ? "Live · locked" : "Rehearsal"}>
-            <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-2 gap-1 rounded-full bg-black/5 p-1">
+            <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1 rounded-full bg-black/5 p-1">
               <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => setLiveMode(false)} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
               <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => setLiveMode(true)} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
             </div>
@@ -719,7 +728,7 @@ export function OperatorConsole() {
                 <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => void jumpPreview(Number(seconds))}>{label} left</Pill>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
               <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => {
                 if (pausedAt) {
                   // Resume from the paused value: shift the test clock by the paused duration.
@@ -742,13 +751,14 @@ export function OperatorConsole() {
               <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("live")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
-              <Pill className="whitespace-nowrap" onClick={() => showScreen("end")}>Show end card now</Pill>
-              <Pill className="whitespace-nowrap" tone="outline" data-testid="back-to-countdown" onClick={() => showScreen("countdown")}>Back to countdown</Pill>
+              <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
+              <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
               <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
               <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
+              <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
             </div>
             <p className="font-mono text-[12px] leading-5 text-black/70">
-              Pause, play, go live, restore and the break/hold/end card buttons go to the live /stream straight away. On /stream a break or hold card beats the end card, which beats the countdown. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
+              Pause, play, go live, restore and the break/hold/welcome/end card buttons go to the live /stream straight away. On /stream a break, hold or welcome card beats the end card, which beats the countdown. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
             </p>
           </Panel>
 
@@ -757,7 +767,7 @@ export function OperatorConsole() {
             <Field label="Session title" htmlFor="name">
               <GrowingText id="name" value={name} onChange={(value) => updateEvent({ name: value })} />
             </Field>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
               <Field label="Date" htmlFor="date">
                 <Input id="date" type="date" value={date} onChange={(event) => updateEvent({ date: event.target.value })} />
               </Field>
@@ -769,7 +779,7 @@ export function OperatorConsole() {
                 </select>
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
               <Field label="Start time" htmlFor="time">
                 <Input id="time" type="time" value={time} onChange={(event) => updateEvent({ time: event.target.value })} />
               </Field>
@@ -1018,6 +1028,17 @@ export function OperatorConsole() {
                 : { background: "#000" }
             }
           >
+            {pinPreview ? (
+              <button
+                type="button"
+                data-testid="unpin-preview"
+                aria-label="Unpin preview"
+                onClick={() => setPinPreview(false)}
+                className="absolute top-1.5 right-1.5 z-30 inline-flex size-11 items-center justify-center rounded-full border border-white/40 bg-black/70 text-[22px] leading-none font-bold text-white shadow-lg backdrop-blur hover:bg-black/85 focus-visible:ring-2 focus-visible:ring-[#ff3c00] focus-visible:outline-none"
+              >
+                <span aria-hidden>×</span>
+              </button>
+            ) : null}
             {transparent && footage ? (
               <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center blur-md brightness-75" style={{ backgroundImage: "url(/brand/hero-bg.png)" }} />
             ) : null}
@@ -1039,13 +1060,13 @@ export function OperatorConsole() {
                 Preview updated
               </span>
             ) : null}
-            {previewScreen === "break" || previewScreen === "hold" ? (
+            {previewScreen === "break" || previewScreen === "hold" || previewScreen === "welcome" ? (
               <OverlayCard
                 kind={previewScreen}
-                title={previewScreen === "break" ? breakTitle : holdTitle}
-                message={previewScreen === "break" ? breakMessage : holdMessage}
-                image={previewScreen === "break" ? breakImage : holdImage}
-                fit={previewScreen === "break" ? breakFit : holdFit}
+                title={previewScreen === "break" ? breakTitle : previewScreen === "welcome" ? welcomeTitle : holdTitle}
+                message={previewScreen === "break" ? breakMessage : previewScreen === "welcome" ? welcomeMessage : holdMessage}
+                image={previewScreen === "break" ? breakImage : previewScreen === "welcome" ? welcomeImage : holdImage}
+                fit={previewScreen === "break" ? breakFit : previewScreen === "welcome" ? welcomeFit : holdFit}
                 since={overlayAt}
                 clock={now}
               />
@@ -1108,8 +1129,8 @@ export function OperatorConsole() {
             <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <Pill className="whitespace-nowrap" onClick={() => showScreen("end")}>Show end card now</Pill>
-              <Pill className="whitespace-nowrap" tone="outline" data-testid="back-to-countdown" onClick={() => showScreen("countdown")}>Back to countdown</Pill>
+              <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
+              <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
@@ -1147,6 +1168,26 @@ export function OperatorConsole() {
                 </label>
                 {holdImage ? <Pill size="sm" tone="outline" onClick={() => setHoldImage("")}>Remove image</Pill> : null}
                 <select aria-label="Image fit" value={holdFit} onChange={(event) => setHoldFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
+                  <option value="cover">Fill frame (cover)</option>
+                  <option value="contain">Fit inside (contain)</option>
+                </select>
+              </div>
+            </Field>
+          </Panel>
+          <Panel id="welcome-card" title="Welcome back card" defaultOpen={false} dirty={drafts.isDirty("welcomeCard")} pill={overlay === "welcome" ? "On air" : undefined}>
+            {draftBar("welcomeCard")}
+            <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show welcome card. Edits here are a draft until you Save.</p>
+            <Field label="Title" htmlFor="welcome-title"><GrowingText id="welcome-title" value={welcomeTitle} onChange={setWelcomeTitle} /></Field>
+            <Field label="Message (optional)" htmlFor="welcome-message"><GrowingText id="welcome-message" value={welcomeMessage} onChange={setWelcomeMessage} /></Field>
+            <Field label="Image (optional): URL or upload" htmlFor="welcome-image">
+              <GrowingText id="welcome-image" value={welcomeImage} onChange={setWelcomeImage} />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label className={`${pillClass("outline", "sm")} cursor-pointer`}>
+                  Upload image
+                  <input data-testid="welcome-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setWelcomeImage); event.target.value = "" }} />
+                </label>
+                {welcomeImage ? <Pill size="sm" tone="outline" onClick={() => setWelcomeImage("")}>Remove image</Pill> : null}
+                <select aria-label="Image fit" value={welcomeFit} onChange={(event) => setWelcomeFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
                   <option value="cover">Fill frame (cover)</option>
                   <option value="contain">Fit inside (contain)</option>
                 </select>
@@ -1351,7 +1392,7 @@ function Field({
   children: ReactNode
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 space-y-1.5">
       <Label htmlFor={htmlFor} className="font-mono text-[12px] tracking-[0.14em] text-black/70 uppercase">{label}</Label>
       {children}
     </div>
@@ -1437,4 +1478,31 @@ function useParsedJson<T>(json: string): T {
 /** Click-time clock for event handlers. */
 function nowMs() {
   return Date.now()
+}
+
+/** Floating "back to top" once you're well down the page; clear of Safari's toolbar and the home bar. */
+function BackToTop() {
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    const update = () => setShow(window.scrollY > Math.max(600, window.innerHeight * 1.2))
+    update()
+    window.addEventListener("scroll", update, { passive: true })
+    window.addEventListener("resize", update)
+    return () => {
+      window.removeEventListener("scroll", update)
+      window.removeEventListener("resize", update)
+    }
+  }, [])
+  if (!show) return null
+  return (
+    <button
+      type="button"
+      data-testid="back-to-top"
+      aria-label="Back to top"
+      onClick={() => window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })}
+      className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(1rem+env(safe-area-inset-bottom))] z-50 inline-flex h-12 items-center gap-1.5 rounded-full bg-black px-4 font-mono text-[13px] font-bold tracking-[0.1em] text-white uppercase shadow-[0_8px_24px_rgba(0,0,0,0.3)] hover:bg-black/85 focus-visible:ring-2 focus-visible:ring-[#ff3c00] focus-visible:outline-none"
+    >
+      <span aria-hidden>↑</span> Top
+    </button>
+  )
 }

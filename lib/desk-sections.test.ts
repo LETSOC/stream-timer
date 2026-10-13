@@ -76,3 +76,12 @@ test("uploads: magic-byte check, size cap, content-addressed name", () => {
   const big = saveUpload(new Uint8Array(5_000_001))
   assert.ok(!big.ok && big.status === 413)
 })
+
+test("welcome back card: parsed, defaulted, beats end card", () => {
+  const s = parseStage({ overlay: "welcome", welcomeFit: "contain", welcomeImage: "javascript:x" })
+  assert.equal(s.overlay, "welcome")
+  assert.equal(s.welcomeTitle, "Welcome back")
+  assert.equal(s.welcomeFit, "contain")
+  assert.equal(s.welcomeImage, "")
+  assert.equal(stageScreen({ overlay: "welcome", forceEnd: true, holdCountdown: false }, true), "welcome")
+})

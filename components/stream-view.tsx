@@ -137,13 +137,13 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
 
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
-      {screen === "break" || screen === "hold" ? (
+      {screen === "break" || screen === "hold" || screen === "welcome" ? (
         <OverlayCard
           kind={screen}
-          title={screen === "break" ? stage.breakTitle : stage.holdTitle}
-          message={screen === "break" ? stage.breakMessage : stage.holdMessage}
-          image={screen === "break" ? stage.breakImage : stage.holdImage}
-          fit={screen === "break" ? stage.breakFit : stage.holdFit}
+          title={screen === "break" ? stage.breakTitle : screen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
+          message={screen === "break" ? stage.breakMessage : screen === "welcome" ? stage.welcomeMessage : stage.holdMessage}
+          image={screen === "break" ? stage.breakImage : screen === "welcome" ? stage.welcomeImage : stage.holdImage}
+          fit={screen === "break" ? stage.breakFit : screen === "welcome" ? stage.welcomeFit : stage.holdFit}
           since={stage.overlayAt}
           clock={now}
           className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"

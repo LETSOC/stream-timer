@@ -39,13 +39,17 @@ export type StageOptions = {
   holdMessage: string
   holdImage: string
   holdFit: ImageFit
+  welcomeTitle: string
+  welcomeMessage: string
+  welcomeImage: string
+  welcomeFit: ImageFit
   overlay: Overlay
   /** When the current overlay went up (ms), for the "on break" timer. */
   overlayAt: number | null
 }
 
 export type ImageFit = "cover" | "contain"
-export type Overlay = "none" | "break" | "hold"
+export type Overlay = "none" | "break" | "hold" | "welcome"
 
 export const DEFAULT_STAGE: StageOptions = {
   checker: 6,
@@ -79,6 +83,10 @@ export const DEFAULT_STAGE: StageOptions = {
   holdMessage: "",
   holdImage: "",
   holdFit: "cover",
+  welcomeTitle: "Welcome back",
+  welcomeMessage: "",
+  welcomeImage: "",
+  welcomeFit: "cover",
   overlay: "none",
   overlayAt: null,
 }
@@ -160,7 +168,11 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     holdMessage: pick("holdMessage", (v) => (typeof v === "string" ? v.slice(0, BODY_MAX) : "")),
     holdImage: pick("holdImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
     holdFit: pick("holdFit", (v) => (v === "contain" ? "contain" : "cover")),
-    overlay: pick("overlay", (v) => (v === "break" || v === "hold" ? v : "none")),
+    welcomeTitle: pick("welcomeTitle", (v) => text(v, DEFAULT_STAGE.welcomeTitle)),
+    welcomeMessage: pick("welcomeMessage", (v) => (typeof v === "string" ? v.slice(0, BODY_MAX) : "")),
+    welcomeImage: pick("welcomeImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
+    welcomeFit: pick("welcomeFit", (v) => (v === "contain" ? "contain" : "cover")),
+    overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" ? v : "none")),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
   }
 }
@@ -188,7 +200,7 @@ export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[
  * What /stream shows, in order of precedence:
  * break/hold overlay  >  end card (forced, or past the end time unless held)  >  countdown.
  */
-export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown">, pastEnd: boolean): "break" | "hold" | "end" | "countdown" {
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown">, pastEnd: boolean): "break" | "hold" | "welcome" | "end" | "countdown" {
   if (stage.overlay !== "none") return stage.overlay
   if (stage.forceEnd || (!stage.holdCountdown && pastEnd)) return "end"
   return "countdown"
