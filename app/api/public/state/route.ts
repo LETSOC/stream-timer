@@ -14,5 +14,5 @@ export async function GET(request: Request) {
   const headers: Record<string, string> = { "Cache-Control": "no-store" }
   // Lets the HLS player fetch /media segments (which carry no ?k=) on the same browser.
   if (viewKeyMatches(key)) headers["Set-Cookie"] = `${VIEW_COOKIE}=${key}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
-  return Response.json(publicState(readServerState()), { headers })
+  return Response.json({ ...publicState(readServerState()), build: process.env.APP_BUILD ?? null }, { headers })
 }

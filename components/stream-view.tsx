@@ -14,6 +14,22 @@ import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
+/**
+ * The server was rebuilt since this tab loaded: reload so OBS runs the new code
+ * (old code silently drops anything it doesn't know, like a new card). At most once a minute.
+ */
+function reloadIfRebuilt(serverBuild: unknown): boolean {
+  const mine = process.env.APP_BUILD
+  if (typeof serverBuild !== "string" || !mine || serverBuild === mine) return false
+  try {
+    const last = Number(sessionStorage.getItem("stream-reload-at") ?? 0)
+    if (Date.now() - last < 60_000) return false
+    sessionStorage.setItem("stream-reload-at", String(Date.now()))
+  } catch { /* storage blocked: still reload */ }
+  window.location.reload()
+  return true
+}
+
 export type StreamInitial = { event: EventConfig; testUntil: number | null; pausedAt: number | null; stage: Partial<Record<keyof StageOptions, unknown>> }
 
 type Stage = StageOptions
@@ -73,9 +89,10 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
+          if (reloadIfRebuilt(body.build)) return
           if (!hasOverrides && next) setServerEvent(next)
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
