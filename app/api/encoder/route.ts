@@ -39,8 +39,8 @@ export async function POST(request: Request) {
   const record = body as { replace?: boolean; restart?: boolean; mode?: string; rtmpUrl?: string }
   if (record.mode === "rtmp") {
     const result = await startRtmpStream(input, typeof record.rtmpUrl === "string" ? record.rtmpUrl : "")
-    if (!result.ok) return Response.json({ error: result.error }, { status: result.status })
-    return Response.json(readStatus())
+    if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
+    return Response.json({ ...readStatus(), note: result.note ?? null })
   }
   const result =
     record.replace || record.restart ? await restartEncoder(input) : await startEncoder(input)
@@ -52,7 +52,12 @@ export async function DELETE(request: Request) {
   await connection()
   const denied = authorizeMutation(request)
   if (denied) return denied
+  if (new URL(request.url).searchParams.get("target") === "rtmp") {
+    const result = await stopRtmpStream()
+    if (!result.ok) return Response.json({ ...readStatus(), error: result.error }, { status: result.status })
+    await stopEncoder()
+    return Response.json({ ...readStatus(), note: result.note ?? null })
+  }
   await stopEncoder()
-  if (new URL(request.url).searchParams.get("target") === "rtmp") await stopRtmpStream()
   return Response.json(readStatus())
 }

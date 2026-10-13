@@ -26,6 +26,8 @@ const emptyStatus: EncoderStatus = {
   rtmpRunning: false,
   rtmpReconnecting: false,
   rtmpRestarts: 0,
+  rtmpConnectError: null,
+  rtmpFailure: null,
   rtmpLogTail: "",
   strayPublishers: [],
 };

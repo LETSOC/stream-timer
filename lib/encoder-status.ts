@@ -21,6 +21,10 @@ export type EncoderStatus = {
   rtmpReconnecting: boolean
   /** How many times the supervisor has relaunched ffmpeg since Start stream. */
   rtmpRestarts: number
+  /** Why the latest run failed to connect, e.g. "Can't connect to ingest (host): End of file". */
+  rtmpConnectError: string | null
+  /** Last give-up reason after the stream stopped (bad URL, too many quick failures). */
+  rtmpFailure: string | null
   rtmpLogTail: string
   /** Other ffmpeg processes publishing over RTMP that this app did not start. */
   strayPublishers: { pid: number; command: string }[]

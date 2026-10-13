@@ -43,6 +43,11 @@ export function OperatorConsole() {
   const [rtmpPhase, setRtmpPhase] = useState<"stopped" | "starting" | "connected" | "reconnecting" | "failed">("stopped")
   const [rtmpReconnecting, setRtmpReconnecting] = useState(false)
   const [rtmpRestarts, setRtmpRestarts] = useState(0)
+  // In-flight Start/Stop request: buttons are locked and clicks ignored until the server answers.
+  const [rtmpBusy, setRtmpBusy] = useState<"starting" | "stopping" | null>(null)
+  const rtmpBusyRef = useRef<"starting" | "stopping" | null>(null)
+  const [rtmpConnectError, setRtmpConnectError] = useState<string | null>(null)
+  const [rtmpFailure, setRtmpFailure] = useState<string | null>(null)
   const [strayPids, setStrayPids] = useState<number[]>([])
   const [rtmpState, setRtmpState] = useState<"idle" | "live" | "error">("idle")
   const [rtmpMessage, setRtmpMessage] = useState("")
@@ -171,8 +176,10 @@ export function OperatorConsole() {
     const load = () => {
       void fetch("/api/encoder", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[] }) => {
+        .then((body: { rtmpRunning?: boolean; rtmpReconnecting?: boolean; rtmpRestarts?: number; rtmpState?: typeof rtmpPhase; strayPublishers?: { pid: number }[]; rtmpConnectError?: string | null; rtmpFailure?: string | null }) => {
           if (cancelled) return
+          setRtmpConnectError(typeof body.rtmpConnectError === "string" ? body.rtmpConnectError : null)
+          setRtmpFailure(typeof body.rtmpFailure === "string" ? body.rtmpFailure : null)
           if (body.rtmpState) setRtmpPhase(body.rtmpState)
           setRtmpLive(body.rtmpRunning === true)
           setRtmpReconnecting(body.rtmpReconnecting === true)
@@ -777,7 +784,7 @@ export function OperatorConsole() {
             <div className="flex items-center justify-between gap-3">
               <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${rtmpPhase === "connected" ? "bg-[#128a3e] text-white" : rtmpPhase === "reconnecting" || rtmpPhase === "starting" ? "bg-[#b45309] text-white" : rtmpPhase === "failed" ? "bg-[#d93200] text-white" : rtmpLive && !rtmpReconnecting ? "bg-[#128a3e] text-white" : "bg-black/5 text-black/70"}`}>
                 <span className={`size-1.5 rounded-full ${rtmpLive ? "animate-pulse bg-white" : "bg-black/30"}`} />
-                {{ stopped: rtmpLive ? "Stream live" : "Stream off", starting: "Connecting…", connected: "Stream live", reconnecting: "Reconnecting", failed: "Failed" }[rtmpPhase]}
+                {rtmpBusy === "starting" ? "Starting…" : rtmpBusy === "stopping" ? "Stopping…" : rtmpConnectError && rtmpLive && rtmpPhase !== "connected" ? "Can't connect" : { stopped: rtmpLive ? "Stream live" : "Stream off", starting: "Connecting…", connected: "Stream live", reconnecting: "Reconnecting", failed: "Failed" }[rtmpPhase]}
                 {rtmpRestarts > 0 ? ` · ${rtmpRestarts}` : ""}
               </span>
             </div>
@@ -785,9 +792,12 @@ export function OperatorConsole() {
               <Input id="rtmp" type="password" autoComplete="off" placeholder="rtmp://uk.castr.io/static/…?password=…" value={rtmpUrl} onChange={(event) => setRtmpUrl(event.target.value)} />
             </Field>
             <div className="flex gap-2">
-              <Pill disabled={!valid || rtmpUrl.trim().length === 0} onClick={() => {
+              <Pill data-testid="rtmp-start" disabled={!valid || rtmpUrl.trim().length === 0 || rtmpBusy !== null || rtmpLive} aria-busy={rtmpBusy === "starting"} onClick={() => {
+                  if (rtmpBusyRef.current) return // ignore clicks while a request is in flight
+                  rtmpBusyRef.current = "starting"
+                  setRtmpBusy("starting")
                   setRtmpState("idle")
-                  setRtmpMessage("")
+                  setRtmpMessage("Connecting to the ingest server…")
                   void fetch("/api/encoder", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -795,25 +805,34 @@ export function OperatorConsole() {
                   })
                     .then(async (response) => {
                       if (handleUnauthorized(response)) return
-                      const body = await response.json().catch(() => null)
+                      const body = (await response.json().catch(() => null)) as { error?: string; note?: string | null; rtmpRunning?: boolean; rtmpState?: typeof rtmpPhase } | null
+                      if (body?.rtmpState) setRtmpPhase(body.rtmpState)
+                      setRtmpLive(body?.rtmpRunning === true)
                       if (!response.ok) {
                         setRtmpState("error")
                         setRtmpMessage(body?.error || "The stream did not start.")
                         return
                       }
                       setRtmpState("live")
-                      setRtmpLive(true)
-                      setRtmpMessage("Sending to the pasted RTMP URL.")
+                      setRtmpMessage(body?.note || (body?.rtmpState === "connected" ? "Connected. Sending to the pasted RTMP URL." : "Started; still connecting. Watch the status above."))
                     })
                     .catch(() => {
                       setRtmpState("error")
                       setRtmpMessage("The desk could not reach the encoder.")
                     })
+                    .finally(() => {
+                      rtmpBusyRef.current = null
+                      setRtmpBusy(null)
+                    })
                 }}
               >
-                Start stream
+                {rtmpBusy === "starting" ? "Starting…" : "Start stream"}
               </Pill>
-              <ConfirmButton className={pillClass("danger")} onConfirm={() => {
+              <ConfirmButton data-testid="rtmp-stop" className={pillClass("danger")} disabled={rtmpBusy !== null || !rtmpLive} confirmLabel="Stop the live stream? · confirm" onConfirm={() => {
+                  if (rtmpBusyRef.current) return
+                  rtmpBusyRef.current = "stopping"
+                  setRtmpBusy("stopping")
+                  setRtmpMessage("Stopping…")
                   void fetch("/api/encoder?target=rtmp", { method: "DELETE" })
                     .then(async (response) => {
                       if (handleUnauthorized(response)) return
@@ -823,19 +842,35 @@ export function OperatorConsole() {
                         setRtmpMessage(body?.error || `Stop failed (server returned ${response.status}). The stream may still be live.`)
                         return
                       }
+                      const body = (await response.json().catch(() => null)) as { note?: string | null; rtmpRunning?: boolean } | null
                       setRtmpState("idle")
-                      setRtmpLive(false)
-                      setRtmpMessage("Stream stopped.")
+                      setRtmpLive(body?.rtmpRunning === true)
+                      setRtmpPhase("stopped")
+                      setRtmpMessage(body?.note || "Stream stopped.")
                     })
                     .catch(() => {
                       setRtmpState("error")
                       setRtmpMessage("Could not reach the encoder to stop. The stream may still be live.")
                     })
+                    .finally(() => {
+                      rtmpBusyRef.current = null
+                      setRtmpBusy(null)
+                    })
                 }}
               >
-                Stop stream
+                {rtmpBusy === "stopping" ? "Stopping…" : "Stop stream"}
               </ConfirmButton>
             </div>
+            {rtmpConnectError && rtmpLive && rtmpPhase !== "connected" ? (
+              <p role="alert" data-testid="rtmp-connect-error" className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">
+                {rtmpConnectError}{rtmpRestarts > 0 ? ` · retrying (${rtmpRestarts})` : ""}. Not live yet.
+              </p>
+            ) : null}
+            {rtmpFailure && !rtmpLive ? (
+              <p role="alert" data-testid="rtmp-failure" className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">
+                Stream failed: {rtmpFailure.split("\n").filter(Boolean).slice(-3).join(" · ").slice(0, 400)}
+              </p>
+            ) : null}
             {rtmpMessage ? <p role="status" data-testid="rtmp-message" className={`font-mono text-[13px] ${rtmpState === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{rtmpMessage}</p> : null}
             {strayPids.length > 0 ? <p className="font-mono text-[13px] text-red-600">Another ffmpeg is publishing outside this desk. PID {strayPids.join(", ")}. Stop that Terminal process, or the old picture stays on the air.</p> : null}
             <p className="font-mono text-[13px] leading-5 text-black/70">
