@@ -136,6 +136,31 @@ else
 fi
 echo "Mode:         $MODE"
 
+# Stream audio (lib/audio-bed.ts writes $AUDIO_ARGS_FILE: one ffmpeg arg per line, plus
+# "@requires <file>" and "@filter <audio filter>" lines). Any required file missing → silence.
+audio_in=(-f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000")
+audio_af="aresample=48000:async=1000:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+if [[ -n "${AUDIO_ARGS_FILE:-}" && -f "${AUDIO_ARGS_FILE:-}" ]]; then
+  audio_ok=1
+  audio_tmp=()
+  audio_tmp_af=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "@requires "*) [[ -f "${line#@requires }" ]] || audio_ok=0 ;;
+      "@filter "*) audio_tmp_af="${line#@filter }" ;;
+      "") ;;
+      *) audio_tmp+=("$line") ;;
+    esac
+  done < "$AUDIO_ARGS_FILE"
+  if (( audio_ok )) && (( ${#audio_tmp[@]} > 0 )); then
+    audio_in=("${audio_tmp[@]}")
+    [[ -n "$audio_tmp_af" ]] && audio_af="$audio_tmp_af"
+  else
+    echo "[audio] audio bed file missing; streaming silence"
+  fi
+fi
+echo "Audio:        ${audio_in[*]: -1}"
+
 if [[ -f "$LIVE_SLATE" ]]; then
   common_input=(
     -hide_banner
@@ -143,14 +168,15 @@ if [[ -f "$LIVE_SLATE" ]]; then
     -stats_period 5
     -re
     -loop 1 -framerate "$FPS" -i "$SLATE"
-    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
+    "${audio_in[@]}"
     -loop 1 -framerate "$FPS" -i "$LIVE_SLATE"
     -filter_complex "[0:v]${VF}[counted];[counted][2:v]overlay=enable='gte(t,${remaining})'[v]"
     -map "[v]"
     -map 1:a:0
     -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -nal-hrd cbr
     -g $((FPS * 2)) -keyint_min $((FPS * 2)) -sc_threshold 0 -pix_fmt yuv420p
-    -c:a aac -b:a 128k -ar 44100
+    -af "$audio_af"
+    -c:a aac -b:a 128k -ar 48000 -ac 2
   )
 else
   common_input=(
@@ -159,13 +185,14 @@ else
     -stats_period 5
     -re
     -loop 1 -framerate "$FPS" -i "$SLATE"
-    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100"
+    "${audio_in[@]}"
     -vf "$VF"
     -map 0:v:0
     -map 1:a:0
     -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -nal-hrd cbr
     -g $((FPS * 2)) -keyint_min $((FPS * 2)) -sc_threshold 0 -pix_fmt yuv420p
-    -c:a aac -b:a 128k -ar 44100
+    -af "$audio_af"
+    -c:a aac -b:a 128k -ar 48000 -ac 2
   )
 fi
 

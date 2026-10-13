@@ -4,7 +4,7 @@
 // Frames come from the Chrome DevTools screencast (Page.startScreencast), which pushes a JPEG
 // whenever the page repaints. A fixed-rate timer writes the latest frame into ffmpeg's
 // image2pipe at CAPTURE_FPS, so the output is constant frame rate even when the page is still.
-// A silent stereo track (anullsrc) is added because Castr/Restream expect audio.
+// Audio: AUDIO_ARGS_FILE (lib/audio-bed.ts: silence, tone or a looped bed); silence if missing.
 //
 // Env: CAPTURE_URL (http://127.0.0.1:PORT/stream?k=VIEWKEY), RTMP_URL, CAPTURE_SIZE (1280x720 |
 // 1920x1080), CAPTURE_FPS (default 30), CAPTURE_BITRATE (kbps; default 2500 at 720p, 4500 at 1080p),
@@ -38,6 +38,20 @@ function pickEncoder() {
   return probe.status === 0 ? "h264_videotoolbox" : "libx264"
 }
 const encoder = pickEncoder()
+
+// Stream audio: one ffmpeg arg per line plus "@requires <file>" / "@filter <af>" lines.
+let audioIn = ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+let audioAf = "aresample=48000:async=1000:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+if (process.env.AUDIO_ARGS_FILE) {
+  try {
+    const lines = fs.readFileSync(process.env.AUDIO_ARGS_FILE, "utf8").split("\n").filter(Boolean)
+    const missing = lines.filter((l) => l.startsWith("@requires ") && !fs.existsSync(l.slice(10)))
+    const args = lines.filter((l) => !l.startsWith("@"))
+    const af = lines.find((l) => l.startsWith("@filter "))?.slice(8)
+    if (missing.length === 0 && args.length) { audioIn = args; if (af) audioAf = af }
+    else log("[audio] audio bed file missing; streaming silence")
+  } catch { log("[audio] audio settings unreadable; streaming silence") }
+}
 // Keyframe every 2s (YouTube/Castr want ≤ 2s), CBR-ish: maxrate = bitrate, 2s buffer.
 const gop = String(fps * 2)
 const videoArgs = encoder === "h264_videotoolbox"
@@ -119,11 +133,11 @@ latest = await page.screenshot({ type: "jpeg", quality: 85 })
 ffmpeg = spawn(ffmpegBin, [
   "-hide_banner", "-loglevel", "info", "-stats_period", "2",
   "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "pipe:0",
-  "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+  ...audioIn,
   "-map", "0:v", "-map", "1:a",
   "-vf", `scale=${width}:${height}:flags=bicubic,format=yuv420p`,
   ...videoArgs, "-r", String(fps),
-  "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+  "-af", audioAf, "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
   "-f", "flv", "-flvflags", "no_duration_filesize", rtmpUrl,
 ], { stdio: ["pipe", "inherit", "pipe"], env: childEnv })
 ffmpeg.stdin.on("error", () => undefined)

@@ -1052,6 +1052,7 @@ export function OperatorConsole() {
                 )
               })}
               <RelayCard dests={dests.items} />
+              <AudioCard />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
               <div className="space-y-2">
@@ -1699,7 +1700,7 @@ function hostOf(url: string, fallback: string): string {
 
 type RtmpChannelId = "slate" | "capture"
 type RtmpPhase = "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
-type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; connectError: string | null; failure: string | null }
+type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; audio?: { mode: "silent" | "tone" | "bed"; warning: string | null; pending: boolean } | null; connectError: string | null; failure: string | null }
 const STOPPED_CHANNEL: RtmpChannelView = { running: false, state: "stopped", reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null }
 
 /** One independent RTMP output (Slate or Browser capture): its own destination, Start/Stop, status and messages. */
@@ -1834,6 +1835,8 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
       </div>
       {live && status.relay ? <p data-testid={tid("via-relay")} className="font-mono text-[12px] text-black/70">Publishing to relay /{channel}{status.size ? ` · ${status.size}` : ""}. Forwards are set in the Relay card.</p> : live && status.host ? <p className="font-mono text-[12px] text-black/70">Sending to {status.host}{status.size ? ` · ${status.size}` : ""}</p> : null}
       {live && status.health ? <SourceHealthLine channel={channel} health={status.health} /> : null}
+      {live && status.audio ? <p data-testid={tid("audio")} className="font-mono text-[12px] text-black/70">Audio: {status.audio.mode === "bed" ? "audio bed" : status.audio.mode}{status.audio.pending ? <span data-testid={tid("audio-pending")} className="ml-2 rounded-full bg-[#b45309] px-2 py-0.5 text-[11px] font-bold text-white uppercase">Restart to apply new audio</span> : null}</p> : null}
+      {live && status.audio?.warning ? <p role="alert" data-testid={tid("audio-warning")} className="font-mono text-[12px] font-bold text-[#8a4b06]">{status.audio.warning}</p> : null}
       {live && status.health && !status.relay ? <DiagnosisLine testid={tid("diagnosis")} value={diagnose({ source: { label: label, health: status.health }, forwards: [], totalKbps: status.health.kbps })} /> : null}
       {sameAsOther && !live ? <p role="alert" data-testid={tid("same-dest")} className="font-mono text-[12px] font-bold text-[#b42318]">The other channel is already live on this destination. One stream key takes one publisher; choose a different destination.</p> : null}
       <div className="flex gap-2">
@@ -1989,5 +1992,164 @@ function DiagnosisLine({ value, testid }: { value: { level: Level; text: string 
       <span className={`mt-1 size-2 shrink-0 rounded-full ${LEVEL_DOT[value.level]}`} />
       <span>{value.text}</span>
     </p>
+  )
+}
+
+type AudioModeView = "silent" | "tone" | "bed"
+type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number }
+type AudioFileView = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string }
+type AudioSettingsView = { rev: number; channels: Record<RtmpChannelId, AudioConfigView> }
+const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aac,audio/mpeg,audio/mp4,audio/wav,audio/aac"
+
+function fmtDuration(sec: number) {
+  const s = Math.round(sec)
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
+}
+
+/** Per-channel stream audio (silence / test tone / looped audio bed) with a shared library. Saved on the server (rev-synced), edited as a draft. */
+function AudioCard() {
+  const [saved, setSaved] = useState<AudioSettingsView | null>(null)
+  const [files, setFiles] = useState<AudioFileView[]>([])
+  const [draft, setDraft] = useState<AudioSettingsView["channels"] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
+  const [playing, setPlaying] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const apply = useCallback((body: { settings?: AudioSettingsView; files?: AudioFileView[] } | null) => {
+    if (body?.settings) setSaved(body.settings)
+    if (body?.files) setFiles(body.files)
+  }, [])
+  const load = useCallback(async () => {
+    const response = await fetch("/api/audio", { cache: "no-store" }).catch(() => null)
+    if (response?.ok) apply(await response.json().catch(() => null))
+  }, [apply])
+  useEffect(() => {
+    const first = window.setTimeout(() => void load(), 0)
+    const id = window.setInterval(() => void load(), 2000)
+    return () => { window.clearTimeout(first); window.clearInterval(id) }
+  }, [load])
+  const view = draft ?? saved?.channels ?? null
+  const dirty = draft !== null && saved !== null && JSON.stringify(draft) !== JSON.stringify(saved.channels)
+  function edit(ch: RtmpChannelId, patch: Partial<AudioConfigView>) {
+    if (!view) return
+    setDraft({ ...view, [ch]: { ...view[ch], ...patch } })
+  }
+  async function post(url: string, init: RequestInit) {
+    setBusy(true)
+    const response = await fetch(url, init).catch(() => null)
+    setBusy(false)
+    if (!response) { setMessage({ tone: "error", text: "Could not reach the server." }); return null }
+    if (handleUnauthorized(response)) return null
+    const body = (await response.json().catch(() => null)) as { error?: string; settings?: AudioSettingsView; files?: AudioFileView[] } | null
+    apply(body)
+    if (!response.ok) { setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` }); return null }
+    return body
+  }
+  async function save() {
+    if (!draft || !saved) return
+    const body = await post("/api/audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", channels: draft, baseRev: saved.rev }) })
+    if (body) { setDraft(null); setMessage({ tone: "info", text: "Audio saved. A live channel uses it after a restart." }) }
+  }
+  async function upload(file: File) {
+    if (file.size > 50_000_000) return setMessage({ tone: "error", text: "Audio is over 50 MB." })
+    const body = await post(`/api/audio/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file })
+    if (body) setMessage({ tone: "info", text: `Uploaded ${file.name}. Add it to a channel’s bed below.` })
+  }
+  function togglePlay(id: string) {
+    const el = audioRef.current
+    if (!el) return
+    if (playing === id) { el.pause(); setPlaying(null); return }
+    el.src = `/api/audio/file/${id}`
+    void el.play().then(() => setPlaying(id)).catch(() => setMessage({ tone: "error", text: "Browser could not play this file." }))
+  }
+  const byId = new Map(files.map((f) => [f.id, f]))
+  return (
+    <div data-testid="audio-card" className="space-y-3 rounded-2xl border border-black/10 bg-white p-3">
+      <audio ref={audioRef} onEnded={() => setPlaying(null)} hidden />
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Stream audio</p>
+        {dirty ? <span data-testid="audio-unsaved" className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[11px] font-bold text-white uppercase">Unsaved</span> : null}
+      </div>
+      <p className="font-mono text-[12px] text-black/70">What Slate and Browser capture send as audio: silence, a test tone, or a looped audio bed. AAC 128k, 48 kHz stereo. Changes apply when a channel (re)starts.</p>
+      {view ? (["slate", "capture"] as const).map((ch) => {
+        const cfg = view[ch]
+        const tid = (s: string) => `audio-${ch}-${s}`
+        return (
+          <div key={ch} data-testid={tid("box")} className="space-y-2 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold">{ch === "slate" ? "Slate" : "Browser capture"}</span>
+              {(["silent", "tone", "bed"] as const).map((mode) => (
+                <label key={mode} className="flex items-center gap-1">
+                  <input type="radio" name={`audio-mode-${ch}`} data-testid={tid(`mode-${mode}`)} checked={cfg.mode === mode} onChange={() => edit(ch, { mode })} />
+                  {mode === "silent" ? "Silent" : mode === "tone" ? "Tone" : "Audio bed"}
+                </label>
+              ))}
+            </div>
+            {cfg.mode === "tone" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <label>Freq <input type="number" data-testid={tid("tone-hz")} min={20} max={20000} value={cfg.toneHz} onChange={(e) => edit(ch, { toneHz: Number(e.target.value) })} className="h-7 w-20 border px-1" /> Hz</label>
+                <label>Level <input type="number" data-testid={tid("tone-db")} min={-60} max={0} value={cfg.toneDb} onChange={(e) => edit(ch, { toneDb: Number(e.target.value) })} className="h-7 w-16 border px-1" /> dBFS</label>
+              </div>
+            ) : null}
+            {cfg.mode === "bed" ? (
+              <div className="space-y-2">
+                {cfg.files.length === 0 ? <p className="text-[#8a4b06]">No files chosen: streams silence. Add one from the library.</p> : null}
+                <ol className="space-y-1">
+                  {cfg.files.map((id, index) => {
+                    const f = byId.get(id)
+                    return (
+                      <li key={`${id}-${index}`} className="flex flex-wrap items-center gap-2">
+                        <span className="text-black/50">{index + 1}.</span>
+                        <span className={`min-w-0 break-words [overflow-wrap:anywhere] ${f ? "" : "text-[#b42318]"}`}>{f ? f.name : "missing file (skipped)"}</span>
+                        <button type="button" className="underline" onClick={() => edit(ch, { files: cfg.files.filter((_, i) => i !== index) })}>remove</button>
+                      </li>
+                    )
+                  })}
+                </ol>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select data-testid={tid("add")} value="" onChange={(e) => e.target.value && edit(ch, { files: [...cfg.files, e.target.value] })} className="h-7 border px-1">
+                    <option value="">+ add file…</option>
+                    {files.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                  {cfg.files.length > 1 ? (
+                    <select data-testid={tid("order")} value={cfg.order} onChange={(e) => edit(ch, { order: e.target.value === "shuffle" ? "shuffle" : "inOrder" })} className="h-7 border px-1">
+                      <option value="inOrder">Play in order</option>
+                      <option value="shuffle">Shuffle (each start)</option>
+                    </select>
+                  ) : null}
+                  <label>Volume <input type="number" data-testid={tid("volume")} min={-40} max={12} value={cfg.volumeDb} onChange={(e) => edit(ch, { volumeDb: Number(e.target.value) })} className="h-7 w-16 border px-1" /> dB</label>
+                  <label>Fade in <input type="number" data-testid={tid("fade")} min={0} max={30} value={cfg.fadeInSec} onChange={(e) => edit(ch, { fadeInSec: Number(e.target.value) })} className="h-7 w-14 border px-1" /> s</label>
+                </div>
+                <p className="text-black/60">Loops forever (the list repeats).</p>
+              </div>
+            ) : null}
+          </div>
+        )
+      }) : <p className="font-mono text-[12px] text-black/60">Loading…</p>}
+      <div className="flex flex-wrap gap-2">
+        <Pill size="sm" data-testid="audio-save" disabled={!dirty || busy} onClick={() => void save()}>Save audio</Pill>
+        <Pill size="sm" tone="outline" data-testid="audio-discard" disabled={!dirty || busy} onClick={() => setDraft(null)}>Discard</Pill>
+      </div>
+      <div className="space-y-1 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-bold">Library</span>
+          <label className="cursor-pointer underline">Upload mp3 / m4a / wav / aac (≤ 50 MB)
+            <input type="file" data-testid="audio-upload" accept={AUDIO_ACCEPT} hidden disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f) }} />
+          </label>
+        </div>
+        {files.length === 0 ? <p className="text-black/60">No audio uploaded yet.</p> : null}
+        <ul className="space-y-1">
+          {files.map((f) => (
+            <li key={f.id} data-testid={`audio-file-${f.name}`} className="flex flex-wrap items-center gap-2">
+              <button type="button" data-testid={`audio-play-${f.name}`} aria-label={playing === f.id ? `Pause ${f.name}` : `Play ${f.name}`} onClick={() => togglePlay(f.id)} className="h-6 w-6 rounded-full bg-black text-[10px] text-white">{playing === f.id ? "❚❚" : "▶"}</button>
+              <span className="min-w-0 break-words [overflow-wrap:anywhere]">{f.name}</span>
+              <span className="text-black/60">{fmtDuration(f.durationSec)} · {f.codec} · {(f.bytes / 1e6).toFixed(1)} MB</span>
+              <ConfirmButton className="underline text-[#b42318]" disabled={busy} confirmLabel="Delete? · confirm" onConfirm={() => void post("/api/audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id: f.id }) })}>delete</ConfirmButton>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {message ? <p role="status" data-testid="audio-message" className={`font-mono text-[12px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
+    </div>
   )
 }

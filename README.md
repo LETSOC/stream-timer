@@ -86,6 +86,12 @@ text='%{eif\:max(0\,trunc((REMAINING-t)/86400))\:d}d …'
 
 `REMAINING` is `TARGET_UNIX - $(date +%s)` at process start, not the unix timestamp itself.
 
+## Stream audio (Slate / Browser capture)
+
+The desk's **Stream audio** card sets each RTMP channel's audio: **Silent** (default), **Tone** (sine, Hz + dBFS, e.g. 1 kHz −20 dBFS), or **Audio bed**. The bed is one or more uploaded MP3/M4A/WAV/AAC files (max 50 MB each, checked with ffprobe), played in order or shuffled, looped forever (`-re -stream_loop -1`), with a volume in dB and an optional fade-in. Output is always AAC 128k, 48 kHz stereo, resampled with `aresample=async` so it stays in sync with the realtime video.
+
+Settings save on the server (`data/audio-settings.json`, files in `data/audio/`) and sync to every desk. Edits are a draft until **Save audio**. A live channel keeps the audio it started with and shows "Restart to apply new audio"; stop and start it to switch. If a bed file is missing, the channel streams silence and shows a warning.
+
 ## Tests
 
 ```bash

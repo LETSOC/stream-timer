@@ -45,6 +45,7 @@ export type EncoderStatus = {
     relay: boolean
     bitrateK?: number | null
     encoder?: string | null
+    audio?: { mode: "silent" | "tone" | "bed"; warning: string | null; pending: boolean } | null
     health?: import("@/lib/stream-health").SourceHealth | import("@/lib/stream-health").HealthStats
     connectError: string | null
     failure: string | null
