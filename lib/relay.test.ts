@@ -3,14 +3,14 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
-import { buildMediamtxConfig, credentials, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
+import { buildMediamtxConfig, credentials, validPullUrl, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
 import { parseOwnSupervisorList } from "./encoder.ts"
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true } })
 })
 
 test("credentials are random, stable, and stored 0600", () => {
@@ -83,4 +83,21 @@ test("program audio track: present (tracks2 or names) vs none", async () => {
   assert.deepEqual(programAudioTrack({ tracks: ["H264", "MPEG-4 Audio"], tracks2: [{ codec: "H264", codecProps: { width: 1280, height: 720 } }, { codec: "MPEG-4 Audio", codecProps: { sampleRate: 48000, channelCount: 2 } }] }), { codec: "AAC", channels: 2, sampleRate: 48000 })
   assert.deepEqual(programAudioTrack({ tracks: ["H264", "Opus"] }), { codec: "Opus", channels: null, sampleRate: null })
   assert.equal(programAudioTrack({ tracks: ["H264"], tracks2: [{ codec: "H264", codecProps: { width: 1280, height: 720 } }] }), null)
+})
+
+test("program backup: own publish login, or a pull source; pull URLs validated", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", programUser: "obs", programPass: "op", backupUser: "bak", backupPass: "bp" }
+  const ports = { rtmp: 19350, hls: 18888, api: 19997 }
+  const pub = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true })
+  assert.match(pub, /user: "bak"[\s\S]*permissions: \[\{ action: publish, path: program-backup \}\]/)
+  assert.match(pub, /\n  program-backup: \{\}/)
+  const pulled = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, backupPullUrl: "rtmp://example.com/live/key" })
+  assert.doesNotMatch(pulled, /user: "bak"/)
+  assert.match(pulled, /program-backup: \{ source: "rtmp:\/\/example.com\/live\/key", sourceOnDemand: no \}/)
+  const off = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: false, backupPullUrl: "rtmp://example.com/x" })
+  assert.doesNotMatch(off, /user: "bak"|source:/)
+  assert.ok(validPullUrl("https://cdn.example.com/hls/index.m3u8"))
+  assert.ok(!validPullUrl("file:///etc/passwd"))
+  assert.ok(!validPullUrl("rtmp://x/y\n  evil: 1"))
+  assert.ok(!validPullUrl("rtmp://x/{a}"))
 })
