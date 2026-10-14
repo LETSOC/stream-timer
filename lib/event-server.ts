@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { DATA_DIR } from "@/lib/encoder"
+import { emitSaved } from "@/lib/event-bus"
 import { asEventConfig, DEFAULT_EVENT, type EventConfig, type SpeakerCard } from "@/lib/event"
 import { DEFAULT_STAGE, parseStage, testClockStale, type StageOptions } from "@/lib/stage"
 
@@ -147,6 +148,7 @@ export function writeServerEvent(
   const temporary = `${file}.tmp`
   fs.writeFileSync(temporary, payload)
   fs.renameSync(temporary, file)
+  emitSaved(rev)
   return { event, rev }
 }
 

@@ -26,7 +26,7 @@ export const SECTIONS: Record<SectionId, { label: string; event?: (keyof EventCo
 export const SECTION_IDS = Object.keys(SECTIONS) as SectionId[]
 
 /** Stage fields that are live switches, always taken from the desk's current state. */
-export const IMMEDIATE_STAGE: (keyof StageOptions)[] = ["forceEnd", "holdCountdown", "overlay", "overlayAt", "deskLive"]
+export const IMMEDIATE_STAGE: (keyof StageOptions)[] = ["forceEnd", "holdCountdown", "overlay", "overlayAt", "deskLive", "program", "programSource"]
 
 export type SectionValues = { event?: Partial<EventConfig>; stage?: Partial<StageOptions> }
 

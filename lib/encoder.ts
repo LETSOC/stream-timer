@@ -3,7 +3,8 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { EncoderStatus } from "@/lib/encoder-status";
-import { relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
+import { programReadFile, relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
+import { audioHash, prepareChannelAudio, readAppliedAudio, readAudioSettings, type AudioMode } from "@/lib/audio-bed";
 import { captureSourceHealth, EMPTY_HEALTH, healthFromSamples, parseStatsLines, type CaptureSourceStats, type HealthStats, type SourceHealth } from "@/lib/stream-health";
 
 export const ROOT = process.cwd();
@@ -355,7 +356,7 @@ export function rtmpFiles(ch: RtmpChannel) {
   }
 }
 
-type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean; bitrateK?: number; encoder?: string }
+type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean; bitrateK?: number; encoder?: string; audio?: { mode: AudioMode; hash: string; warning: string | null; /** hot-swappable (audio feeder) */ live?: boolean } }
 
 function readRtmpMeta(ch: RtmpChannel = "slate"): RtmpMeta | null {
   try {
@@ -415,6 +416,20 @@ function channelHealth(ch: RtmpChannel, running: boolean, meta: RtmpMeta | null)
       })()
     : { ...EMPTY_HEALTH, ageMs: Date.now() - stats.at }
   return captureSourceHealth(encoder, stats)
+}
+
+function channelAudio(ch: RtmpChannel, meta: RtmpMeta | null): NonNullable<RtmpChannelStatus["audio"]> {
+  const live = meta?.audio
+  const saved = audioHash(readAudioSettings().channels[ch])
+  if (live?.live) {
+    // Audio feeder: changes apply live (no restart). "applying" while it hasn't caught up yet.
+    const applied = readAppliedAudio(ch)
+    const fresh = applied !== null && Date.now() - applied.updatedAt < 5000
+    return { mode: applied?.mode ?? live.mode, warning: applied?.warning ?? live.warning, pending: false, live: true, applying: !fresh || applied.hash !== saved || applied.pending !== null, peakDb: fresh ? applied.peakDb : null, underruns: applied?.underruns ?? 0 }
+  }
+  const runtimeFallback = /\[audio\] audio (bed file missing|settings unreadable)/.test(readTail(rtmpFiles(ch).log, 16384).split(/supervisor[^\n]*started|Mode: /).pop() ?? "")
+  const warning = live?.warning ?? (runtimeFallback ? "Audio bed file went missing; streaming silence." : null)
+  return { mode: runtimeFallback ? "silent" : (live?.mode ?? "silent"), warning, pending: live ? live.hash !== saved : false }
 }
 
 function forgetChannel(ch: RtmpChannel) {
@@ -488,6 +503,9 @@ export type RtmpChannelStatus = {
   bitrateK: number | null
   encoder: string | null
   health: SourceHealth | HealthStats
+  /** What this channel is playing as audio; pending = saved settings differ (restart to apply). */
+  /** pending = saved audio differs and needs a restart (only channels started before live audio). live = hot-swaps; applying = switching now. */
+  audio: { mode: AudioMode; warning: string | null; pending: boolean; live?: boolean; applying?: boolean; peakDb?: number | null; underruns?: number } | null
   connectError: string | null
   failure: string | null
   logTail: string
@@ -511,6 +529,7 @@ export function readChannelStatus(ch: RtmpChannel): RtmpChannelStatus {
     bitrateK: running ? (meta?.bitrateK ?? (ch === "slate" ? 2500 : null)) : null,
     encoder: running ? (meta?.encoder ?? (ch === "slate" ? "libx264" : null)) : null,
     health: channelHealth(ch, running, meta),
+    audio: running ? channelAudio(ch, meta) : null,
     connectError: running ? parseConnectError(readTail(files.log, 32768), readRtmpHost(ch)) : null,
     failure: running ? null : readFailure(ch),
     logTail: redact(readTail(files.log).split(/\r?\n/).slice(-20).join("\n").slice(-2000)),
@@ -768,6 +787,8 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   fs.writeFileSync(files.log, "", { mode: 0o600 })
   fs.chmodSync(files.log, 0o600)
   const logFd = fs.openSync(files.log, "a")
+  // Stream audio for this run (silence / tone / looped bed); a missing file falls back to silence.
+  const audio = prepareChannelAudio(ch)
   const child = spawn("bash", [SUPERVISOR, ch, `dest=${destinationFingerprint(url)}`, ...(source.relay ? ["via=relay"] : [])], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
@@ -780,17 +801,23 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
       RTMP_STATE_FILE: files.state,
       RTMP_LOG_FILE: files.log,
       RTMP_FAIL_FILE: files.fail,
+      AUDIO_ARGS_FILE: audio.argsFile,
+      AUDIO_LIVE_FILE: audio.liveFile,
+      AUDIO_APPLIED_FILE: audio.appliedFile,
+      NODE_BIN: process.execPath,
+      FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg",
       ...(source.kind === "capture"
-        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
+        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_KEY_FILE: path.join(DATA_DIR, "capture-key"), PROGRAM_READ_FILE: programReadFile(), CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
         : {}),
     }),
   })
   child.unref()
   fs.closeSync(logFd)
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
+  const audioMeta = { mode: audio.live.mode, hash: audio.hash, warning: audio.live.warning, live: true }
   let host = ""
   try { host = new URL(url).hostname } catch { /* validated above */ }
-  fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, ...(source.kind === "capture" ? { bitrateK: source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500), encoder: source.encoder ?? "auto" } : {}), dest: destinationFingerprint(url), ...(source.relay ? { relay: true } : {}) }))
+  fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, ...(source.kind === "capture" ? { bitrateK: source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500), encoder: source.encoder ?? "auto" } : {}), dest: destinationFingerprint(url), audio: audioMeta, ...(source.relay ? { relay: true } : {}) }))
 
   // Wait for the first connection. "Output #0" means ffmpeg opened the RTMP output.
   // A supervisor "exited" line this early means the URL or script is wrong, so stop

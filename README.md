@@ -86,6 +86,72 @@ text='%{eif\:max(0\,trunc((REMAINING-t)/86400))\:d}d …'
 
 `REMAINING` is `TARGET_UNIX - $(date +%s)` at process start, not the unix timestamp itself.
 
+## Stream audio (Slate / Browser capture)
+
+The desk's **Stream audio** card sets each RTMP channel's audio: **Silent** (default), **Tone** (sine, Hz + dBFS, e.g. 1 kHz −20 dBFS), or **Audio bed**. The bed is one or more uploaded MP3/M4A/WAV/AAC files (max 50 MB each, checked with ffprobe), played in order or shuffled, looped forever (`-re -stream_loop -1`), with a volume in dB and an optional fade-in. Output is always AAC 128k, 48 kHz stereo, resampled with `aresample=async` so it stays in sync with the realtime video.
+
+Settings save on the server (`data/audio-settings.json`, files in `data/audio/`) and sync to every desk. Edits are a draft until **Save audio**. Saved changes apply **live** (within about a second, 300 ms crossfade; volume-only changes ramp over 200 ms): silence, tone, bed, playlist, volume and fade switch without restarting ffmpeg or reconnecting RTMP. How: `scripts/audio-feeder.mjs` makes the stream audio (raw PCM, wall-clock paced) and the encoder reads it as a never-ending input: the Slate gets it on fd 3 from a feeder process started next to its ffmpeg, Browser capture runs the feeder in-process and mixes OBS program audio on top. Beds are decoded by short-lived ffmpeg children, one per file; a missing or broken file plays silence until the next one instead of stalling the stream. The server writes `data/rtmp-audio-<channel>.live.json` on save; the feeder reports what is on air (mode, peak dBFS, underruns) in `…applied.json`, shown on the channel card ("Applied live" / "Applying…"). Only a channel started by an older build still shows "Restart to apply new audio"; restart it once. Shuffle reshuffles on every pass through the list.
+
+### Browser capture A/V sync
+
+Capture stamps video and audio on **one timeline** (frame *k* = sample *i* = wall time since start; when the encoder falls more than ~0.5s behind, both skip the same span), so they cannot drift apart. Constant offsets are compensated live:
+
+- **Screencast lag** (Chrome paint → capture, a few ms): stream audio is delayed to match the picture.
+- **OBS program audio**: /stream's player reports how far behind the relay's live edge it is (`data-latency-ms` from hls.js). Program audio, read straight from MediaMTX, is delayed by *player latency + screencast lag − reader lag*, tracked continuously (smoothed, clamped; ±16% sample rate to follow the player without clicks). The old fixed `CAPTURE_PROGRAM_AUDIO_DELAY_MS` (default 1170) is only the fallback until the first player reading.
+- **Desk A/V offset trim** (±500 ms, live): + delays the audio, − holds the picture back instead. On /slate, only + is available (its picture is ffmpeg's own).
+
+**A/V sync test** (Browser capture checkbox): white full-frame flash + 1 kHz beep every wall-clock second, on air. Record or watch on Castr and measure the flash-to-beep offset (target |offset| &lt; 40 ms, no growing drift). The channel health line shows the compensation now applied (`A/V sync: screencast lag …ms → audio +…ms · program delay …ms`).
+
+
+## Phone Stream Deck (/deck)
+
+Open `/deck` on a phone (same login as the desk; local mode on 127.0.0.1 needs none). Big buttons for
+Transport: go live, pause/resume, reset clock, restore festival, jumps (15s/10m/30m/1h), countdown /
+break / hold / welcome / end card, Rehearsal/Live. Go live, reset, restore and end card need a second tap.
+It shows the current screen, mode, countdown, paused and test-clock state, and can preview `/stream`
+(no view key needed: your session is enough) or the relay output.
+
+`npm start` / `npm run dev` now run `server.ts`: Next plus a WebSocket at `/api/deck/ws` on the same port
+(43211, `BIND_HOST` as before). Every save pushes state to all decks and desks instantly; the desk's 2s poll
+and HTTP `POST /api/deck/action` stay as fallbacks if the socket is blocked. The socket needs a same-origin
+`Origin` and an operator session (the encoder token is not accepted). `npm run start:next` / `dev:next`
+run plain Next without the socket.
+
+## OBS program feed (/program)
+
+OBS (on this Mac) can send its program into the relay; Transport › **Show program (OBS)** (desk or
+`/deck`) then puts it full-frame on `/stream`. Precedence on `/stream`: break/hold/welcome card >
+program > end card > countdown (cards go on top of the program; Countdown / End card switch it off).
+
+1. Desk › Relay › `/program · OBS feed` › **Arm receive** (starts MediaMTX if needed; it stays up while
+   armed, independent of channels and forwards).
+2. **Reveal OBS URL** (hides after 30s). In OBS › Settings › Stream: Service *Custom*, Server
+   `rtmp://127.0.0.1:19350/`, Stream Key `program?user=obs_…&pass=…` (copy both). OBS › Output:
+   keyframe interval **1 s**, x264/Apple VT H.264, AAC 48 kHz; tune zerolatency if offered.
+3. Start Streaming in OBS. The card shows *Receiving* with codec, resolution, fps and bitrate; *Preview*
+   plays it on the desk.
+4. **Show program (OBS)**. `/stream` (OBS Browser Source or Browser capture) plays it via LL-HLS
+   (~1.2 s behind OBS), with sound in OBS Browser Source; *Waiting for OBS* shows while nothing arrives.
+
+- The OBS login is its own (publish to `/program` only, loopback only) and lives in
+  `data/relay/credentials.json` (0600). **New key** issues a new one and disconnects OBS. **Disarm**
+  removes the login, disconnects OBS and stops MediaMTX if nothing else uses it.
+- Viewers get `/program` only through `/api/program/hls` with the view key (or the capture key);
+  no relay URL or login reaches a browser. `/api/public/state` adds just `programReady`.
+- **Browser capture audio**: headless Chromium's sound isn't captured, so while `/stream` shows the
+  program the capture reads `/program`'s audio from the relay and mixes it in (delayed
+  `CAPTURE_PROGRAM_AUDIO_DELAY_MS`, default 1170, to match the picture), fading the audio bed out
+  under it and back afterwards.
+- **Slate** (ffmpeg text) can't show the program; it keeps the countdown. Use Browser capture.
+- OBS must run on the same machine (MediaMTX listens on 127.0.0.1 only).
+
+### Program audio and previews
+
+- **/stream (OBS Browser Source)** plays the program feed **with sound** by default. In the Browser Source properties tick **“Control audio via OBS”** so the sound shows up as its own source in the OBS audio mixer (meter, mute, volume, monitoring) instead of going straight to the desktop output. `?mute=1` mutes it (the deck preview uses that).
+- **Switching** to program keeps the current screen (countdown or card) up until the feed has drawn a frame, then crossfades (300 ms). /stream preloads the feed whenever OBS is sending, so the switch is normally instant. “Waiting for OBS” only appears if no frame arrives within 5 s, OBS has been gone for more than 3 s, or the picture has stalled for more than 4 s (the last frame is held until then).
+- **Desk hero preview, deck preview and the Relay card preview** play the feed over the operator-only HLS path, **muted by default**, with a mute/unmute toggle, volume and a live level meter. The choice is saved per device (and per place). Browsers only allow sound after a tap: if you left it unmuted, the first tap anywhere on the page turns it back on (the button shows “Tap for sound”). The meter reads the audio before the volume, so it moves while muted once sound has been enabled once. On iPhone Safari the meter may stay flat (WebKit limitation with native HLS); the sound still plays.
+- **Relay card** shows “Audio present” (codec, channels, kHz) or “No audio track” from MediaMTX, plus whether Browser capture is mixing program audio and its peak level. The Encoder panel’s capture health line shows the same.
+
 ## Tests
 
 ```bash

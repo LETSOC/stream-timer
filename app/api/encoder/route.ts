@@ -11,7 +11,7 @@ import {
   stopRtmpStream, stopAllRtmp,
   type RtmpSource,
 } from "@/lib/encoder"
-import { getViewKey } from "@/lib/view-key"
+import { getCaptureKey } from "@/lib/capture-key"
 import { CAPTURE_BITRATES } from "@/lib/capture-options"
 import { RELAY_TARGET, resolveDestination } from "@/lib/rtmp-destinations"
 import { ensureRelayServer, relayPublishUrl, stopRelayEverything, stopRelayServerIfIdle } from "@/lib/relay"
@@ -62,10 +62,12 @@ export async function POST(request: Request) {
     const rec = body as { source?: unknown; captureSize?: unknown; captureBitrate?: unknown; captureEncoder?: unknown }
     let source: RtmpSource = { kind: "slate" }
     if (rec.source === "capture") {
-      // Capture loads /stream from this server on loopback with the view key (never leaves the machine).
+      getCaptureKey()
+      // Capture loads /stream from this server on loopback with its own internal key (data/capture-key,
+      // sent as a header), not the OBS view key: rotating the view key must not blank a live capture.
       const port = new URL(request.url).port || "43211"
       const origin = process.env.CAPTURE_ORIGIN || `http://127.0.0.1:${port}`
-      source = { kind: "capture", pageUrl: `${origin}/stream?k=${encodeURIComponent(getViewKey())}`, size: rec.captureSize === "1920x1080" ? "1920x1080" : "1280x720" }
+      source = { kind: "capture", pageUrl: `${origin}/stream`, size: rec.captureSize === "1920x1080" ? "1920x1080" : "1280x720" }
       const allowed: readonly number[] = CAPTURE_BITRATES[source.size]
       const asked = Number(rec.captureBitrate)
       source.bitrateK = allowed.includes(asked) ? asked : allowed[1]

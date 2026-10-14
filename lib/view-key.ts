@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { authMode, isOperator, readCookie, VIEW_COOKIE } from "@/lib/auth"
 import { DATA_DIR } from "@/lib/encoder"
+import { isCaptureRequest } from "@/lib/capture-key"
 
 /** Read-only key for OBS pages (/stream, /end, /media). VIEW_KEY env, else data/view-key (0600). */
 function keyFile() {
@@ -45,10 +46,11 @@ export function viewKeyMatches(candidate: string | null | undefined): boolean {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-/** ?k=, the st_view cookie, or an operator session. */
+/** ?k=, the st_view cookie, an operator session, or the internal capture browser. */
 export function canView(request: Request): boolean {
   if (!viewKeyRequired()) return true
   if (isOperator(request)) return true
+  if (isCaptureRequest(request.headers)) return true
   const url = new URL(request.url)
   return viewKeyMatches(url.searchParams.get("k")) || viewKeyMatches(readCookie(request, VIEW_COOKIE))
 }

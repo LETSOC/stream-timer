@@ -16,6 +16,10 @@ import { NumberField } from "@/components/number-field"
 import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
+import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
+import { failoverText, ProgramSourceSwitch, sourceStatus, useFailoverEvents } from "@/components/program-source-switch"
+import type { FailoverSettings, ProgramSource } from "@/lib/program-source"
+import type { ProgramSourcesView } from "@/lib/transport"
 import { StreamPlayer } from "@/components/stream-player"
 import { diagnose, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 import { CAPTURE_BITRATES } from "@/lib/capture-options"
@@ -28,6 +32,8 @@ import {
 } from "@/lib/countdown"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import { useNow } from "@/lib/use-now"
+import { applyTransport, endInstant, EXTENDS, extendTarget, type Screen, type TransportAction } from "@/lib/transport"
+import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
@@ -37,6 +43,7 @@ import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/secti
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
+import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
@@ -77,7 +84,7 @@ export function OperatorConsole() {
   const selectedDest = dests.items.find((item) => item.id === (manageId ?? dests.selectedId)) ?? dests.items[0] ?? null
   const slateDest = dests.items.find((item) => item.id === dests.selectedId) ?? null
   const rtmpUrl = slateDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
-  const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
+  const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | "dest" | null>(null)
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
   const [showLink, setShowLink] = useState(true)
@@ -115,6 +122,10 @@ export function OperatorConsole() {
   const [welcomeFit, setWelcomeFit] = useState<ImageFit>("cover")
   const [overlay, setOverlay] = useState<Overlay>("none")
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
+  const [program, setProgram] = useState(false)
+  const [programSource, setProgramSource] = useState<"main" | "backup">("main")
+  // Both program inputs' health + failover settings (server monitor), polled; null = relay not armed.
+  const [sources, setSources] = useState<ProgramSourcesView | null>(null)
   // What /stream has for the draft-managed sections (Event, Links, Look, Socials, End/Break/Hold card, Speakers).
   // The fields above are the desk's draft; only "Save" copies a section into `published`.
   const [published, setPublished] = useState<DeskSnapshot | null>(null)
@@ -128,7 +139,7 @@ export function OperatorConsole() {
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
   // One toast at a time; each kind has its own title, duration and timer. Polling never touches it.
-  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error"; text: string }
+  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend" | "failover"; text: string; undo?: () => void }
   const [toast, setToastState] = useState<Toast | null>(null)
   const toastTimer = useRef<number | null>(null)
   const toastSeq = useRef(0)
@@ -138,11 +149,11 @@ export function OperatorConsole() {
     toastTimer.current = null
     setToastState(null)
   }, [])
-  const showToast = useCallback((kind: Toast["kind"], text: string) => {
-    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000 }[kind]
+  const showToast = useCallback((kind: Toast["kind"], text: string, undo?: () => void) => {
+    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000, extend: 8000, failover: 8000 }[kind]
     const id = ++toastSeq.current
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
-    setToastState({ id, kind, text })
+    setToastState({ id, kind, text, undo })
     toastTimer.current = window.setTimeout(() => {
       toastTimer.current = null
       setToastState((current) => (current?.id === id ? null : current))
@@ -150,6 +161,17 @@ export function OperatorConsole() {
   }, [])
   /** Errors and messages that aren't copies or sync. */
   const setToast = useCallback((text: string | null) => (text ? showToast("error", text) : dismissToast()), [showToast, dismissToast])
+  useEffect(() => {
+    let stop = false
+    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSources?: ProgramSourcesView | null } | null) => {
+      if (!stop && body) setSources(body.programSources ?? null)
+    }).catch(() => undefined)
+    void poll()
+    const id = window.setInterval(poll, 1000)
+    return () => { stop = true; window.clearInterval(id) }
+  }, [])
+  // Failovers (and switches from other devices) toast on every desk.
+  useFailoverEvents(sources?.last, (e) => showToast("failover", failoverText(e)))
   // Preview-only aids (never sent to /stream), remembered in localStorage.
   const [trueObs, setTrueObs] = useSectionOpen("aid-true-obs", false)
   const [safeZone, setSafeZone] = useSectionOpen("aid-safe-zone", false)
@@ -297,6 +319,8 @@ export function OperatorConsole() {
     if (stage.welcomeFit === "cover" || stage.welcomeFit === "contain") setWelcomeFit(stage.welcomeFit)
     if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
+    if (typeof stage.program === "boolean") setProgram(stage.program)
+    if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
   }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
@@ -342,7 +366,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, deskLive: liveMode }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, deskLive: liveMode }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -405,11 +429,14 @@ export function OperatorConsole() {
       window.setTimeout(() => setRevealed((current) => (current?.id === id ? null : current)), 30_000)
     }
   }
+  // Two-step copy for secrets: the URL must be fetched first, and an awaited fetch would end the
+  // click gesture (iOS/http copy then fails). First tap reveals + arms; the next tap copies synchronously.
   async function copyDest(id: string) {
-    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal", id }) }).catch(() => null)
-    if (!response || handleUnauthorized(response)) return
-    const body = (await response.json().catch(() => null)) as { url?: string } | null
-    if (response.ok && body?.url) void copy("stream", body.url)
+    if (revealed?.id === id) {
+      void copy("dest", revealed.url, "destination URL")
+      return
+    }
+    await revealDest(id)
   }
   function forgetLegacy() {
     window.localStorage.removeItem("hyphen-countdown-rtmp")
@@ -480,6 +507,20 @@ export function OperatorConsole() {
   useEffect(() => {
     syncNowRef.current = () => void pullRemote(true)
   }, [pullRemote])
+  // Instant sync: the deck WebSocket pushes the rev on every save; the 2s poll below stays as the fallback.
+  const { link: wsLink } = useDeckSocket({
+    poll: false,
+    onState: (remote) => {
+      // pullRemote skips while this desk's own autosave is pending; retry briefly so a push isn't lost until the next poll.
+      let tries = 0
+      const pull = () => {
+        if ((revRef.current ?? -1) >= remote.rev || tries++ > 15) return
+        syncNowRef.current()
+        window.setTimeout(pull, 150)
+      }
+      pull()
+    },
+  })
   useEffect(() => {
     if (!hydrated) return
     const id = window.setInterval(() => void pullRemote(), 2000)
@@ -581,16 +622,8 @@ export function OperatorConsole() {
   }
 
   /** Live switch for /stream: break, hold, end card or countdown (mutually exclusive). */
-  function showScreen(next: "break" | "hold" | "welcome" | "end" | "countdown") {
-    const nextOverlay: Overlay = next === "break" || next === "hold" || next === "welcome" ? next : "none"
-    const at = nextOverlay === "none" ? null : nowMs()
-    const nextForceEnd = next === "end"
-    const nextHold = next === "countdown"
-    setOverlay(nextOverlay)
-    setOverlayAt(at)
-    setForceEnd(nextForceEnd)
-    setHoldCountdown(nextHold)
-    sendSave({ ...savePayload, stage: { ...savePayload.stage, overlay: nextOverlay, overlayAt: at, forceEnd: nextForceEnd, holdCountdown: nextHold } })
+  function showScreen(next: Screen) {
+    runTransport({ type: "screen", screen: next })
   }
 
   async function uploadImage(file: File, apply: (url: string) => void) {
@@ -659,39 +692,90 @@ export function OperatorConsole() {
 
   const previewNow = pausedAt ?? (now ? new Date(now.getTime() + skewMs) : null)
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
-  const endTarget = wallTimeInZone(date, endAt || endTime, timeZone)
+  const endTarget = endInstant(date, time, endAt || endTime, timeZone)
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
-  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
+  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
-  async function jumpPreview(seconds: number) {
-    if (!valid) return
-    setPausedAt(null)
-    const nextUntil = nowMs() + seconds * 1000
-    setTestUntil(nextUntil)
-    setSkewMs(target.getTime() - nextUntil)
-    sendSave({ ...savePayload, testUntil: nextUntil, pausedAt: null })
+  /**
+   * Every Transport button goes through lib/transport (the same code the phone deck runs on the
+   * server), then into this desk's state and straight to the server.
+   */
+  function runTransport(action: TransportAction) {
+    const base = { event: published?.event ?? event, testUntil, pausedAt: pausedMs || null, stage: savePayload.stage }
+    const result = applyTransport(base, action, nowMs())
+    if (!result.ok) {
+      setToast(result.error)
+      return false
+    }
+    const next = result.next
+    setTestUntil(next.testUntil)
+    setPausedAt(next.pausedAt !== null ? new Date(next.pausedAt) : null)
+    if (next.pausedAt === null) {
+      const nextTarget = wallTimeInZone(next.event.date, next.event.time, next.event.timeZone).getTime()
+      setSkewMs(next.testUntil !== null && Number.isFinite(nextTarget) ? nextTarget - next.testUntil : 0)
+    }
+    if (action.type === "screen") {
+      setOverlay(next.stage.overlay)
+      setOverlayAt(next.stage.overlayAt)
+      setProgram(next.stage.program)
+      setForceEnd(next.stage.forceEnd)
+      setHoldCountdown(next.stage.holdCountdown)
+    }
+    if (action.type === "programSource") setProgramSource(next.stage.programSource)
+    if (action.type === "mode") setLiveMode(next.stage.deskLive)
+    if (action.type === "extendEnd" || action.type === "setEnd") {
+      // A quick action: goes live straight away, like restore (the sections weren't dirty, see extendEnd).
+      const end = { endTime: next.event.endTime }
+      updateEvent(end)
+      setEndAt(next.stage.endAt)
+      setPublished((current) => (current ? { ...current, event: { ...current.event, ...end }, stage: { ...current.stage, endAt: next.stage.endAt } } : current))
+    }
+    if (action.type === "restore") {
+      const restored = { date: next.event.date, time: next.event.time, timeZone: next.event.timeZone }
+      // A transport action: the restored date goes live straight away (not a draft).
+      updateEvent(restored)
+      setPublished((current) => (current ? { ...current, event: { ...current.event, ...restored } } : current))
+    }
+    sendSave({ event: next.event, testUntil: next.testUntil, pausedAt: next.pausedAt, stage: next.stage })
+    return true
   }
-
-  function goLiveNow() {
-    if (!valid) return
-    const nextUntil = nowMs() - 1000
-    setPausedAt(null)
-    setTestUntil(nextUntil)
-    setSkewMs(target.getTime() - nextUntil)
-    sendSave({ ...savePayload, testUntil: nextUntil, pausedAt: null })
+  /**
+   * +5 / +10 min on the end time (the end card override if set, else Event › End time).
+   * If that section has an unsaved draft, the extension goes into the draft (Save publishes it,
+   * like any other edit); otherwise it's saved straight away with an Undo toast.
+   */
+  function extendEnd(minutes: number) {
+    if (drafts.isDirty("endCard") || (!endAt && drafts.isDirty("event"))) {
+      const t = extendTarget(endTime, endAt, minutes)
+      const check = applyTransport({ event, testUntil, pausedAt: pausedMs || null, stage: { ...draftStage, deskLive: false } }, { type: "extendEnd", minutes }, nowMs())
+      if (!check.ok) return setToast(check.error)
+      if (t.field === "endAt") setEndAt(t.to)
+      else updateEvent({ endTime: t.to })
+      showToast("extend", `Draft end ${t.to} · Save to apply`)
+      return
+    }
+    const prev = { endTime: published?.event.endTime ?? endTime, endAt: published?.stage.endAt ?? endAt }
+    const t = extendTarget(prev.endTime, prev.endAt, minutes)
+    if (!runTransport({ type: "extendEnd", minutes })) return
+    showToast("extend", `${minutes < 0 ? "Shortened" : "Extended"} to ${t.to}`, () => {
+      if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endAt || prev.endTime}`)
+    })
   }
-
-  function restoreFestival() {
-    const restored = { date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }
-    setPausedAt(null)
-    setTestUntil(null)
-    setSkewMs(0)
-    updateEvent(restored)
-    // A transport action: the restored date goes live straight away (not a draft).
-    const nextEvent = { ...(published?.event ?? event), ...restored }
-    setPublished((current) => (current ? { ...current, event: { ...current.event, ...restored } } : current))
-    sendSave({ ...savePayload, event: nextEvent, testUntil: null, pausedAt: null })
+  /** Main/Backup: through the server's transport (logged, synced to every device over the deck socket). */
+  async function switchProgramSource(source: ProgramSource) {
+    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source } }) }).catch(() => null)
+    const body = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string; state?: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } } | null
+    if (!response?.ok || !body?.ok) return setToast(body?.error ?? "Could not switch the program source.")
+    if (body.state?.programSource) setProgramSource(body.state.programSource)
+    if (body.state) setSources(body.state.programSources ?? null)
   }
+  async function saveFailover(patch: Partial<FailoverSettings>) {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
+    if (!response?.ok) setToast("Could not save the failover setting.")
+  }
+  const jumpPreview = (seconds: number) => runTransport({ type: "jump", seconds })
+  const goLiveNow = () => runTransport({ type: "goLive" })
+  const restoreFestival = () => runTransport({ type: "restore" })
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -726,23 +810,20 @@ export function OperatorConsole() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
-    // navigator.clipboard is missing on plain-http non-localhost origins (e.g. LAN IP).
-    const copiedOk = await navigator.clipboard?.writeText(value).then(() => true, () => false)
-    if (!copiedOk) {
-      showToast("copy-failed", value)
-      return
-    }
+  // Call synchronously from the click (no await before it): on plain-http LAN origins only the
+  // in-gesture execCommand fallback works. If the browser refuses, a dialog shows the text selected.
+  async function copy(kind: "stream" | "file" | "link" | "params" | "dest", value: string, label = "text") {
+    const result = await copyOrShow(label, value)
+    if (result !== "copied") return
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
-    if (kind === "link" || kind === "params") {
-      showToast("copy", value)
-    }
+    showToast("copy", kind === "dest" ? "Destination URL (with stream key)" : value)
   }
 
   return (
     <div data-desk-root data-pin-spacer={pinPreview ? "true" : undefined} className={`min-h-dvh bg-[#F6F6F3] text-black ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
       <BackToTop />
+      <CopyFallbackHost />
       <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -764,6 +845,10 @@ export function OperatorConsole() {
                 Save all ({drafts.dirty.length})
               </Pill>
             ) : null}
+            <Link href="/deck" data-testid="deck-link" title={wsLink === "live" ? "Instant sync on (WebSocket)" : "Instant sync off: syncing every 2s"} className={`${pillClass("outline", "sm")} inline-flex items-center gap-1.5 no-underline`}>
+              <span aria-hidden className={`size-2 rounded-full ${wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"}`} />
+              Deck
+            </Link>
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
@@ -877,9 +962,10 @@ export function OperatorConsole() {
 
           <Panel title="Transport" pill={liveMode ? "Live · locked" : "Rehearsal"}>
             <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1 rounded-full bg-black/5 p-1">
-              <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => setLiveMode(false)} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
-              <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => setLiveMode(true)} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
+              <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => runTransport({ type: "mode", live: false })} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
+              <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => runTransport({ type: "mode", live: true })} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
             </div>
+            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <div className="flex flex-wrap gap-2">
               {[
@@ -888,34 +974,21 @@ export function OperatorConsole() {
                 [1800, "30min"],
                 [3600, "1 hour"],
               ].map(([seconds, label]) => (
-                <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => void jumpPreview(Number(seconds))}>{label} left</Pill>
+                <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => jumpPreview(Number(seconds))}>{label} left</Pill>
               ))}
             </div>
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-              <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => {
-                if (pausedAt) {
-                  // Resume from the paused value: shift the test clock by the paused duration.
-                  const resumeNow = Date.now()
-                  if (valid) {
-                    const nextUntil = target.getTime() - pausedAt.getTime() + resumeNow
-                    setTestUntil(nextUntil)
-                    setSkewMs(target.getTime() - nextUntil)
-                  } else {
-                    setSkewMs(pausedAt.getTime() - resumeNow)
-                  }
-                  setPausedAt(null)
-                  return
-                }
-                if (previewNow) setPausedAt(previewNow)
-              }}>
+              <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => runTransport({ type: pausedAt ? "resume" : "pause" })}>
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
-              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
+              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
               <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("live")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
               <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
+              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
+              <div className="col-span-2"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} /></div>
               <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
               <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
               <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
@@ -948,6 +1021,7 @@ export function OperatorConsole() {
               </Field>
               <Field label="End time" htmlFor="endTime">
                 <Input id="endTime" type="time" value={endTime} onChange={(event) => updateEvent({ endTime: event.target.value })} />
+                {endAt ? null : <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-event-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div>}
               </Field>
             </div>
             <Field label="Venue" htmlFor="venue">
@@ -1039,7 +1113,7 @@ export function OperatorConsole() {
 
           <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
             <p className="font-mono text-[12px] text-black/70">Slate and Browser capture are separate outputs. Run either, or both at once to different destinations.</p>
-            <div className="grid gap-3">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
               {(["slate", "capture"] as const).map((ch) => {
                 const other = ch === "slate" ? "capture" : "slate"
                 const pick = (c: RtmpChannelId) => (c === "slate" ? dests.selectedId : dests.selectedCaptureId)
@@ -1052,6 +1126,7 @@ export function OperatorConsole() {
                 )
               })}
               <RelayCard dests={dests.items} />
+              <AudioCard />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
               <div className="space-y-2">
@@ -1082,7 +1157,7 @@ export function OperatorConsole() {
                     <>
                       <Pill size="sm" tone="outline" data-testid="dest-rename" onClick={() => setDestForm({ mode: destForm.mode === "rename" ? null : "rename", name: selectedDest.name, url: "" })}>Rename</Pill>
                       <Pill size="sm" tone="outline" data-testid="dest-reveal" aria-pressed={revealed?.id === selectedDest.id} onClick={() => void revealDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? "Hide" : "Reveal"}</Pill>
-                      <Pill size="sm" tone="outline" data-testid="dest-copy" onClick={() => void copyDest(selectedDest.id)}>Copy</Pill>
+                      <Pill size="sm" tone="outline" data-testid="dest-copy" onClick={() => void copyDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? (copied === "dest" ? "Copied" : "Tap to copy") : "Copy"}</Pill>
                       <ConfirmButton data-testid="dest-delete" className={pillClass("danger", "sm")} disabled={[dests.selectedId, dests.selectedCaptureId].includes(selectedDest.id) && rtmpLive} confirmLabel={`Delete ${selectedDest.name}? · confirm`} onConfirm={() => void destAction({ action: "delete", id: selectedDest.id })}>Delete</ConfirmButton>
                     </>
                   ) : null}
@@ -1241,6 +1316,8 @@ export function OperatorConsole() {
             ) : (
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
+            {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
+            {previewScreen === "program" ? <ProgramPlayer key={programSource} scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
           </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 [&>*:first-child]:basis-full xl:[&>*:first-child]:basis-0 xl:[&>*:first-child]:grow">
@@ -1278,7 +1355,7 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div></Field>
+            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-endcard-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div> : null}</Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
@@ -1399,16 +1476,17 @@ export function OperatorConsole() {
           aria-live="polite"
           data-testid="toast"
           data-kind={toast.kind}
-          title="Tap to dismiss"
-          onClick={toast.kind === "copy-failed" ? undefined : dismissToast}
+          title={toast.undo ? "Tap to undo" : "Tap to dismiss"}
+          onClick={toast.kind === "copy-failed" ? undefined : () => { dismissToast(); toast.undo?.() }}
           onTouchMove={toast.kind === "copy-failed" ? undefined : dismissToast}
           className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-left text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]"
         >
-          <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
+          <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" || toast.kind === "failover" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
           <span className="min-w-0">
-            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up" }[toast.kind]}</span>
+            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up", extend: "End time", failover: "Program source" }[toast.kind]}</span>
             <span className={`block font-mono text-[12px] text-white/75 ${toast.kind === "copy-failed" ? "break-all select-all" : "truncate"}`}>{toast.text}</span>
           </span>
+          {toast.undo ? <span data-testid="toast-undo" className="shrink-0 rounded-full bg-[#D9FF43] px-3 py-1 font-mono text-[12px] font-bold text-black">Undo</span> : null}
         </button>
       ) : null}
       {showHelp ? (
@@ -1699,7 +1777,7 @@ function hostOf(url: string, fallback: string): string {
 
 type RtmpChannelId = "slate" | "capture"
 type RtmpPhase = "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
-type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; connectError: string | null; failure: string | null }
+type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; audio?: { mode: "silent" | "tone" | "bed"; warning: string | null; pending: boolean; live?: boolean; applying?: boolean; peakDb?: number | null; underruns?: number } | null; connectError: string | null; failure: string | null }
 const STOPPED_CHANNEL: RtmpChannelView = { running: false, state: "stopped", reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null }
 
 /** One independent RTMP output (Slate or Browser capture): its own destination, Start/Stop, status and messages. */
@@ -1788,9 +1866,9 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 
   const pillText = busy === "starting" ? "Starting…" : busy === "stopping" ? "Stopping…" : status.connectError && live && phase !== "connected" ? "Can't connect" : { stopped: live ? "Live" : "Off", starting: "Connecting…", connected: status.adopted ? "Live (found running)" : "Live", reconnecting: "Reconnecting", stalled: "Stalled · no frames", failed: "Failed" }[phase]
   return (
-    <div data-testid={`rtmp-card-${channel}`} className="space-y-2 rounded-2xl border border-black/10 bg-white p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">{label}</p>
+    <div data-testid={`rtmp-card-${channel}`} className="min-w-0 break-words [overflow-wrap:anywhere] space-y-2 rounded-2xl border border-black/10 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p data-testid={tid("heading")} className="font-mono text-[13px] font-bold tracking-[0.04em]">{channel === "slate" ? "/slate" : "/browser capture"}</p>
         <span data-testid={tid("status")} data-state={live ? phase : "stopped"} className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${phase === "connected" || (live && phase === "stopped") ? "bg-[#128a3e] text-white" : phase === "reconnecting" || phase === "starting" ? "bg-[#b45309] text-white" : phase === "failed" || phase === "stalled" ? "bg-[#d93200] text-white" : "bg-black/5 text-black/70"}`}>
           <span className={`size-1.5 rounded-full ${live ? "animate-pulse bg-white" : "bg-black/30"}`} />
           {pillText}{status.restarts > 0 ? <span title="Times the supervisor restarted the encoder after it exited (dropped connection, crash, or failed connect)"> · {status.restarts} {status.restarts === 1 ? "restart" : "restarts"}</span> : ""}
@@ -1800,13 +1878,13 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
       <div className="flex flex-wrap items-center gap-2 font-mono text-[12px] text-black/70">
         <label htmlFor={tid("destination")}>Destination</label>
         {dests.length ? (
-          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
+          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 max-w-full flex-1 basis-40 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
             <option value="">Choose…</option>
             <option value="relay">Relay (MediaMTX) → /{channel}</option>
             {dests.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.host}</option>)}
           </select>
         ) : (
-          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
+          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 max-w-full flex-1 basis-40 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
             <option value="">Add a destination below, or…</option>
             <option value="relay">Relay (MediaMTX) → /{channel}</option>
           </select>
@@ -1824,9 +1902,9 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
             </select>
             <label htmlFor="capture-encoder">Encoder</label>
             <select id="capture-encoder" data-testid="capture-encoder" disabled={live} value={captureEncoder} onChange={(event) => { const v = event.target.value === "libx264" || event.target.value === "videotoolbox" ? event.target.value : "auto"; setCaptureEncoderState(v); window.localStorage.setItem("rtmp-capture-encoder", v) }} className="h-8 border px-2">
-              <option value="auto">Auto (VideoToolbox on Mac)</option>
+              <option value="auto">Auto (VideoToolbox if it can hold CBR, else libx264)</option>
               <option value="libx264">libx264 (CPU)</option>
-              <option value="videotoolbox">VideoToolbox</option>
+              <option value="videotoolbox">VideoToolbox (always)</option>
             </select>
             <span className="basis-full">Keyframe every 2s, constant bitrate (maxrate = bitrate, 2s buffer), + 128k audio.</span>
           </>
@@ -1834,9 +1912,20 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
       </div>
       {live && status.relay ? <p data-testid={tid("via-relay")} className="font-mono text-[12px] text-black/70">Publishing to relay /{channel}{status.size ? ` · ${status.size}` : ""}. Forwards are set in the Relay card.</p> : live && status.host ? <p className="font-mono text-[12px] text-black/70">Sending to {status.host}{status.size ? ` · ${status.size}` : ""}</p> : null}
       {live && status.health ? <SourceHealthLine channel={channel} health={status.health} /> : null}
+      {live && status.audio ? (
+        <p data-testid={tid("audio")} data-live={status.audio.live ? "1" : "0"} data-applying={status.audio.applying ? "1" : "0"} className="font-mono text-[12px] text-black/70">
+          Audio: {status.audio.mode === "bed" ? "audio bed" : status.audio.mode}
+          {status.audio.live ? <span data-testid={tid("audio-level")}> · {typeof status.audio.peakDb === "number" ? `peak ${status.audio.peakDb.toFixed(0)} dBFS` : "silent"}</span> : null}
+          {status.audio.live && status.audio.applying ? <span data-testid={tid("audio-applying")} className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-bold uppercase">Applying…</span> : null}
+          {status.audio.live && !status.audio.applying ? <span data-testid={tid("audio-hot")} className="ml-2 inline-block rounded-full bg-[#128a3e] px-2 py-0.5 text-[11px] font-bold whitespace-nowrap text-white uppercase" title="Audio changes switch live: no restart, no reconnect">Applied live</span> : null}
+          {status.audio.pending ? <span data-testid={tid("audio-pending")} className="ml-2 rounded-full bg-[#b45309] px-2 py-0.5 text-[11px] font-bold text-white uppercase" title="This channel started before live audio switching; restart it once to get it.">Restart to apply new audio</span> : null}
+          {status.audio.warning ? <span className="block text-[#8a4b06]">{status.audio.warning}</span> : null}
+        </p>
+      ) : null}
+      {live && status.audio?.warning ? <p role="alert" data-testid={tid("audio-warning")} className="font-mono text-[12px] font-bold text-[#8a4b06]">{status.audio.warning}</p> : null}
       {live && status.health && !status.relay ? <DiagnosisLine testid={tid("diagnosis")} value={diagnose({ source: { label: label, health: status.health }, forwards: [], totalKbps: status.health.kbps })} /> : null}
       {sameAsOther && !live ? <p role="alert" data-testid={tid("same-dest")} className="font-mono text-[12px] font-bold text-[#b42318]">The other channel is already live on this destination. One stream key takes one publisher; choose a different destination.</p> : null}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Pill data-testid={tid("start")} disabled={!canStart || !selected || busy !== null || live} aria-busy={busy === "starting"} onClick={start}>{busy === "starting" ? "Starting…" : `Start ${label.toLowerCase()}`}</Pill>
         <ConfirmButton data-testid={tid("stop")} className={pillClass("danger")} disabled={busy !== null || !live} confirmLabel={`Stop ${label.toLowerCase()}? · confirm`} onConfirm={stop}>{busy === "stopping" ? "Stopping…" : "Stop"}</ConfirmButton>
       </div>
@@ -1851,12 +1940,143 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-type RelayView = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
+type RelayView = { backup?: { ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
+/** External OBS program feed: OBS publishes to the relay's /program; /stream can show it full-frame. */
+function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const program = relay?.program
+  const captureSource = relay?.paths.capture?.source
+  const captureProgramAudio = captureSource && "capture" in captureSource ? captureSource.capture?.programAudio ?? null : null
+  const [obs, setObs] = useState<{ server: string; streamKey: string } | null>(null)
+  const [preview, setPreview] = useState(false)
+  useEffect(() => {
+    if (!obs) return
+    const id = window.setTimeout(() => setObs(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [obs])
+  async function reveal() {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-program" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey })
+  }
+  const state = !program?.armed ? "off" : program.ready ? "receiving" : "waiting"
+  const video = program?.tracks.find((t) => /264|265|hevc|av1|vp9/i.test(t)) ?? null
+  const audio = program?.tracks.find((t) => /aac|opus|mpeg-4 audio|mp3/i.test(t)) ?? null
+  return (
+    <div data-testid="program-section" className="space-y-2 rounded-xl border border-black/10 p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[13px] font-bold">/program · OBS feed</span>
+        <span data-testid="program-state" data-state={state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${state === "receiving" ? "bg-[#128a3e] text-white" : state === "waiting" ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>
+          {state === "receiving" ? "Receiving" : state === "waiting" ? "Armed · waiting for OBS" : "Off"}
+        </span>
+        {state === "receiving" ? <span data-testid="program-stats" className="font-mono text-[12px] text-black/70">{[program?.video ?? video ?? "no video", program?.audio ?? audio ?? "no audio", program?.fps ? `${program.fps} fps` : null, program?.kbps ? `${(program.kbps / 1000).toFixed(1)} Mbps` : null].filter(Boolean).join(" · ")}</span> : null}
+      </div>
+      {state === "receiving" ? (
+        <p data-testid="program-audio-track" data-present={program?.audioTrack ? "1" : "0"} className="font-mono text-[12px]">
+          {program?.audioTrack ? (
+            <><span className="rounded-full bg-[#128a3e] px-2 py-0.5 text-[11px] font-bold text-white uppercase">Audio present</span> <span className="text-black/70">{[program.audioTrack.codec, program.audioTrack.channels ? (program.audioTrack.channels === 1 ? "mono" : program.audioTrack.channels === 2 ? "stereo" : `${program.audioTrack.channels} ch`) : null, program.audioTrack.sampleRate ? `${program.audioTrack.sampleRate / 1000} kHz` : null].filter(Boolean).join(" · ")}</span></>
+          ) : (
+            <><span className="rounded-full bg-[#d93200] px-2 py-0.5 text-[11px] font-bold text-white uppercase">No audio track</span> <span className="text-black/70">OBS sends picture only: check OBS › Settings › Audio / the mixer.</span></>
+          )}
+        </p>
+      ) : null}
+      {captureProgramAudio ? (
+        <p data-testid="program-capture-audio" data-mixing={captureProgramAudio.mixing ? "1" : "0"} className="font-mono text-[12px] text-black/70">
+          Browser capture: {captureProgramAudio.mixing ? `mixing program audio · peak ${captureProgramAudio.peakDb === null || captureProgramAudio.peakDb === undefined ? "silent" : `${captureProgramAudio.peakDb.toFixed(0)} dBFS`}` : captureProgramAudio.on ? "program on, audio not flowing yet" : "not mixing program audio (screen isn’t program)"}
+        </p>
+      ) : null}
+      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can&apos;t show it.</p>
+      <div className="flex flex-wrap gap-2">
+        {program?.armed ? (
+          <ConfirmButton data-testid="program-disarm" className={pillClass("danger", "sm")} disabled={busy} confirmLabel="Disarm? OBS gets disconnected · confirm" onConfirm={() => void act({ action: "disarm-program" }, "Disarmed.")}>Disarm</ConfirmButton>
+        ) : (
+          <Pill size="sm" data-testid="program-arm" disabled={busy || !relay?.installed} onClick={() => void act({ action: "arm-program" }, "Armed: waiting for OBS on /program.")}>Arm receive</Pill>
+        )}
+        <Pill size="sm" tone="outline" data-testid="program-reveal" disabled={!program?.armed} onClick={() => (obs ? setObs(null) : void reveal())}>{obs ? "Hide OBS URL" : "Reveal OBS URL"}</Pill>
+        <Pill size="sm" tone="outline" data-testid="program-preview" aria-pressed={preview} disabled={!program?.ready} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview"}</Pill>
+        <ConfirmButton data-testid="program-rotate" className={pillClass("outline", "sm")} disabled={busy || !program?.armed} confirmLabel="New key? OBS must be updated · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-program" }, "New OBS stream key. Reveal it and update OBS.") }}>New key</ConfirmButton>
+      </div>
+      {obs ? (
+        <div data-testid="program-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
+          <p className="text-black/70">OBS › Settings › Stream › Service: Custom. Hides in 30s.</p>
+          <CredRow label="Server" value={obs.server} copyLabel="OBS server" testid="program-obs-server" />
+          <CredRow label="Key" value={obs.streamKey} copyLabel="OBS stream key" testid="program-obs-key" />
+        </div>
+      ) : null}
+      {preview && program?.ready ? (
+        <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay" ready={program.ready} /></div>
+      ) : null}
+      {program?.armed ? <BackupSection relay={relay} busy={busy} act={act} /> : null}
+    </div>
+  )
+}
+
+/** One revealed secret: label · value (mono, wraps anywhere) · Copy, aligned on any width. */
+function CredRow({ label, value, copyLabel, testid }: { label: string; value: string; copyLabel: string; testid: string }) {
+  return (
+    <div className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-start gap-2">
+      <span className="pt-1 text-black/60">{label}</span>
+      <code data-testid={testid} className="min-w-0 pt-1 font-mono break-all">{value}</code>
+      <Pill size="sm" tone="outline" data-testid={`${testid}-copy`} onClick={() => void copyOrShow(copyLabel, value)}>Copy</Pill>
+    </div>
+  )
+}
+
+/** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
+function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const backup = relay?.backup
+  const [obs, setObs] = useState<{ server: string; streamKey: string } | null>(null)
+  const [pull, setPull] = useState("")
+  const [preview, setPreview] = useState(false)
+  useEffect(() => {
+    if (!obs) return
+    const id = window.setTimeout(() => setObs(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [obs])
+  async function reveal() {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey })
+  }
+  const st = sourceStatus(backup ? { ready: backup.ready, kbps: backup.kbps, dataAgeMs: backup.dataAgeMs } : undefined)
+  return (
+    <div data-testid="backup-section" className="space-y-2 border-t border-black/10 pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[13px] font-bold">/program-backup · backup</span>
+        <span data-testid="backup-state" data-state={st.tone} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${st.tone === "ok" ? "bg-[#128a3e] text-white" : st.tone === "warn" ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>{st.text}</span>
+        {backup?.pullFrom ? <span className="font-mono text-[12px] text-black/70">pulling from {backup.pullFrom}</span> : null}
+      </div>
+      <p className="font-mono text-[12px] text-black/70">A second computer publishes here with its own key, or MediaMTX pulls a URL (RTMP/RTSP/SRT/HLS). Pick Main/Backup and auto-failover in Transport.</p>
+      <div className="flex flex-wrap gap-2">
+        <Pill size="sm" tone="outline" data-testid="backup-reveal" disabled={Boolean(backup?.pullFrom)} onClick={() => (obs ? setObs(null) : void reveal())}>{obs ? "Hide backup URL" : "Reveal backup URL"}</Pill>
+        <Pill size="sm" tone="outline" data-testid="backup-preview" aria-pressed={preview} disabled={!backup?.ready} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview"}</Pill>
+      </div>
+      {obs ? (
+        <div data-testid="backup-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
+          <p className="text-black/70">Backup computer › OBS › Stream › Custom (same ingest server). Hides in 30s.</p>
+          <CredRow label="Server" value={obs.server} copyLabel="Backup server" testid="backup-obs-server" />
+          <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
+        <Pill size="sm" data-testid="backup-pull-save" disabled={busy || !pull.trim()} onClick={() => { void act({ action: "backup-pull", url: pull.trim() }, "Backup pulls from the URL."); setPull("") }}>Pull</Pill>
+        {backup?.pullFrom ? <Pill size="sm" tone="outline" data-testid="backup-pull-clear" disabled={busy} onClick={() => void act({ action: "backup-pull", url: "" }, "Backup takes a publisher again.")}>Stop pulling</Pill> : null}
+      </div>
+      {preview && backup?.ready ? (
+        <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay-backup" src={programOperatorSrc("program-backup")} ready={backup.ready} /></div>
+      ) : null}
+    </div>
+  )
+}
+
 function RelayCard({ dests }: { dests: Dest[] }) {
   const [relay, setRelay] = useState<RelayView | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1886,8 +2106,8 @@ function RelayCard({ dests }: { dests: Dest[] }) {
   }
   const running = relay?.running === true
   return (
-    <div data-testid="relay-card" className="space-y-3 rounded-2xl border border-black/10 bg-white p-3">
-      <div className="flex items-center justify-between gap-2">
+    <div data-testid="relay-card" className="min-w-0 break-words [overflow-wrap:anywhere] space-y-3 rounded-2xl border border-black/10 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Relay (MediaMTX)</p>
         {running && relay?.totalOutKbps ? <span data-testid="relay-total-out" title="Sum of all forwards plus direct channels: roughly your upload use" className="font-mono text-[12px] text-black/70">↑ {(relay.totalOutKbps / 1000).toFixed(1)} Mbps out</span> : null}
         <span className="flex flex-wrap items-center gap-1">
@@ -1902,10 +2122,11 @@ function RelayCard({ dests }: { dests: Dest[] }) {
       <p className="font-mono text-[12px] text-black/70">Optional. Pick “Relay” as a channel’s destination and start it: it publishes to the relay server (preview works) without going anywhere else. Tick destinations per path, then Start forwards to fan out (one ffmpeg -c copy each, restarted on failure). Stop forwards ends the fan-out only; channels keep publishing. The server stops by itself when nothing uses it.{relay?.version ? ` MediaMTX ${relay.version}.` : ""}</p>
       {relay && !relay.installed ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">MediaMTX not found. On the Mac: brew install mediamtx, or run scripts/install-mediamtx.sh, or set MEDIAMTX_BIN.</p> : null}
       {relay?.error ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">{relay.error}</p> : null}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Pill size="sm" data-testid="relay-start" disabled={busy || relay?.enabled === true || !relay?.installed} onClick={() => void act({ action: "start" }, "Forwards started.")}>Start forwards</Pill>
         <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !relay?.enabled} confirmLabel="Stop all forwards? Channels keep publishing · confirm" onConfirm={() => void act({ action: "stop" }, "Forwards stopped. Channels keep publishing to the relay.")}>Stop forwards</ConfirmButton>
       </div>
+      <ProgramSection relay={relay} busy={busy} act={act} />
       {(["slate", "capture"] as const).map((name) => {
         const info = relay?.paths[name]
         const enabled = new Map((info?.forwards ?? []).map((item) => [item.destId, item]))
@@ -1976,7 +2197,17 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
       <HealthChip health={health} />
       {cap ? (
         <p className="font-mono text-[11px] text-black/60" title="Chrome only sends a frame when /stream repaints (≥1/s for the countdown); the writer repeats the last one to keep a constant frame rate. Backlog = frames skipped because the encoder fell behind.">
-          Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms
+          Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms{typeof cap.heartbeatAgeMs === "number" ? (cap.heartbeatAgeMs < 6000 ? " · page alive" : ` · page stalled ${Math.round(cap.heartbeatAgeMs / 1000)}s`) : ""}
+        </p>
+      ) : null}
+      {cap?.sync ? (
+        <p data-testid={`rtmp-sync-${channel}`} className="font-mono text-[11px] text-black/60" title="Audio is delayed by the screencast lag so it matches the picture; program audio follows the /stream player's latency. Trim is the desk's A/V offset.">
+          A/V sync: screencast lag {cap.sync.screencastLagMs ?? "–"}ms → audio +{cap.sync.bedDelayMs}ms{cap.sync.videoDelayMs ? ` · video +${cap.sync.videoDelayMs}ms` : ""}{cap.sync.trimMs ? ` · trim ${cap.sync.trimMs > 0 ? "+" : ""}${cap.sync.trimMs}ms` : ""}{cap.programAudio?.mixing ? ` · program delay ${cap.programAudio.delayMs}ms (player ${cap.programAudio.playerLatencyMs ?? "?"}ms)` : ""}{cap.sync.skippedMs ? ` · dropped ${cap.sync.skippedMs}ms (encoder behind)` : ""}{cap.sync.test ? " · SYNC TEST ON" : ""}
+        </p>
+      ) : null}
+      {cap?.programAudio ? (
+        <p data-testid={`rtmp-program-audio-${channel}`} className="font-mono text-[11px] text-black/60">
+          Program audio: {cap.programAudio.mixing ? `mixing · peak ${typeof cap.programAudio.peakDb === "number" ? `${cap.programAudio.peakDb.toFixed(0)} dBFS` : "silent"}` : cap.programAudio.on ? "waiting for OBS audio" : "off (audio bed)"}
         </p>
       ) : null}
     </div>
@@ -1989,5 +2220,176 @@ function DiagnosisLine({ value, testid }: { value: { level: Level; text: string 
       <span className={`mt-1 size-2 shrink-0 rounded-full ${LEVEL_DOT[value.level]}`} />
       <span>{value.text}</span>
     </p>
+  )
+}
+
+type AudioModeView = "silent" | "tone" | "bed"
+type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; syncTest?: boolean }
+type AudioFileView = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string }
+type AudioSettingsView = { rev: number; channels: Record<RtmpChannelId, AudioConfigView> }
+const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aac,audio/mpeg,audio/mp4,audio/wav,audio/aac"
+
+function fmtDuration(sec: number) {
+  const s = Math.round(sec)
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
+}
+
+/** Per-channel stream audio (silence / test tone / looped audio bed) with a shared library. Saved on the server (rev-synced), edited as a draft. */
+function AudioCard() {
+  const [saved, setSaved] = useState<AudioSettingsView | null>(null)
+  const [files, setFiles] = useState<AudioFileView[]>([])
+  const [draft, setDraft] = useState<AudioSettingsView["channels"] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
+  const [playing, setPlaying] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const apply = useCallback((body: { settings?: AudioSettingsView; files?: AudioFileView[] } | null) => {
+    if (body?.settings) setSaved(body.settings)
+    if (body?.files) setFiles(body.files)
+  }, [])
+  const load = useCallback(async () => {
+    const response = await fetch("/api/audio", { cache: "no-store" }).catch(() => null)
+    if (response?.ok) apply(await response.json().catch(() => null))
+  }, [apply])
+  useEffect(() => {
+    const first = window.setTimeout(() => void load(), 0)
+    const id = window.setInterval(() => void load(), 2000)
+    return () => { window.clearTimeout(first); window.clearInterval(id) }
+  }, [load])
+  const view = draft ?? saved?.channels ?? null
+  const dirty = draft !== null && saved !== null && JSON.stringify(draft) !== JSON.stringify(saved.channels)
+  function edit(ch: RtmpChannelId, patch: Partial<AudioConfigView>) {
+    if (!view) return
+    setDraft({ ...view, [ch]: { ...view[ch], ...patch } })
+  }
+  async function post(url: string, init: RequestInit) {
+    setBusy(true)
+    const response = await fetch(url, init).catch(() => null)
+    setBusy(false)
+    if (!response) { setMessage({ tone: "error", text: "Could not reach the server." }); return null }
+    if (handleUnauthorized(response)) return null
+    const body = (await response.json().catch(() => null)) as { error?: string; settings?: AudioSettingsView; files?: AudioFileView[] } | null
+    apply(body)
+    if (!response.ok) { setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` }); return null }
+    return body
+  }
+  async function save() {
+    if (!draft || !saved) return
+    const body = await post("/api/audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", channels: draft, baseRev: saved.rev }) })
+    if (body) { setDraft(null); setMessage({ tone: "info", text: "Audio saved. Live channels switch to it now (crossfade, no restart)." }) }
+  }
+  async function upload(file: File) {
+    if (file.size > 50_000_000) return setMessage({ tone: "error", text: "Audio is over 50 MB." })
+    const body = await post(`/api/audio/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file })
+    if (body) setMessage({ tone: "info", text: `Uploaded ${file.name}. Add it to a channel’s bed below.` })
+  }
+  function togglePlay(id: string) {
+    const el = audioRef.current
+    if (!el) return
+    if (playing === id) { el.pause(); setPlaying(null); return }
+    el.src = `/api/audio/file/${id}`
+    void el.play().then(() => setPlaying(id)).catch(() => setMessage({ tone: "error", text: "Browser could not play this file." }))
+  }
+  const byId = new Map(files.map((f) => [f.id, f]))
+  return (
+    <div data-testid="audio-card" className="min-w-0 break-words [overflow-wrap:anywhere] space-y-3 rounded-2xl border border-black/10 bg-white p-3">
+      <audio ref={audioRef} onEnded={() => setPlaying(null)} hidden />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Stream audio</p>
+        {dirty ? <span data-testid="audio-unsaved" className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[11px] font-bold text-white uppercase">Unsaved</span> : null}
+      </div>
+      <p className="font-mono text-[12px] text-black/70">What /slate and /browser capture send as audio: silence, a test tone, or a looped audio bed (one file or a playlist). AAC 128k, 48 kHz stereo. Saved changes switch live within about a second with a short crossfade: no restart, no reconnect.</p>
+      {view ? (["slate", "capture"] as const).map((ch) => {
+        const cfg = view[ch]
+        const tid = (s: string) => `audio-${ch}-${s}`
+        return (
+          <div key={ch} data-testid={tid("box")} className="space-y-2 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
+            <p data-testid={tid("title")} className="font-bold">{ch === "slate" ? "/slate" : "/browser capture"}</p>
+            <div role="radiogroup" aria-label={`${ch === "slate" ? "/slate" : "/browser capture"} audio`} className="flex flex-col items-start gap-1">
+              {(["silent", "tone", "bed"] as const).map((mode) => (
+                <label key={mode} className="flex min-h-7 items-center gap-2">
+                  <input type="radio" name={`audio-mode-${ch}`} data-testid={tid(`mode-${mode}`)} checked={cfg.mode === mode} onChange={() => edit(ch, { mode })} />
+                  {mode === "silent" ? "Silent" : mode === "tone" ? "Tone" : "Audio bed / playlist"}
+                </label>
+              ))}
+            </div>
+            <div className="flex flex-col items-start gap-1 border-t border-black/10 pt-2">
+              <label className="flex items-center gap-2" title={ch === "slate" ? "Slate: + delays the audio (its picture is ffmpeg's own, so it can't go earlier)." : "+ = audio later, − = audio earlier (the picture is held back instead). Applies live."}>
+                A/V offset <input type="number" data-testid={tid("av-offset")} min={ch === "slate" ? 0 : -500} max={500} step={10} value={cfg.avOffsetMs ?? 0} onChange={(e) => edit(ch, { avOffsetMs: Number(e.target.value) })} className="h-7 w-20 border px-1" /> ms
+                <span className="text-black/60">(+ audio later)</span>
+              </label>
+              {ch === "capture" ? (
+                <label className="flex min-h-7 items-center gap-2">
+                  <input type="checkbox" data-testid={tid("sync-test")} checked={cfg.syncTest === true} onChange={(e) => edit(ch, { syncTest: e.target.checked })} />
+                  A/V sync test: white flash + beep every second (on air!)
+                </label>
+              ) : null}
+            </div>
+            {cfg.mode === "tone" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <label>Freq <input type="number" data-testid={tid("tone-hz")} min={20} max={20000} value={cfg.toneHz} onChange={(e) => edit(ch, { toneHz: Number(e.target.value) })} className="h-7 w-20 border px-1" /> Hz</label>
+                <label>Level <input type="number" data-testid={tid("tone-db")} min={-60} max={0} value={cfg.toneDb} onChange={(e) => edit(ch, { toneDb: Number(e.target.value) })} className="h-7 w-16 border px-1" /> dBFS</label>
+              </div>
+            ) : null}
+            {cfg.mode === "bed" ? (
+              <div className="space-y-2">
+                {cfg.files.length === 0 ? <p className="text-[#8a4b06]">No files chosen: streams silence. Add one from the library.</p> : null}
+                <ol className="space-y-1">
+                  {cfg.files.map((id, index) => {
+                    const f = byId.get(id)
+                    return (
+                      <li key={`${id}-${index}`} className="flex flex-wrap items-center gap-2">
+                        <span className="text-black/50">{index + 1}.</span>
+                        <span className={`min-w-0 break-words [overflow-wrap:anywhere] ${f ? "" : "text-[#b42318]"}`}>{f ? f.name : "missing file (skipped)"}</span>
+                        <button type="button" className="underline" onClick={() => edit(ch, { files: cfg.files.filter((_, i) => i !== index) })}>remove</button>
+                      </li>
+                    )
+                  })}
+                </ol>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select data-testid={tid("add")} value="" onChange={(e) => e.target.value && edit(ch, { files: [...cfg.files, e.target.value] })} className="h-7 border px-1">
+                    <option value="">+ add file…</option>
+                    {files.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                  {cfg.files.length > 1 ? (
+                    <select data-testid={tid("order")} value={cfg.order} onChange={(e) => edit(ch, { order: e.target.value === "shuffle" ? "shuffle" : "inOrder" })} className="h-7 border px-1">
+                      <option value="inOrder">Play in order</option>
+                      <option value="shuffle">Shuffle (each pass)</option>
+                    </select>
+                  ) : null}
+                  <label>Volume <input type="number" data-testid={tid("volume")} min={-40} max={12} value={cfg.volumeDb} onChange={(e) => edit(ch, { volumeDb: Number(e.target.value) })} className="h-7 w-16 border px-1" /> dB</label>
+                  <label>Fade in <input type="number" data-testid={tid("fade")} min={0} max={30} value={cfg.fadeInSec} onChange={(e) => edit(ch, { fadeInSec: Number(e.target.value) })} className="h-7 w-14 border px-1" /> s</label>
+                </div>
+                <p className="text-black/60">Loops forever (the list repeats).</p>
+              </div>
+            ) : null}
+          </div>
+        )
+      }) : <p className="font-mono text-[12px] text-black/60">Loading…</p>}
+      <div className="flex flex-wrap gap-2">
+        <Pill size="sm" data-testid="audio-save" disabled={!dirty || busy} onClick={() => void save()}>Save audio</Pill>
+        <Pill size="sm" tone="outline" data-testid="audio-discard" disabled={!dirty || busy} onClick={() => setDraft(null)}>Discard</Pill>
+      </div>
+      <div className="space-y-1 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-bold">Library</span>
+          <label className="cursor-pointer underline">Upload mp3 / m4a / wav / aac (≤ 50 MB)
+            <input type="file" data-testid="audio-upload" accept={AUDIO_ACCEPT} hidden disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f) }} />
+          </label>
+        </div>
+        {files.length === 0 ? <p className="text-black/60">No audio uploaded yet.</p> : null}
+        <ul className="space-y-1">
+          {files.map((f) => (
+            <li key={f.id} data-testid={`audio-file-${f.name}`} className="flex flex-wrap items-center gap-2">
+              <button type="button" data-testid={`audio-play-${f.name}`} aria-label={playing === f.id ? `Pause ${f.name}` : `Play ${f.name}`} onClick={() => togglePlay(f.id)} className="h-6 w-6 rounded-full bg-black text-[10px] text-white">{playing === f.id ? "❚❚" : "▶"}</button>
+              <span className="min-w-0 break-words [overflow-wrap:anywhere]">{f.name}</span>
+              <span className="text-black/60">{fmtDuration(f.durationSec)} · {f.codec} · {(f.bytes / 1e6).toFixed(1)} MB</span>
+              <ConfirmButton className="underline text-[#b42318]" disabled={busy} confirmLabel="Delete? · confirm" onConfirm={() => void post("/api/audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id: f.id }) })}>delete</ConfirmButton>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {message ? <p role="status" data-testid="audio-message" className={`font-mono text-[12px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
+    </div>
   )
 }

@@ -4,7 +4,12 @@
 // Frames come from the Chrome DevTools screencast (Page.startScreencast), which pushes a JPEG
 // whenever the page repaints. A fixed-rate timer writes the latest frame into ffmpeg's
 // image2pipe at CAPTURE_FPS, so the output is constant frame rate even when the page is still.
-// A silent stereo track (anullsrc) is added because Castr/Restream expect audio.
+// Audio: scripts/audio-feeder.mjs (AUDIO_LIVE_FILE: silence, tone or a bed/playlist), switchable live.
+// Program audio: headless Chromium's sound is not part of the screencast, so while /stream shows
+// the OBS program (<html data-screen="program">) this script reads /program's audio straight from
+// the relay (URL in PROGRAM_READ_FILE, 0600) and feeds it to ffmpeg as raw PCM on fd 3, delayed by
+// CAPTURE_PROGRAM_AUDIO_DELAY_MS (default 1170, measured: LL-HLS ~1.2s + screencast) to line up with the LL-HLS picture. The same PCM
+// stream carries a gain channel that fades the audio bed out under the program (200ms) and back.
 //
 // Env: CAPTURE_URL (http://127.0.0.1:PORT/stream?k=VIEWKEY), RTMP_URL, CAPTURE_SIZE (1280x720 |
 // 1920x1080), CAPTURE_FPS (default 30), CAPTURE_BITRATE (kbps; default 2500 at 720p, 4500 at 1080p),
@@ -13,7 +18,9 @@
 // Exits non-zero on any failure so rtmp-supervisor.sh restarts it.
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
+import path from "node:path"
 import { chromium } from "playwright"
+import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
 const pageUrl = process.env.CAPTURE_URL
@@ -34,30 +41,213 @@ function pickEncoder() {
   const want = (process.env.CAPTURE_ENCODER || "auto").toLowerCase()
   if (want === "libx264") return "libx264"
   if (want !== "videotoolbox" && !(want === "auto" && process.platform === "darwin")) return "libx264"
-  const probe = spawnSync(ffmpegBin, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30", "-frames:v", "2", "-c:v", "h264_videotoolbox", "-b:v", "1000k", "-f", "null", "-"], { timeout: 8000 })
-  return probe.status === 0 ? "h264_videotoolbox" : "libx264"
+  if (!vtProbe([])) return "libx264"
+  // auto: only use VideoToolbox when it can hold a constant bitrate; its average-bitrate mode
+  // undershoots badly on static pages. An explicit "videotoolbox" still gets it (with a warning).
+  if (want === "auto" && !vtProbe(["-constant_bit_rate", "1"])) return "libx264"
+  return "h264_videotoolbox"
+}
+function vtProbe(extra) {
+  const probe = spawnSync(ffmpegBin, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30", "-frames:v", "2", "-c:v", "h264_videotoolbox", "-b:v", "1000k", ...extra, "-f", "null", "-"], { timeout: 8000 })
+  return probe.status === 0
 }
 const encoder = pickEncoder()
+// VideoToolbox's default rate control is average-bitrate VBR and ignores -maxrate as a floor, so a
+// mostly static page encodes at a fraction of the set bitrate (e.g. 636k of 2500k), which YouTube
+// can treat as an unhealthy/idle stream. True CBR (-constant_bit_rate 1) needs FFmpeg 6.1+ and
+// macOS 13+ on Apple Silicon; probe it and fall back to ABR with a data-rate cap.
+const vtCbr = encoder === "h264_videotoolbox" && vtProbe(["-constant_bit_rate", "1"])
+
 // Keyframe every 2s (YouTube/Castr want ≤ 2s), CBR-ish: maxrate = bitrate, 2s buffer.
 const gop = String(fps * 2)
 const videoArgs = encoder === "h264_videotoolbox"
-  ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-profile:v", "high", "-b:v", `${bitrate}k`, "-maxrate", `${bitrate}k`, "-bufsize", `${bitrate * 2}k`, "-g", gop, "-keyint_min", gop]
+  ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-profile:v", "high", "-b:v", `${bitrate}k`,
+     ...(vtCbr ? ["-constant_bit_rate", "1"] : ["-maxrate", `${bitrate}k`, "-bufsize", `${bitrate * 2}k`]),
+     "-g", gop, "-keyint_min", gop, "-force_key_frames", `expr:gte(t,n_forced*2)`]
   : ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "high", "-b:v", `${bitrate}k`, "-maxrate", `${bitrate}k`, "-bufsize", `${bitrate * 2}k`, "-nal-hrd", "cbr", "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-x264-params", "force-cfr=1"]
+
+// ---------- audio (fd 3: s16le, 48k stereo = stream audio from the live feeder, faded under program audio) ----------
+//
+// A/V sync. Video and audio are both stamped by one timeline: frame k stands for timeline time
+// k/fps, sample i for i/48000, and both writers emit exactly what wall time says is due (a stall
+// skips the SAME span in both, see `skippedMs`), so they cannot drift apart.
+// Constant offsets are compensated:
+//  - screencast lag: a frame reaches us `lag` ms after Chrome painted it (CDP frame timestamp vs
+//    arrival, smoothed), so the stream audio is delayed by that much to match the picture;
+//  - program audio: /stream's hidden player reports how far behind the relay's live edge it is
+//    (hls.js playingDate → data-latency-ms); program audio read straight from the relay is delayed
+//    by that latency + screencast lag - reader lag, tracked continuously (smoothed, clamped) with
+//    ±2% sample drop/repeat so it follows the player without clicks;
+//  - the desk's A/V offset trim (+ = audio later, - = audio earlier: delays the video instead).
+const RATE = 48000
+const programFile = process.env.PROGRAM_READ_FILE || ""
+/** Fallback program delay while /stream hasn't reported its player latency yet. */
+const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
+/** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
+const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
+const prog = { source: "main", wanted: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false }
+const sync = { lagMs: null, trimMs: 0, test: false }
+/** Screencast lag used for compensation (smoothed; 0 until measured). */
+const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
+function programTargetMs() {
+  const base = prog.latencyMs === null ? progFallbackMs : prog.latencyMs + screencastLag() - readerLagMs
+  return Math.max(100, Math.min(5000, base + sync.trimMs + videoDelayMs()))
+}
+function startProgramReader() {
+  if (prog.reader || !programFile || Date.now() < prog.restartAt) return
+  let url = ""
+  // Main = program-read.url, Backup = program-backup-read.url next to it (both 0600, written by lib/relay).
+  const file = prog.source === "backup" ? path.join(path.dirname(programFile), "program-backup-read.url") : programFile
+  try { url = fs.readFileSync(file, "utf8").trim() } catch { return }
+  if (!url) return
+  const reader = spawn(ffmpegBin, ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-rw_timeout", "5000000", "-i", url, "-vn", "-ac", "2", "-ar", String(RATE), "-f", "s16le", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"], env: childEnv })
+  prog.reader = reader
+  reader.stdout.on("data", (chunk) => {
+    prog.chunks.push(chunk)
+    prog.bytes += chunk.length
+    // Hard ceiling: never more than target + 1s queued.
+    const max = (Math.round(((prog.targetMs + 1000) / 1000) * RATE)) * 4
+    if (prog.bytes > max) dropProgram(prog.bytes - max)
+  })
+  reader.on("exit", () => {
+    if (prog.reader === reader) prog.reader = null
+    prog.chunks = []; prog.bytes = 0; prog.primed = false; prog.levelMs = null
+    prog.restartAt = Date.now() + 2000
+  })
+  log(`[audio] program audio: reading the ${prog.source === "backup" ? "Backup" : "Main"} feed`)
+}
+function stopProgramReader() {
+  if (!prog.reader) return
+  prog.reader.kill("SIGTERM")
+  prog.reader = null
+  prog.chunks = []; prog.bytes = 0; prog.primed = false; prog.levelMs = null
+  log("[audio] program audio: off")
+}
+function dropProgram(bytes) {
+  let left = bytes - (bytes % 4)
+  while (left > 0 && prog.chunks.length) {
+    const head = prog.chunks[0]
+    if (head.length <= left) { prog.chunks.shift(); prog.bytes -= head.length; left -= head.length }
+    else { prog.chunks[0] = head.subarray(left); prog.bytes -= left; left = 0 }
+  }
+}
+function readProgramFrames(frames) {
+  const want = frames * 4
+  const buf = Buffer.allocUnsafe(want)
+  let at = 0
+  while (at < want) {
+    const head = prog.chunks[0]
+    const take = Math.min(head.length, want - at)
+    head.copy(buf, at, 0, take)
+    at += take
+    if (take === head.length) prog.chunks.shift()
+    else prog.chunks[0] = head.subarray(take)
+  }
+  prog.bytes -= want
+  return buf
+}
+/**
+ * `n` stereo frames of program audio delayed by programTargetMs(), or null while it (re)fills.
+ * Keeps the queue at the target by consuming faster/slower (linear resample, up to ±16%: as fast
+ * as hls.js itself speeds up to catch the live edge, so the sound follows the picture). Big jumps
+ * (the player stalled or re-synced): > 300ms too much → drop once; > 300ms too little → hold
+ * (silence, the picture is frozen then too) until the queue is back.
+ */
+function takeProgram(n) {
+  const target = (prog.targetMs = programTargetMs())
+  const targetBytes = Math.round((target / 1000) * RATE) * 4
+  if (!prog.primed) {
+    if (prog.bytes < targetBytes || prog.bytes === 0) return null
+    prog.primed = true
+    prog.levelMs = (prog.bytes / 4 / RATE) * 1000
+  }
+  const queuedMs = (prog.bytes / 4 / RATE) * 1000
+  prog.levelMs = prog.levelMs === null ? queuedMs : prog.levelMs * 0.85 + queuedMs * 0.15 // ~120ms smoothing (reader bursts)
+  let err = prog.levelMs - target
+  if (err > 300) { dropProgram(prog.bytes - targetBytes); prog.levelMs = target; prog.jumps += 1; err = 0 }
+  if (err < -300 || prog.holding) {
+    // Hold: silence until the queue is back at the target.
+    if (!prog.holding) { prog.holding = true; prog.jumps += 1 }
+    if (queuedMs >= target) { prog.holding = false; prog.levelMs = queuedMs }
+    return Buffer.alloc(n * 4)
+  }
+  const rate = Math.abs(err) < 5 ? 0 : Math.max(-0.16, Math.min(0.16, err / 500))
+  if (rate) prog.corrections += 1
+  const consume = Math.max(1, Math.round(n * (1 + rate)))
+  if (prog.bytes < consume * 4 + 4) { prog.primed = false; prog.underruns += 1; return null }
+  // One extra frame for interpolation (left in the queue).
+  const raw = readProgramFrames(consume)
+  if (consume === n) return raw
+  const next = prog.chunks.length ? prog.chunks[0] : null
+  const out = Buffer.allocUnsafe(n * 4)
+  for (let i = 0; i < n; i++) {
+    const pos = (i * consume) / n
+    const k = Math.floor(pos)
+    const f = pos - k
+    for (let c = 0; c < 2; c++) {
+      const a = raw.readInt16LE(k * 4 + c * 2)
+      const b = k + 1 < consume ? raw.readInt16LE((k + 1) * 4 + c * 2) : next && next.length >= 4 ? next.readInt16LE(c * 2) : a
+      out.writeInt16LE(Math.round(a + (b - a) * f), i * 4 + c * 2)
+    }
+  }
+  return out
+}
+const GAIN_STEP = 1 / (0.2 * RATE)
+let bedLine = null // delay line (screencast lag + positive trim), created with the feeder
+/** `wallMs` = timeline time of the first frame (beeps of the sync test line up with the flashes). */
+function pcmBlock(n, wallMs) {
+  const programPcm = prog.wanted ? takeProgram(n) : null
+  const wantBed = Math.max(0, screencastLag() + Math.max(0, sync.trimMs))
+  const curBed = bedLine.delayMs()
+  bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
+  const bed = bedLine.process(feeder ? feeder.readFloat(n, wallMs) : new Float32Array(n * 2))
+  const out = Buffer.alloc(n * 4)
+  // Fade the stream audio out only once program audio is actually flowing (no hole while the reader starts).
+  const target = programPcm ? 0 : 1
+  if (programPcm) prog.mixedAt = Date.now()
+  for (let i = 0; i < n; i++) {
+    if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
+    else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
+    let l = bed[i * 2] * prog.gain * 32767
+    let r = bed[i * 2 + 1] * prog.gain * 32767
+    if (programPcm) {
+      const pl = programPcm.readInt16LE(i * 4)
+      const pr = programPcm.readInt16LE(i * 4 + 2)
+      l += pl
+      r += pr
+      const m = Math.max(Math.abs(pl), Math.abs(pr))
+      if (m > prog.peak) prog.peak = m
+    }
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(l))), i * 4)
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(r))), i * 4 + 2)
+  }
+  return out
+}
 
 const childEnv = { ...process.env }
 delete childEnv.ENCODER_TOKEN
 delete childEnv.RTMP_URL
 delete childEnv.CAPTURE_URL
+delete childEnv.CAPTURE_KEY_FILE
+delete childEnv.PROGRAM_READ_FILE
+
+// Stream audio, hot-swappable while live (scripts/audio-feeder.mjs; silence if no settings file).
+const feeder = createAudioFeeder({ liveFile: process.env.AUDIO_LIVE_FILE || "", appliedFile: process.env.AUDIO_APPLIED_FILE || "", ffmpegBin, env: childEnv, log })
+bedLine = createDelayLine()
 
 let browser = null
 let ffmpeg = null
 let ticker = null
+let audioTicker = null
 let stopping = false
 
 async function shutdown(code) {
   if (stopping) return
   stopping = true
   if (ticker) clearInterval(ticker)
+  if (audioTicker) clearInterval(audioTicker)
+  try { prog.reader?.kill("SIGTERM") } catch { /* gone */ }
+  try { feeder.stop() } catch { /* gone */ }
   try { ffmpeg?.stdin.end() } catch { /* closed */ }
   try { await browser?.close() } catch { /* gone */ }
   if (ffmpeg && ffmpeg.exitCode === null) {
@@ -68,7 +258,8 @@ async function shutdown(code) {
 }
 for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => { log(`${sig}: stopping`); void shutdown(0) })
 
-log(`starting ${width}x${height} @ ${fps}fps, ${bitrate}k, ${encoder}, keyframe every 2s`)
+log(`starting ${width}x${height} @ ${fps}fps, ${bitrate}k, ${encoder}${encoder === "h264_videotoolbox" ? (vtCbr ? " (constant bitrate)" : " (average bitrate)") : ""}, keyframe every 2s`)
+if (encoder === "h264_videotoolbox" && !vtCbr) log("VideoToolbox here can't do constant bitrate (needs FFmpeg 6.1+ and macOS 13+ on Apple Silicon); a static page may send well under the set bitrate. Pick libx264 for a padded constant bitrate.")
 browser = await chromium.launch({
   headless: true,
   handleSIGTERM: false,
@@ -83,13 +274,32 @@ browser = await chromium.launch({
 browser.on("disconnected", () => { if (!stopping) { log("browser crashed"); void shutdown(5) } })
 
 const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })
+// Internal capture credential (data/capture-key, 0600), not the OBS view key, so rotating the
+// view key doesn't blank this capture. Sent as a header, and only to this server's own origin
+// (never to third-party images/fonts on the page). Re-read per request so a fresh file is picked up.
+const pageOrigin = new URL(pageUrl).origin
+const captureKeyFile = process.env.CAPTURE_KEY_FILE
+const readCaptureKey = () => { try { return fs.readFileSync(captureKeyFile, "utf8").trim() } catch { return "" } }
+if (captureKeyFile) {
+  if (!readCaptureKey()) log("capture key file missing; /stream will need the view key")
+  await context.route("**/*", (route) => {
+    const req = route.request()
+    let sameOrigin = false
+    try { sameOrigin = new URL(req.url()).origin === pageOrigin } catch { /* data: etc */ }
+    const key = sameOrigin ? readCaptureKey() : ""
+    return key ? route.continue({ headers: { ...req.headers(), "x-stream-capture-key": key } }) : route.continue()
+  })
+}
 const page = await context.newPage()
 page.on("crash", () => { log("page crashed"); void shutdown(6) })
-const response = await page.goto(pageUrl, { waitUntil: "networkidle", timeout: 20000 }).catch(() => null)
+// DOM-ready + the page's own ready marker (not "networkidle": /stream polls forever, and slow
+// speaker images would otherwise hold the start for 20s).
+const response = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => null)
 if (!response || !response.ok()) {
   log(`could not load /stream (status ${response?.status() ?? "none"})`)
   await shutdown(7)
 }
+await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 }).catch(() => log("/stream ready marker not seen in 15s; capturing anyway"))
 if (await page.getByText("View key required").count()) {
   log("/stream says the view key is wrong")
   await shutdown(8)
@@ -100,16 +310,29 @@ await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g
 
 let latest = null
 let frames = 0
-let lastFrameAt = Date.now()
 // Health counters, reset every stats window.
 const win = { at: Date.now(), screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0 }
 let freshFrame = false
-cdp.on("Page.screencastFrame", ({ data, sessionId }) => {
+// Recent frames with arrival time, so a negative A/V trim can show the picture a little later.
+const frameRing = []
+cdp.on("Page.screencastFrame", ({ data, sessionId, metadata }) => {
   latest = Buffer.from(data, "base64")
+  const arrived = Date.now()
+  frameRing.push({ buf: latest, at: arrived })
+  while (frameRing.length > 2 && arrived - frameRing[1].at > 1200) frameRing.shift()
+  // Screencast lag: paint time (CDP, seconds) → arrival here. Smoothed; ignores outliers (GC pauses).
+  const painted = Number(metadata?.timestamp) * 1000
+  if (painted > 0) {
+    const lag = arrived - painted
+    // Typical screencast lag is a few ms; ignore GC/load spikes so the bed delay doesn't leap.
+    if (lag >= 0 && lag < 200) {
+      if (sync.lagMs === null) sync.lagMs = Math.min(60, lag)
+      else if (Math.abs(lag - sync.lagMs) < 80) sync.lagMs = sync.lagMs * 0.95 + lag * 0.05
+    }
+  }
   frames += 1
   win.screencast += 1
   freshFrame = true
-  lastFrameAt = Date.now()
   cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined)
 })
 await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: width, maxHeight: height, everyNthFrame: 1 })
@@ -119,13 +342,16 @@ latest = await page.screenshot({ type: "jpeg", quality: 85 })
 ffmpeg = spawn(ffmpegBin, [
   "-hide_banner", "-loglevel", "info", "-stats_period", "2",
   "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "pipe:0",
-  "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+  "-thread_queue_size", "4096", "-f", "s16le", "-ar", String(RATE), "-ac", "2", "-i", "pipe:3",
   "-map", "0:v", "-map", "1:a",
+  "-af", "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
   "-vf", `scale=${width}:${height}:flags=bicubic,format=yuv420p`,
   ...videoArgs, "-r", String(fps),
-  "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+  "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
   "-f", "flv", "-flvflags", "no_duration_filesize", rtmpUrl,
-], { stdio: ["pipe", "inherit", "pipe"], env: childEnv })
+], { stdio: ["pipe", "inherit", "pipe", "pipe"], env: childEnv })
+const pcmOut = ffmpeg.stdio[3]
+pcmOut.on("error", () => undefined)
 ffmpeg.stdin.on("error", () => undefined)
 // ffmpeg prints the output URL ("Output #0, flv, to 'rtmp://…/KEY'"): redact before it reaches the log.
 const hideKey = (text) => text.split(rtmpUrl).join("rtmp://[destination]").replace(/(rtmps?:\/\/[^\s/'"]+)\/[^\s'"]*/gi, "$1/••••").replace(/(password=)[^\s&'"]+/gi, "$1••••")
@@ -152,29 +378,132 @@ ffmpeg.on("exit", (code) => { if (!stopping) { log(`ffmpeg exited (code ${code})
 // real-time speed (1.0x) instead of drifting with timer jitter.
 const startedAt = Date.now()
 let written = 0
+// One timeline for both streams (see the A/V sync note at the top). skippedMs grows only when the
+// encoder fell > 0.5s behind and video frames had to be dropped: audio skips the same span.
+let skippedMs = 0
+const timelineMs = () => Date.now() - startedAt - skippedMs
+/** Negative trim beyond the screencast-lag compensation is applied by showing the picture later. */
+const videoDelayMs = () => Math.max(0, -(screencastLag() + sync.trimMs))
+// Audio pipe on the same timeline as the frames, so audio and video stay locked.
+let pcmWritten = 0
+audioTicker = setInterval(() => {
+  if (!pcmOut.writable) return
+  let due = Math.floor((timelineMs() * RATE) / 1000) - pcmWritten
+  while (due > 0) {
+    const n = Math.min(due, RATE)
+    pcmOut.write(pcmBlock(n, startedAt + skippedMs + (pcmWritten * 1000) / RATE))
+    pcmWritten += n
+    due -= n
+  }
+}, 20)
+/** Runs in the page: the sync test's full-frame white flash for the first 100ms of every wall-clock second. */
+function syncTestOverlay(on) {
+  const id = "__av_sync_test"
+  let el = document.getElementById(id)
+  if (!on) { el?.remove(); return }
+  if (el) return
+  el = document.createElement("div")
+  el.id = id
+  el.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:#fff;display:none;pointer-events:none"
+  document.body.appendChild(el)
+  const tick = () => {
+    if (!el.isConnected) return
+    el.style.display = Date.now() % 1000 < 100 ? "block" : "none"
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+// Which screen is /stream on? (set by the page; polled cheaply)
+setInterval(async () => {
+  if (stopping || reloading) return
+  // Desk settings (live): A/V trim and the sync test.
+  const live = feeder.sync()
+  sync.trimMs = live.avOffsetMs
+  if (live.syncTest !== sync.test) {
+    sync.test = live.syncTest
+    log(`[sync] A/V sync test ${sync.test ? "on: white flash + 1 kHz beep at every second" : "off"}`)
+    await page.evaluate(syncTestOverlay, sync.test).catch(() => undefined)
+  }
+  const info = await page.evaluate(() => {
+    const feed = document.querySelector("[data-testid=program-feed]")
+    const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
+  }).catch(() => ({ source: prog.source, screen: "", lat: null }))
+  const screen = info.screen
+  // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
+  // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
+  if (info.source !== prog.source) {
+    log(`[audio] program source → ${info.source === "backup" ? "Backup" : "Main"}`)
+    prog.source = info.source
+    prog.latencyMs = null
+    if (prog.reader) { stopProgramReader(); prog.restartAt = 0 }
+  }
+  // Program player latency (relay live edge → picture), smoothed (~0.7s).
+  if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.7 + info.lat * 0.3
+  const wanted = screen === "program"
+  if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) log("[audio] /stream shows the program: audio follows OBS") }
+  else if (prog.wanted) log("[audio] /stream left the program: audio bed back")
+  prog.wanted = wanted
+  if (wanted) startProgramReader()
+  else if (prog.reader && Date.now() - prog.lastWantedAt > 10000) stopProgramReader() // keep warm 10s for quick back-and-forth
+}, 250)
 ticker = setInterval(() => {
   if (!latest || !ffmpeg?.stdin.writable) return
-  const due = Math.floor(((Date.now() - startedAt) * fps) / 1000) - written
+  let due = Math.floor((timelineMs() * fps) / 1000) - written
   if (due <= 0) return
   if (due > 1) win.maxLag = Math.max(win.maxLag, ((due - 1) * 1000) / fps)
-  if (ffmpeg.stdin.writableNeedDrain) { written += due; win.skipped += due; return } // encoder behind: drop, don't queue
-  const n = Math.min(due, 3)
-  for (let i = 0; i < n; i++) ffmpeg.stdin.write(latest)
-  win.written += n
-  win.skipped += due - n
-  win.repeats += freshFrame ? n - 1 : n
+  // Encoder behind (more than ~6 frames queued in the pipe). Frames are stamped by count, so waiting
+  // keeps sync; only past 0.5s drop frames, and move the shared timeline so audio drops the same span.
+  if (ffmpeg.stdin.writableLength > latest.length * 6) {
+    // (Not while ffmpeg is still opening its inputs: it needs the audio pipe to keep flowing.)
+    if (due > fps / 2 && lastStatsLine) { skippedMs += ((due - 1) * 1000) / fps; win.skipped += due - 1 }
+    return
+  }
+  // Frame to show: the latest, or (negative trim) the latest that arrived videoDelay ago.
+  const hold = videoDelayMs()
+  let frame = latest
+  if (hold > 0) {
+    const cutoff = Date.now() - hold
+    for (let i = frameRing.length - 1; i >= 0; i--) if (frameRing[i].at <= cutoff) { frame = frameRing[i].buf; break }
+  }
+  for (let i = 0; i < due; i++) ffmpeg.stdin.write(frame)
+  win.written += due
+  win.repeats += freshFrame ? due - 1 : due
   freshFrame = false
   written += due
 }, Math.max(5, Math.floor(1000 / fps / 2)))
 
-// Health: the countdown repaints every second, so a long silence means the page is stuck.
-setInterval(() => {
-  const quiet = Date.now() - lastFrameAt
-  if (quiet > 15000) {
-    log(`no repaint for ${Math.round(quiet / 1000)}s; reloading /stream`)
-    lastFrameAt = Date.now()
-    page.reload({ waitUntil: "networkidle", timeout: 20000 }).catch(() => { log("reload failed"); void shutdown(9) })
-  }
+// Stuck detection by page heartbeat (window.__hb, +1/s), not by repaints: a static LIVE/end/hold
+// screen legitimately sends no screencast frames (the writer keeps repeating the last one).
+// Reload only when the page's JS stops ticking; if reloads don't help, exit so the supervisor
+// restarts the whole capture.
+let lastHb = -1
+let lastHbAt = Date.now()
+let reloading = false
+const reloads = []
+setInterval(async () => {
+  if (reloading || stopping) return
+  const hb = await Promise.race([
+    page.evaluate(() => window.__hb ?? -1),
+    new Promise((resolve) => setTimeout(() => resolve(-2), 3000)),
+  ]).catch(() => -2)
+  if (typeof hb === "number" && hb >= 0 && hb !== lastHb) { lastHb = hb; lastHbAt = Date.now(); return }
+  const quiet = Date.now() - lastHbAt
+  if (quiet < 15000) return
+  const now = Date.now()
+  while (reloads.length && now - reloads[0] > 120000) reloads.shift()
+  if (reloads.length >= 3) { log(`page heartbeat still stalled after ${reloads.length} reloads in 2 min; restarting capture`); void shutdown(9); return }
+  reloads.push(now)
+  log(`page heartbeat stalled ${Math.round(quiet / 1000)}s (${hb === -2 ? "page not responding" : "no tick"}); reloading /stream`)
+  reloading = true
+  try {
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 })
+    sync.test = false // the overlay went with the old page; the poll re-adds it
+    await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 })
+  } catch { log("reload failed"); void shutdown(9) }
+  lastHb = -1
+  lastHbAt = Date.now()
+  reloading = false
 }, 5000)
 const encHist = []
 if (statsFile) {
@@ -185,13 +514,17 @@ if (statsFile) {
     const stats = {
       at: now,
       screencastFps: +(win.screencast / secs).toFixed(2),
+      heartbeatAgeMs: Date.now() - lastHbAt,
       writtenFps: +(win.written / secs).toFixed(2),
       repeatPct: win.written ? +((win.repeats / win.written) * 100).toFixed(1) : 0,
       backpressurePct: total ? +((win.skipped / total) * 100).toFixed(1) : 0,
       maxLagMs: Math.round(win.maxLag),
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
+      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps },
+      sync: { screencastLagMs: sync.lagMs === null ? null : Math.round(sync.lagMs), trimMs: sync.trimMs, videoDelayMs: Math.round(videoDelayMs()), bedDelayMs: Math.round(bedLine.delayMs()), skippedMs: Math.round(skippedMs), test: sync.test },
       statsLine: lastStatsLine,
     }
+    prog.peak = 0
     // Encoder rates over this window from ffmpeg's cumulative counters (its own fps/speed are averages since start).
     const m = /frame=\s*(\d+).*?size=\s*(\d+(?:\.\d+)?)\s*(KiB|kB|MiB|MB|B).*?time=\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(lastStatsLine)
     if (m) {

@@ -33,6 +33,40 @@ Channels and forwards are independent.
 4. Stopping a channel leaves its forwards waiting for the source. The server stops by itself once no channel publishes to it and forwards are off. If MediaMTX crashes, its loop restarts it and the channel's supervisor reconnects the publisher.
 5. **Stop all** stops every channel, every forward and the server. Ticks are kept.
 
+## Program backup input (/program-backup) and failover
+
+Next to the OBS program feed (`/program`, "Main") the relay takes a second, **Backup** input on
+`/program-backup`, on the same RTMP ingest port (default 19350). It is accepted while the program
+feed is armed (Relay card › Arm receive) and has **its own publish key** (rotated together with the
+OBS key by "New key"). Feed it in one of two ways:
+
+- **A second computer / second OBS** publishes to it: Relay card › Reveal backup URL gives Server
+  `rtmp://127.0.0.1:19350/` and Key `program-backup?user=bak_…&pass=…`. (The ingest binds to
+  `127.0.0.1` like `/program`; for another machine use `BIND_HOST`/a tunnel, same as Main.)
+- **Pull from URL**: paste an `rtmp://`, `rtsp://`, `srt://` or `https://…/index.m3u8` (HLS) URL and
+  press Pull. MediaMTX keeps pulling it (`source:` with `sourceOnDemand: no`) so it is warm for an
+  instant switch; the publish key is then not used. Only `scheme://host` is ever shown in status.
+
+**Switching** (desk › Transport and phone /deck › Program source): **Main / Backup** with live status
+of each input (publishing, bitrate, age of the last data MediaMTX received ≈ last frame age).
+`/stream` prewarms both players whenever each is publishing; on a switch the input on air stays up
+until the incoming one has rendered a frame, then it crossfades on top (4 s cap). The previews
+(desk hero, deck) follow the active input with the usual sound toggle + level meter. Browser
+capture's program audio follows the input on air (it reads `program-backup-read.url`, 0600, for
+Backup) and the adaptive A/V-sync delay re-locks on the new player's latency.
+
+**Auto-failover** (default off, saved in `data/relay/settings.json`): a server monitor checks both
+inputs every 0.5 s. If Main is on air and has no new data for **N s** (default 3, 1–60) and Backup is
+healthy, it switches to Backup. Then either it **returns to Main** once Main has been healthy for
+**M s** (default 10, 2–600), or it **stays on Backup** (untick "return to Main"). Auto-return only
+undoes its own failover; a manual "Backup" is never overridden. Every switch (auto or manual) is
+logged (`[program] auto-failover …` in the server log), shown as "Last: …" under the switch, and
+toasted on every desk and deck (synced over the deck WebSocket).
+
+API (operator, same-origin POST `/api/relay`): `reveal-backup`, `backup-pull {url}` (`""` = publisher
+again), `failover {failover: {auto, stallSec, returnSec, autoReturn}}`. The switch itself is the
+transport action `{ type: "programSource", source: "main" | "backup" }` (deck WS / `/api/deck/action`).
+
 ## Files (data/relay/, files 0600, folder 0700, all gitignored)
 
 | file | what |

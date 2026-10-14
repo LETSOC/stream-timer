@@ -122,8 +122,10 @@ function round(value: number | null, digits: number) {
 /** What the capture process reports about itself (scripts/capture-stream.mjs → CAPTURE_STATS_FILE). */
 export type CaptureSourceStats = {
   at: number
-  /** JPEG frames Chrome pushed per second (it only sends on repaint; the countdown repaints ≥1/s). */
+  /** JPEG frames Chrome pushed per second (only on repaint; 0 is normal on a static LIVE/end/hold screen). */
   screencastFps: number
+  /** ms since /stream's window.__hb last advanced (page JS alive). Missing on older capture processes. */
+  heartbeatAgeMs?: number | null
   /** Frames written into ffmpeg per second (should equal the target fps). */
   writtenFps: number
   /** Share of written frames that repeated the previous screencast frame. */
@@ -136,6 +138,10 @@ export type CaptureSourceStats = {
   encoder: string
   bitrateK: number
   size: string
+  /** OBS program audio mixed into the capture (screen=program). peakDb: loudest program sample this window (dBFS), null = silence/none. */
+  programAudio?: { on: boolean; reading: boolean; mixing?: boolean; peakDb?: number | null; bufferedMs: number; underruns: number; delayMs: number; queuedMs?: number | null; playerLatencyMs?: number | null; corrections?: number; jumps?: number }
+  /** A/V sync compensation now applied (ms). */
+  sync?: { screencastLagMs: number | null; trimMs: number; videoDelayMs: number; bedDelayMs: number; skippedMs: number; test: boolean }
 }
 
 export type SourceHealth = HealthStats & { capture: CaptureSourceStats | null }
@@ -154,7 +160,10 @@ export function captureSourceHealth(encoder: HealthStats, capture: CaptureSource
   if (capture.backpressurePct > 2) flag(capture.backpressurePct > 10, `encoder backlog: ${capture.backpressurePct.toFixed(0)}% frames skipped`)
   if (capture.writtenFps < capture.fps - 2) flag(capture.writtenFps < capture.fps * 0.8, `writer ${capture.writtenFps.toFixed(1)} fps`)
   if (capture.maxLagMs > 250) flag(capture.maxLagMs > 1000, `timer lag ${Math.round(capture.maxLagMs)}ms (CPU)`)
-  if (capture.screencastFps < 0.7) flag(capture.screencastFps < 0.3, `Chrome repaint ${capture.screencastFps.toFixed(1)}/s`)
+  // Page heartbeat, not repaint rate: a static screen legitimately repaints ~0/s.
+  if (typeof capture.heartbeatAgeMs === "number") {
+    if (capture.heartbeatAgeMs > 8000) flag(capture.heartbeatAgeMs > 15000, `page heartbeat ${Math.round(capture.heartbeatAgeMs / 1000)}s old`)
+  } else if (capture.screencastFps < 0.3) flag(false, `Chrome repaint ${capture.screencastFps.toFixed(1)}/s`)
   return { ...encoder, level, warnings, capture }
 }
 
@@ -171,7 +180,7 @@ export function diagnose(input: { source: { label: string; health: SourceHealth 
   if (source && source.health.level !== "ok" && source.health.level !== "idle") {
     if (cap && (cap.backpressurePct > 2 || cap.maxLagMs > 250 || (source.health.speed !== null && source.health.speed < 0.97)))
       return { level: source.health.level, text: `${source.label} encoder can't keep up → CPU on this machine. Try 720p, a lower bitrate, or VideoToolbox; close other apps.` }
-    if (cap && cap.screencastFps < 0.7) return { level: source.health.level, text: `${source.label}: Chrome isn't repainting /stream → browser capture stuck or starved (CPU).` }
+    if (cap && (cap.heartbeatAgeMs ?? 0) > 8000) return { level: source.health.level, text: `${source.label}: /stream page stopped ticking → page stuck or CPU-starved (capture reloads it).` }
     if (source.health.speed !== null && source.health.speed < 0.97) return { level: source.health.level, text: `${source.label} encoder is slower than real time → CPU on this machine.` }
     return { level: source.health.level, text: `${source.label} source: ${source.health.warnings.join(", ")}.` }
   }

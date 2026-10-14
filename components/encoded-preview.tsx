@@ -1,5 +1,6 @@
 "use client";
 
+import { copyOrShow } from "@/components/copy-fallback";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Button } from "@/components/ui/button";
@@ -167,7 +168,8 @@ export function EncodedPreview({
             type="button"
             className={pill("solid")}
             onClick={() => {
-              void navigator.clipboard?.writeText(playlistUrl).then(() => {
+              void copyOrShow("m3u8 link", playlistUrl).then((result) => {
+                if (result !== "copied") return
                 setCopied(true)
                 window.setTimeout(() => setCopied(false), 1500)
               })

@@ -1,6 +1,6 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
-import { RELAY_PATHS, relayStatus, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { armProgram, backupObsUrl, disarmProgram, programObsUrl, setBackupPull, setFailover, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
   if (denied) return denied
-  const body = (await request.json().catch(() => null)) as { action?: unknown; path?: unknown; destinationId?: unknown; on?: unknown } | null
+  const body = (await request.json().catch(() => null)) as { action?: unknown; path?: unknown; destinationId?: unknown; on?: unknown; url?: unknown; failover?: unknown } | null
   const reply = async (result: { ok: true; note?: string } | { ok: false; error: string; status: number }) =>
     result.ok ? Response.json({ ...(await relayStatus()), note: result.note ?? null }, { headers: NO_STORE }) : Response.json({ ...(await relayStatus()), error: result.error }, { status: result.status, headers: NO_STORE })
   switch (body?.action) {
@@ -30,7 +30,23 @@ export async function POST(request: Request) {
       if (!RELAY_PATHS.includes(body.path as RelayPath) || typeof body.destinationId !== "string") return Response.json({ error: "Expected { path: slate|capture, destinationId, on }." }, { status: 400 })
       return reply(await setForward(body.path as RelayPath, body.destinationId, body.on === true))
     }
+    case "arm-program":
+      return reply(await armProgram())
+    case "disarm-program":
+      return reply(await disarmProgram())
+    case "rotate-program":
+      return reply(await rotateProgramCredentials())
+    case "reveal-program":
+      // OBS settings, on demand only (POST + operator + same-origin). Never part of GET status.
+      return Response.json(programObsUrl(), { headers: NO_STORE })
+    case "reveal-backup":
+      return Response.json(backupObsUrl(), { headers: NO_STORE })
+    case "backup-pull":
+      if (typeof body.url !== "string") return Response.json({ error: "Expected { url }." }, { status: 400 })
+      return reply(await setBackupPull(body.url))
+    case "failover":
+      return reply(await setFailover(body.failover))
     default:
-      return Response.json({ error: "Expected { action: start | stop | forward }." }, { status: 400 })
+      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | rotate-program | reveal-backup | backup-pull | failover }." }, { status: 400 })
   }
 }
