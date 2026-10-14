@@ -14,8 +14,8 @@ export const JUMPS = [
   { label: "1h", seconds: 3600 },
 ] as const
 
-export type Screen = "break" | "hold" | "welcome" | "end" | "countdown"
-export const SCREENS: readonly Screen[] = ["countdown", "break", "hold", "welcome", "end"]
+export type Screen = "break" | "hold" | "welcome" | "program" | "end" | "countdown"
+export const SCREENS: readonly Screen[] = ["countdown", "break", "hold", "welcome", "program", "end"]
 
 export type TransportAction =
   | { type: "jump"; seconds: number }
@@ -112,7 +112,9 @@ export function applyTransport(state: TransportState, action: TransportAction, n
     case "screen": {
       const overlay = action.screen === "break" || action.screen === "hold" || action.screen === "welcome" ? action.screen : "none"
       const overlayAt = overlay === "none" ? null : overlay === state.stage.overlay ? state.stage.overlayAt ?? now : now
-      return next({}, { overlay, overlayAt, forceEnd: action.screen === "end", holdCountdown: action.screen === "countdown" })
+      // Cards sit on top of the program feed (it stays "on" underneath); countdown/end switch it off.
+      const program = action.screen === "program" ? true : overlay !== "none" ? state.stage.program : false
+      return next({}, { overlay, overlayAt, program, forceEnd: action.screen === "end", holdCountdown: action.screen === "countdown" })
     }
     case "mode":
       return next({}, { deskLive: action.live })
@@ -133,6 +135,9 @@ export type DeckState = {
   testStale: boolean
   deskLive: boolean
   overlay: StageOptions["overlay"]
+  program: boolean
+  /** Last known: is OBS publishing to the relay's /program path? null = not known (relay not armed). */
+  programReady: boolean | null
   overlayAt: number | null
   forceEnd: boolean
   holdCountdown: boolean
@@ -143,6 +148,7 @@ export type DeckState = {
 export function deckState(
   state: TransportState & { rev: number; testSetAt: number | null },
   now = Date.now(),
+  programReady: boolean | null = null,
 ): DeckState {
   return {
     rev: state.rev,
@@ -157,6 +163,8 @@ export function deckState(
     testStale: testClockStale(state.testSetAt, now),
     deskLive: state.stage.deskLive,
     overlay: state.stage.overlay,
+    program: state.stage.program,
+    programReady,
     overlayAt: state.stage.overlayAt,
     forceEnd: state.stage.forceEnd,
     holdCountdown: state.stage.holdCountdown,

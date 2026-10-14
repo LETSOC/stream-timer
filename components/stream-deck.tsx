@@ -8,7 +8,7 @@ import { deckScreen, effectiveNow, eventTarget, isRisky, JUMPS, lockedInLive, ty
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
-const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", end: "End card" }
+const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", program: "Program (OBS)", end: "End card" }
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling (no WebSocket)", offline: "Offline" }
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
@@ -193,6 +193,8 @@ export function StreamDeck() {
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Screen</h2>
       <div className="grid grid-cols-2 gap-2">
         {(["countdown", "break", "hold", "welcome"] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
+        {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
+        {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn&apos;t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
         {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
       </div>
 
@@ -267,7 +269,7 @@ function StreamFrame() {
   }, [])
   return (
     <span ref={box} className="absolute inset-0 block overflow-hidden">
-      <iframe data-testid="deck-preview-frame" title="/stream preview" src="/stream" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1280, height: 720, transform: `scale(${scale})` }} />
+      <iframe data-testid="deck-preview-frame" title="/stream preview" src="/stream?mute=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1280, height: 720, transform: `scale(${scale})` }} />
     </span>
   )
 }

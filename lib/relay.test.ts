@@ -10,7 +10,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] } })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false })
 })
 
 test("credentials are random, stable, and stored 0600", () => {
@@ -29,7 +29,22 @@ test("config binds every listener to the given host and restricts users to local
   assert.match(yml, /moq: no/)
   assert.match(yml, /authMethod: internal/)
   assert.equal((yml.match(/ips: \['127\.0\.0\.1\/32', '::1\/128'\]/g) ?? []).length, 2)
-  assert.match(yml, /  slate: \{\}\n  capture: \{\}/)
+  assert.match(yml, /  slate: \{\}\n  capture: \{\}\n  program: \{\}/)
+  // Internal publisher limited to slate/capture; no OBS login while disarmed.
+  assert.match(yml, /permissions: \[\{ action: publish, path: slate \}, \{ action: publish, path: capture \}\]/)
+  assert.doesNotMatch(yml, /path: program/)
+})
+
+test("armed: OBS gets its own login, publish on /program only, loopback only", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", programUser: "obs_x", programPass: "secretobs" }
+  const yml = buildMediamtxConfig({ host: "127.0.0.1", ports: { rtmp: 19350, hls: 18888, api: 19997 }, creds, programArmed: true })
+  const block = yml.split("  - user: ").find((b) => b.startsWith('"obs_x"')) ?? ""
+  assert.match(block, /pass: "secretobs"/)
+  assert.match(block, /ips: \['127\.0\.0\.1\/32', '::1\/128'\]/)
+  assert.match(block, /permissions: \[\{ action: publish, path: program \}\]$/m)
+  assert.doesNotMatch(block, /read|api/)
+  const fresh = credentials()
+  assert.ok(fresh.programUser?.startsWith("obs_") && (fresh.programPass?.length ?? 0) >= 20 && fresh.programPass !== fresh.publishPass)
 })
 
 test("relay loops are found by this checkout's script path and tagged", () => {

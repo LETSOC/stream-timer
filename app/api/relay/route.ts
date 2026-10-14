@@ -1,6 +1,6 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
-import { RELAY_PATHS, relayStatus, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { armProgram, disarmProgram, programObsUrl, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -30,7 +30,16 @@ export async function POST(request: Request) {
       if (!RELAY_PATHS.includes(body.path as RelayPath) || typeof body.destinationId !== "string") return Response.json({ error: "Expected { path: slate|capture, destinationId, on }." }, { status: 400 })
       return reply(await setForward(body.path as RelayPath, body.destinationId, body.on === true))
     }
+    case "arm-program":
+      return reply(await armProgram())
+    case "disarm-program":
+      return reply(await disarmProgram())
+    case "rotate-program":
+      return reply(await rotateProgramCredentials())
+    case "reveal-program":
+      // OBS settings, on demand only (POST + operator + same-origin). Never part of GET status.
+      return Response.json(programObsUrl(), { headers: NO_STORE })
     default:
-      return Response.json({ error: "Expected { action: start | stop | forward }." }, { status: 400 })
+      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | rotate-program }." }, { status: 400 })
   }
 }

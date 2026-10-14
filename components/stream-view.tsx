@@ -10,6 +10,7 @@ import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
 import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
+import { ProgramFeed } from "@/components/program-feed"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
@@ -92,6 +93,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [testUntil, setTestUntil] = useState<number | null>(initial?.testUntil ?? null)
   const [pausedAt, setPausedAt] = useState<number | null>(initial?.pausedAt ?? null)
   const [stage, setStage] = useState<Stage>(() => parseStage(initial?.stage ?? {}))
+  const [programReady, setProgramReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -105,13 +107,14 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { programReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (reloadIfRebuilt(body.build)) return
           if (!hasOverrides && next) setServerEvent(next)
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
+          setProgramReady(body.programReady === true)
           if (body.stage && typeof body.stage === "object") {
             setStage(parseStage(body.stage))
           }
@@ -159,6 +162,10 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const pastEnd = Boolean(clock && wallTimeInZone(event.date, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
   const screen = stageScreen(stage, pastEnd)
   const ended = screen === "end"
+  // Browser capture reads this to switch its audio to the OBS program feed.
+  useEffect(() => {
+    document.documentElement.dataset.screen = screen
+  }, [screen])
 
   if (blocked) {
     return (
@@ -170,7 +177,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
 
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
-      {screen === "break" || screen === "hold" || screen === "welcome" ? (
+      {stage.program ? <ProgramFeed ready={programReady} visible={screen === "program"} muted={params.get("mute") === "1"} /> : null}
+      {screen === "program" ? null : screen === "break" || screen === "hold" || screen === "welcome" ? (
         <OverlayCard
           kind={screen}
           title={screen === "break" ? stage.breakTitle : screen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
@@ -179,7 +187,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           fit={screen === "break" ? stage.breakFit : screen === "welcome" ? stage.welcomeFit : stage.holdFit}
           since={stage.overlayAt}
           clock={now}
-          className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
+          className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
         />
       ) : ended ? (
         <EndStreamPage className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{

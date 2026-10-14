@@ -46,6 +46,8 @@ export type StageOptions = {
   /** Desk Rehearsal/Live switch, shared so every desk agrees. Not used by /stream. */
   deskLive: boolean
   overlay: Overlay
+  /** Live switch: show the external OBS program feed (relay path /program). Beaten by break/hold/welcome; beats end card and countdown. */
+  program: boolean
   /** When the current overlay went up (ms), for the "on break" timer. */
   overlayAt: number | null
 }
@@ -91,6 +93,7 @@ export const DEFAULT_STAGE: StageOptions = {
   welcomeFit: "cover",
   deskLive: false,
   overlay: "none",
+  program: false,
   overlayAt: null,
 }
 
@@ -177,6 +180,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     welcomeFit: pick("welcomeFit", (v) => (v === "contain" ? "contain" : "cover")),
     deskLive: pick("deskLive", (v) => v === true),
     overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" ? v : "none")),
+    program: pick("program", (v) => v === true),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
   }
 }
@@ -202,10 +206,11 @@ export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[
 
 /**
  * What /stream shows, in order of precedence:
- * break/hold overlay  >  end card (forced, or past the end time unless held)  >  countdown.
+ * break/hold/welcome overlay  >  OBS program feed  >  end card (forced, or past the end time unless held)  >  countdown.
  */
-export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown">, pastEnd: boolean): "break" | "hold" | "welcome" | "end" | "countdown" {
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean }, pastEnd: boolean): "break" | "hold" | "welcome" | "program" | "end" | "countdown" {
   if (stage.overlay !== "none") return stage.overlay
+  if (stage.program) return "program"
   if (stage.forceEnd || (!stage.holdCountdown && pastEnd)) return "end"
   return "countdown"
 }

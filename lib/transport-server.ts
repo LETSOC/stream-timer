@@ -1,4 +1,5 @@
 import { readServerState, RevConflict, writeServerEvent } from "@/lib/event-server"
+import { programReadyCached } from "@/lib/relay"
 import { applyTransport, deckState, type DeckState, type TransportAction } from "@/lib/transport"
 
 export type ServerTransportResult =
@@ -6,7 +7,7 @@ export type ServerTransportResult =
   | { ok: false; status: 400 | 409 | 423; error: string; state: DeckState }
 
 export function currentDeckState(now = Date.now()): DeckState {
-  return deckState(readServerState(), now)
+  return deckState(readServerState(), now, programReadyCached())
 }
 
 /**
@@ -17,13 +18,13 @@ export function currentDeckState(now = Date.now()): DeckState {
 export function runServerTransport(action: TransportAction, expectedRev: number | undefined, now = Date.now()): ServerTransportResult {
   const current = readServerState()
   if (expectedRev !== undefined && expectedRev !== current.rev) {
-    return { ok: false, status: 409, error: "Changed on another device. Check the state and tap again.", state: deckState(current, now) }
+    return { ok: false, status: 409, error: "Changed on another device. Check the state and tap again.", state: deckState(current, now, programReadyCached()) }
   }
   const result = applyTransport(current, action, now)
-  if (!result.ok) return { ok: false, status: current.stage.deskLive ? 423 : 400, error: result.error, state: deckState(current, now) }
+  if (!result.ok) return { ok: false, status: current.stage.deskLive ? 423 : 400, error: result.error, state: deckState(current, now, programReadyCached()) }
   try {
     const saved = writeServerEvent(result.next.event, result.next.testUntil, result.next.pausedAt, result.next.stage, expectedRev, now)
-    if (!saved) return { ok: false, status: 400, error: "Event payload was not valid.", state: deckState(current, now) }
+    if (!saved) return { ok: false, status: 400, error: "Event payload was not valid.", state: deckState(current, now, programReadyCached()) }
   } catch (error) {
     if (error instanceof RevConflict) return { ok: false, status: 409, error: "Changed on another device. Check the state and tap again.", state: currentDeckState(now) }
     throw error

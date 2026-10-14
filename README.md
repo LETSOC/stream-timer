@@ -106,6 +106,34 @@ and HTTP `POST /api/deck/action` stay as fallbacks if the socket is blocked. The
 `Origin` and an operator session (the encoder token is not accepted). `npm run start:next` / `dev:next`
 run plain Next without the socket.
 
+## OBS program feed (/program)
+
+OBS (on this Mac) can send its program into the relay; Transport › **Show program (OBS)** (desk or
+`/deck`) then puts it full-frame on `/stream`. Precedence on `/stream`: break/hold/welcome card >
+program > end card > countdown (cards go on top of the program; Countdown / End card switch it off).
+
+1. Desk › Relay › `/program · OBS feed` › **Arm receive** (starts MediaMTX if needed; it stays up while
+   armed, independent of channels and forwards).
+2. **Reveal OBS URL** (hides after 30s). In OBS › Settings › Stream: Service *Custom*, Server
+   `rtmp://127.0.0.1:19350/`, Stream Key `program?user=obs_…&pass=…` (copy both). OBS › Output:
+   keyframe interval **1 s**, x264/Apple VT H.264, AAC 48 kHz; tune zerolatency if offered.
+3. Start Streaming in OBS. The card shows *Receiving* with codec, resolution, fps and bitrate; *Preview*
+   plays it on the desk.
+4. **Show program (OBS)**. `/stream` (OBS Browser Source or Browser capture) plays it via LL-HLS
+   (~1.2 s behind OBS), with sound in OBS Browser Source; *Waiting for OBS* shows while nothing arrives.
+
+- The OBS login is its own (publish to `/program` only, loopback only) and lives in
+  `data/relay/credentials.json` (0600). **New key** issues a new one and disconnects OBS. **Disarm**
+  removes the login, disconnects OBS and stops MediaMTX if nothing else uses it.
+- Viewers get `/program` only through `/api/program/hls` with the view key (or the capture key);
+  no relay URL or login reaches a browser. `/api/public/state` adds just `programReady`.
+- **Browser capture audio**: headless Chromium's sound isn't captured, so while `/stream` shows the
+  program the capture reads `/program`'s audio from the relay and mixes it in (delayed
+  `CAPTURE_PROGRAM_AUDIO_DELAY_MS`, default 1170, to match the picture), fading the audio bed out
+  under it and back afterwards.
+- **Slate** (ffmpeg text) can't show the program; it keeps the countdown. Use Browser capture.
+- OBS must run on the same machine (MediaMTX listens on 127.0.0.1 only).
+
 ## Tests
 
 ```bash

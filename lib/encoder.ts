@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { EncoderStatus } from "@/lib/encoder-status";
-import { relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
+import { programReadFile, relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
 import { audioHash, prepareChannelAudio, readAudioSettings, type AudioMode } from "@/lib/audio-bed";
 import { captureSourceHealth, EMPTY_HEALTH, healthFromSamples, parseStatsLines, type CaptureSourceStats, type HealthStats, type SourceHealth } from "@/lib/stream-health";
 
@@ -796,7 +796,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
       RTMP_FAIL_FILE: files.fail,
       AUDIO_ARGS_FILE: audio.argsFile,
       ...(source.kind === "capture"
-        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_KEY_FILE: path.join(DATA_DIR, "capture-key"), CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
+        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_KEY_FILE: path.join(DATA_DIR, "capture-key"), PROGRAM_READ_FILE: programReadFile(), CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
         : {}),
     }),
   })

@@ -118,6 +118,7 @@ export function OperatorConsole() {
   const [welcomeFit, setWelcomeFit] = useState<ImageFit>("cover")
   const [overlay, setOverlay] = useState<Overlay>("none")
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
+  const [program, setProgram] = useState(false)
   // What /stream has for the draft-managed sections (Event, Links, Look, Socials, End/Break/Hold card, Speakers).
   // The fields above are the desk's draft; only "Save" copies a section into `published`.
   const [published, setPublished] = useState<DeskSnapshot | null>(null)
@@ -300,6 +301,7 @@ export function OperatorConsole() {
     if (stage.welcomeFit === "cover" || stage.welcomeFit === "contain") setWelcomeFit(stage.welcomeFit)
     if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
+    if (typeof stage.program === "boolean") setProgram(stage.program)
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
   }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
@@ -345,7 +347,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, deskLive: liveMode }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, deskLive: liveMode }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -673,7 +675,7 @@ export function OperatorConsole() {
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
   const endTarget = wallTimeInZone(date, endAt || endTime, timeZone)
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
-  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
+  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
   /**
    * Every Transport button goes through lib/transport (the same code the phone deck runs on the
@@ -696,6 +698,7 @@ export function OperatorConsole() {
     if (action.type === "screen") {
       setOverlay(next.stage.overlay)
       setOverlayAt(next.stage.overlayAt)
+      setProgram(next.stage.program)
       setForceEnd(next.stage.forceEnd)
       setHoldCountdown(next.stage.holdCountdown)
     }
@@ -900,6 +903,7 @@ export function OperatorConsole() {
               <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => runTransport({ type: "mode", live: false })} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
               <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => runTransport({ type: "mode", live: true })} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
             </div>
+            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <div className="flex flex-wrap gap-2">
               {[
@@ -921,6 +925,7 @@ export function OperatorConsole() {
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
               <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
+              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
               <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
               <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
               <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
@@ -1859,12 +1864,66 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-type RelayView = { totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null }
+type RelayView = { program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
+/** External OBS program feed: OBS publishes to the relay's /program; /stream can show it full-frame. */
+function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const program = relay?.program
+  const [obs, setObs] = useState<{ server: string; streamKey: string } | null>(null)
+  const [preview, setPreview] = useState(false)
+  useEffect(() => {
+    if (!obs) return
+    const id = window.setTimeout(() => setObs(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [obs])
+  async function reveal() {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-program" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey })
+  }
+  const state = !program?.armed ? "off" : program.ready ? "receiving" : "waiting"
+  const video = program?.tracks.find((t) => /264|265|hevc|av1|vp9/i.test(t)) ?? null
+  const audio = program?.tracks.find((t) => /aac|opus|mpeg-4 audio|mp3/i.test(t)) ?? null
+  return (
+    <div data-testid="program-section" className="space-y-2 rounded-xl border border-black/10 p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[13px] font-bold">/program · OBS feed</span>
+        <span data-testid="program-state" data-state={state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${state === "receiving" ? "bg-[#128a3e] text-white" : state === "waiting" ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>
+          {state === "receiving" ? "Receiving" : state === "waiting" ? "Armed · waiting for OBS" : "Off"}
+        </span>
+        {state === "receiving" ? <span data-testid="program-stats" className="font-mono text-[12px] text-black/70">{[program?.video ?? video ?? "no video", program?.audio ?? audio ?? "no audio", program?.fps ? `${program.fps} fps` : null, program?.kbps ? `${(program.kbps / 1000).toFixed(1)} Mbps` : null].filter(Boolean).join(" · ")}</span> : null}
+      </div>
+      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can&apos;t show it.</p>
+      <div className="flex flex-wrap gap-2">
+        {program?.armed ? (
+          <ConfirmButton data-testid="program-disarm" className={pillClass("danger", "sm")} disabled={busy} confirmLabel="Disarm? OBS gets disconnected · confirm" onConfirm={() => void act({ action: "disarm-program" }, "Disarmed.")}>Disarm</ConfirmButton>
+        ) : (
+          <Pill size="sm" data-testid="program-arm" disabled={busy || !relay?.installed} onClick={() => void act({ action: "arm-program" }, "Armed: waiting for OBS on /program.")}>Arm receive</Pill>
+        )}
+        <Pill size="sm" tone="outline" data-testid="program-reveal" disabled={!program?.armed} onClick={() => (obs ? setObs(null) : void reveal())}>{obs ? "Hide OBS URL" : "Reveal OBS URL"}</Pill>
+        <Pill size="sm" tone="outline" data-testid="program-preview" aria-pressed={preview} disabled={!program?.ready} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview"}</Pill>
+        <ConfirmButton data-testid="program-rotate" className={pillClass("outline", "sm")} disabled={busy || !program?.armed} confirmLabel="New key? OBS must be updated · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-program" }, "New OBS stream key. Reveal it and update OBS.") }}>New key</ConfirmButton>
+      </div>
+      {obs ? (
+        <div data-testid="program-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
+          <p className="text-black/70">OBS › Settings › Stream › Service: Custom. Hides in 30s.</p>
+          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Server</span><code data-testid="program-obs-server" className="min-w-0 flex-1 break-all">{obs.server}</code><Pill size="sm" tone="outline" onClick={() => void copyOrShow("OBS server", obs.server)}>Copy</Pill></div>
+          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Key</span><code data-testid="program-obs-key" className="min-w-0 flex-1 break-all">{obs.streamKey}</code><Pill size="sm" tone="outline" onClick={() => void copyOrShow("OBS stream key", obs.streamKey)}>Copy</Pill></div>
+        </div>
+      ) : null}
+      {preview && program?.ready ? (
+        <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><StreamPlayer src="/api/relay/hls/program/index.m3u8" /></div>
+      ) : null}
+    </div>
+  )
+}
+
 function RelayCard({ dests }: { dests: Dest[] }) {
   const [relay, setRelay] = useState<RelayView | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1914,6 +1973,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
         <Pill size="sm" data-testid="relay-start" disabled={busy || relay?.enabled === true || !relay?.installed} onClick={() => void act({ action: "start" }, "Forwards started.")}>Start forwards</Pill>
         <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !relay?.enabled} confirmLabel="Stop all forwards? Channels keep publishing · confirm" onConfirm={() => void act({ action: "stop" }, "Forwards stopped. Channels keep publishing to the relay.")}>Stop forwards</ConfirmButton>
       </div>
+      <ProgramSection relay={relay} busy={busy} act={act} />
       {(["slate", "capture"] as const).map((name) => {
         const info = relay?.paths[name]
         const enabled = new Map((info?.forwards ?? []).map((item) => [item.destId, item]))

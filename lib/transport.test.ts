@@ -60,6 +60,21 @@ test("screens are mutually exclusive; same overlay keeps its start time", () => 
   assert.deepEqual([cd.stage.forceEnd, cd.stage.holdCountdown], [false, true])
 })
 
+test("program: cards sit on top of it, countdown/end switch it off; precedence", () => {
+  const prog = ok(applyTransport(base(), { type: "screen", screen: "program" }, NOW))
+  assert.deepEqual([prog.stage.program, prog.stage.overlay, prog.stage.forceEnd], [true, "none", false])
+  const brk = ok(applyTransport(prog, { type: "screen", screen: "break" }, NOW))
+  assert.deepEqual([brk.stage.program, brk.stage.overlay], [true, "break"])
+  const s = (st: TransportState) => deckScreen(deckState({ ...st, rev: 1, testSetAt: null }, NOW), NOW)
+  assert.equal(s(brk), "break")
+  assert.equal(s(ok(applyTransport(brk, { type: "screen", screen: "program" }, NOW))), "program")
+  // program beats a forced end card and a past end time
+  assert.equal(s({ ...prog, stage: { ...prog.stage, forceEnd: true } }), "program")
+  assert.equal(ok(applyTransport(prog, { type: "screen", screen: "end" }, NOW)).stage.program, false)
+  assert.equal(ok(applyTransport(prog, { type: "screen", screen: "countdown" }, NOW)).stage.program, false)
+  assert.deepEqual(parseAction({ type: "screen", screen: "program" }), { type: "screen", screen: "program" })
+})
+
 test("Live mode locks rehearsal-only actions but not go live / screens / mode", () => {
   const live = ok(applyTransport(base(), { type: "mode", live: true }, NOW))
   assert.equal(live.stage.deskLive, true)
