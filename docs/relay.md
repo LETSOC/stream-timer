@@ -89,6 +89,18 @@ Second laptop OBS › Settings › Stream: Service **Custom…**, Server `rtmp:/
 Stream Key `program-backup?user=bak_…&pass=…` (or the `/program` key to be Main). Settings › Output:
 x264/hardware, CBR 3000–6000 kb/s, keyframe interval 1 s (LL-HLS wants short GOPs), AAC 48 kHz.
 
+### When the LAN laptop can't (re)connect
+
+- **Connection refused** = nothing listens on 19350: the relay server is stopped (Disarm, or a server
+  crash). Desk "Stop all" no longer stops MediaMTX while the program input is armed.
+- **Authentication failed** = wrong/old key. Each input has its own **New key**: Main's rotates Main
+  only, Backup's rotates Backup only.
+- A reconnecting OBS takes over its path at once (`overridePublisher: yes`), even if the dead session
+  hasn't timed out.
+- The LAN IP can change (DHCP, other Wi-Fi): compare OBS's Server with the LAN row in the panel.
+- Relay card › /program shows **Ingest: listening on …** and the **last refused** publish from
+  `data/relay/mediamtx.log` (the log restarts with MediaMTX).
+
 ### Bed / tone during the program
 
 While the program (Main or Backup) is on air, Browser capture carries program audio only: the bed or

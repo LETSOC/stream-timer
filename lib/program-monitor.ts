@@ -6,7 +6,7 @@
 import { eventBus } from "@/lib/event-bus"
 import { readServerState } from "@/lib/event-server"
 import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type FailoverMemory } from "@/lib/program-source"
-import { programSourceHealth, readSettings, refreshProgramSources } from "@/lib/relay"
+import { programSourceHealth, readSettings, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
 
@@ -47,6 +47,7 @@ export function onProgramSources(listener: () => void): () => void {
 export async function programMonitorTick(now = Date.now()) {
   const m = monitor()
   await refreshProgramSources()
+  await verifyMediamtxConfig(now)
   const settings = readSettings()
   if (settings.programArmed) {
     const state = readServerState()

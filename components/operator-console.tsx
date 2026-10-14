@@ -1941,7 +1941,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; lastReject: { at: string; text: string } | null; logFile: string }; backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -2000,8 +2000,15 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         )}
         <Pill size="sm" tone="outline" data-testid="program-reveal" disabled={!program?.armed} onClick={() => (obs ? setObs(null) : void reveal())}>{obs ? "Hide OBS URL" : "Reveal OBS URL"}</Pill>
         <Pill size="sm" tone="outline" data-testid="program-preview" aria-pressed={preview} disabled={!program?.ready} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview"}</Pill>
-        <ConfirmButton data-testid="program-rotate" className={pillClass("outline", "sm")} disabled={busy || !program?.armed} confirmLabel="New key? OBS must be updated · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-program" }, "New OBS stream key. Reveal it and update OBS.") }}>New key</ConfirmButton>
+        <ConfirmButton data-testid="program-rotate" className={pillClass("outline", "sm")} disabled={busy || !program?.armed} confirmLabel="New Main key? Main OBS must be updated (backup key unchanged) · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-program" }, "New Main OBS key. Reveal it and update OBS; the backup key is unchanged.") }}>New key</ConfirmButton>
       </div>
+      {relay?.ingest ? (
+        <p data-testid="ingest-diag" className="font-mono text-[11px] break-all text-black/60">
+          Ingest: {relay.ingest.listen ? `listening on ${relay.ingest.listen}` : "not listening (relay server stopped)"}{relay.ingest.lan && relay.ingest.listen?.startsWith("127.") ? " · LAN ingest is on but still bound to loopback (fixing…)" : ""}{relay.ingest.resyncs ? ` · config re-applied ${relay.ingest.resyncs}×` : ""}
+          {relay.ingest.lastReject ? <><br /><span data-testid="ingest-last-reject" className="text-[#b42318]">Last refused: {relay.ingest.lastReject.at} · {relay.ingest.lastReject.text}</span></> : null}
+          <br />Log: {relay.ingest.logFile}
+        </p>
+      ) : null}
       <label className="flex items-start gap-2 font-mono text-[12px] text-black/70">
         <input type="checkbox" data-testid="lan-ingest" className="mt-0.5 size-4 shrink-0" checked={relay?.backup?.lanIngest === true} disabled={busy} onChange={(e) => void act({ action: "lan-ingest", on: e.target.checked }, e.target.checked ? "Accepting program ingest from the LAN." : "Program ingest is local-only.")} />
         <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. Toggling briefly reconnects OBS. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
@@ -2060,6 +2067,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
       <p className="font-mono text-[12px] text-black/70">A second computer publishes here with its own key, or MediaMTX pulls a URL (RTMP/RTSP/SRT/HLS). Pick Main/Backup and auto-failover in Transport.</p>
       <div className="flex flex-wrap gap-2">
         <Pill size="sm" tone="outline" data-testid="backup-reveal" disabled={Boolean(backup?.pullFrom)} onClick={() => (obs ? setObs(null) : void reveal())}>{obs ? "Hide backup URL" : "Reveal backup URL"}</Pill>
+        <ConfirmButton data-testid="backup-rotate" className={pillClass("outline", "sm")} disabled={busy || Boolean(backup?.pullFrom)} confirmLabel="New backup key? Backup OBS must be updated · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-backup" }, "New backup key. Reveal it and update the backup OBS; Main is unchanged.") }}>New key</ConfirmButton>
         <Pill size="sm" tone="outline" data-testid="backup-preview" aria-pressed={preview} disabled={!backup?.ready} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview"}</Pill>
       </div>
       {obs ? (

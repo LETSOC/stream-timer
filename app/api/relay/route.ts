@@ -34,6 +34,8 @@ export async function POST(request: Request) {
       return reply(await armProgram())
     case "disarm-program":
       return reply(await disarmProgram())
+    case "rotate-backup":
+      return reply(await rotateProgramCredentials("backup"))
     case "rotate-program":
       return reply(await rotateProgramCredentials())
     case "reveal-program":

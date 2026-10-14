@@ -127,14 +127,18 @@ export function credentials(): Credentials {
   return created
 }
 
-/** New OBS login (old OBS URL stops working on the next publish). */
-export function rotateProgramCredentials(): Promise<RelayResult> {
+/**
+ * New publish login for ONE input (its OBS must be updated; the other input keeps working).
+ * Only that path's publisher is kicked.
+ */
+export function rotateProgramCredentials(which: "main" | "backup" = "main"): Promise<RelayResult> {
   return withLock(async () => {
     const c = credentials()
-    writePrivate(file("credentials.json"), JSON.stringify({ ...c, programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token() }))
-    await kickProgramUnlocked()
+    const next = which === "backup" ? { ...c, backupUser: `bak_${token(4)}`, backupPass: token() } : { ...c, programUser: `obs_${token(4)}`, programPass: token() }
+    writePrivate(file("credentials.json"), JSON.stringify(next))
     if (relayRunning()) writeConfigIfChanged()
-    return { ok: true, note: "New OBS stream key. Update OBS." }
+    await kickProgramUnlocked(which === "backup" ? [BACKUP_PATH] : [PROGRAM_PATH])
+    return { ok: true, note: which === "backup" ? "New backup stream key. Update the backup OBS." : "New Main OBS stream key. Update OBS (backup key unchanged)." }
   })
 }
 
@@ -203,9 +207,11 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     "    permissions: [{ action: read }, { action: api }]",
     "paths:",
     ...RELAY_PATHS.map((name) => `  ${name}: {}`),
-    `  ${PROGRAM_PATH}: {}`,
+    // A reconnecting OBS (Wi-Fi blip, kill -9) takes over its path at once instead of being refused
+    // until the dead session times out.
+    `  ${PROGRAM_PATH}: { overridePublisher: yes }`,
     // Backup: a second publisher, or MediaMTX pulls it (always on while armed, so failover is instant).
-    pull ? `  ${BACKUP_PATH}: { source: ${JSON.stringify(pull)}, sourceOnDemand: no }` : `  ${BACKUP_PATH}: {}`,
+    pull ? `  ${BACKUP_PATH}: { source: ${JSON.stringify(pull)}, sourceOnDemand: no }` : `  ${BACKUP_PATH}: { overridePublisher: yes }`,
     "",
   ].join("\n")
 }
@@ -367,22 +373,25 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
   return { ok: true }
 }
 
+function desiredConfig() {
+  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined })
+}
 function writeConfigIfChanged() {
-  const yml = buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined })
+  const yml = desiredConfig()
   let current = ""
   try { current = fs.readFileSync(file("mediamtx.yml"), "utf8") } catch { /* first start */ }
-  if (current !== yml) writePrivate(file("mediamtx.yml"), yml)
+  if (current.replace(/# resync .*\n$/, "") !== yml) writePrivate(file("mediamtx.yml"), yml)
 }
 
 /** Disconnect whoever publishes /program (disarm / new key). */
-async function kickProgramUnlocked() {
+async function kickProgramUnlocked(paths: string[] = [PROGRAM_PATH, BACKUP_PATH]) {
   if (!relayRunning()) return
   try {
     const api = `http://127.0.0.1:${relayPorts().api}/v3`
     const response = await fetch(`${api}/rtmpconns/list`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
     const body = (await response.json()) as { items?: { id: string; path: string; state: string }[] }
     for (const conn of body.items ?? []) {
-      if ((conn.path === PROGRAM_PATH || conn.path === BACKUP_PATH) && conn.state === "publish") await fetch(`${api}/rtmpconns/kick/${encodeURIComponent(conn.id)}`, { method: "POST", headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500) })
+      if (paths.includes(conn.path) && conn.state === "publish") await fetch(`${api}/rtmpconns/kick/${encodeURIComponent(conn.id)}`, { method: "POST", headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500) })
     }
   } catch { /* nothing to kick */ }
 }
@@ -451,6 +460,39 @@ export function setFailover(raw: unknown): Promise<RelayResult> {
     writeSettings({ ...readSettings(), failover: parseFailover({ ...readSettings().failover, ...(raw && typeof raw === "object" ? raw : {}) }) })
     return { ok: true }
   })
+}
+
+/** Pure: does MediaMTX's live config (API) match the generated file on what matters for ingest? */
+export function liveConfigMatches(yml: string, live: { rtmpAddress?: string; authInternalUsers?: { user: string }[] }): boolean {
+  const want = /\nrtmpAddress: (\S+)/.exec(yml)?.[1]
+  const users = [...yml.matchAll(/\n  - user: "([^"]+)"/g)].map((m) => m[1]).sort().join(",")
+  return live.rtmpAddress === want && (live.authInternalUsers ?? []).map((u) => u.user).sort().join(",") === users
+}
+/**
+ * MediaMTX hot-reloads mediamtx.yml, but two writes in quick succession (LAN toggle, New key, arm)
+ * can leave it running the older one: e.g. RTMP still on 127.0.0.1 or an old OBS key, so the LAN
+ * laptop gets "connection refused" / "authentication failed". Compare the live config with the
+ * file and re-trigger the reload when they disagree twice in a row. Called by the program monitor.
+ */
+const configCheck = ((globalThis as { __mtxConfigCheck?: { at: number; misses: number; reloads: number } }).__mtxConfigCheck ??= { at: 0, misses: 0, reloads: 0 })
+export async function verifyMediamtxConfig(now = Date.now()): Promise<void> {
+  if (now - configCheck.at < 2000 || !relayRunning()) return
+  configCheck.at = now
+  try {
+    const response = await fetch(`http://127.0.0.1:${relayPorts().api}/v3/config/global/get`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+    if (!response.ok) return
+    const yml = desiredConfig()
+    if (liveConfigMatches(yml, (await response.json()) as { rtmpAddress?: string; authInternalUsers?: { user: string }[] })) { configCheck.misses = 0; return }
+    if (++configCheck.misses < 2) return
+    configCheck.misses = 0
+    configCheck.reloads += 1
+    // Same content plus a changing comment: a new file event MediaMTX can't coalesce away.
+    writePrivate(file("mediamtx.yml"), `${yml}# resync ${configCheck.reloads} ${new Date(now).toISOString()}\n`)
+    console.log(`[relay] MediaMTX was running an older config; reload re-triggered (${configCheck.reloads})`)
+  } catch { /* API down: the loop restarts it */ }
+}
+export function mediamtxConfigResyncs(): number {
+  return configCheck.reloads
 }
 
 // ---------- both program inputs: health for the switcher and auto-failover ----------
@@ -567,13 +609,17 @@ export function stopRelayServerIfIdle(): Promise<boolean> {
   return withLock(stopServerIfIdleUnlocked)
 }
 
-/** Stop all: forwards off, every relay process gone. */
+/**
+ * Stop all (outgoing): forwards off and their processes gone. The program INPUTS are not outputs:
+ * while armed, MediaMTX keeps running so OBS (incl. a LAN laptop) stays connected. Disarm stops it.
+ */
 export function stopRelayEverything(): Promise<RelayResult> {
   return withLock(async () => {
-    writeSettings({ ...readSettings(), enabled: false, programArmed: false })
-    for (const loop of findRelayLoops()) await killGroup(loop.pid)
+    writeSettings({ ...readSettings(), enabled: false })
+    const keep = readSettings().programArmed
+    for (const loop of findRelayLoops()) if (!(keep && loop.tag === "mediamtx")) await killGroup(loop.pid)
     for (const name of fs.existsSync(relayDir()) ? fs.readdirSync(relayDir()) : []) {
-      if (/^(mediamtx|fwd-.*)(-state)?\.json$/.test(name)) fs.rmSync(file(name), { force: true })
+      if ((keep ? /^fwd-.*(-state)?\.json$/ : /^(mediamtx|fwd-.*)(-state)?\.json$/).test(name)) fs.rmSync(file(name), { force: true })
     }
     return { ok: true }
   })
@@ -715,8 +761,27 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
 /** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
 export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
+export type IngestDiag = { resyncs: number; listen: string | null; lan: boolean; lanUrl: string | null; lastReject: { at: string; text: string } | null; logFile: string }
+/**
+ * Pure: from MediaMTX's log, where the RTMP ingest last started listening and the last refused /
+ * failed publish (auth failure, path taken, timeout), redacted of query strings.
+ */
+export function parseIngestLog(log: string): { listen: string | null; lastReject: { at: string; text: string } | null } {
+  let listen: string | null = null
+  let lastReject: { at: string; text: string } | null = null
+  for (const line of log.split("\n")) {
+    const l = /\[RTMP\] (?:started|listener opened) .*?on ([^\s(]+)/.exec(line)
+    if (l) listen = l[1]
+    if (/\[RTMP\] \[conn [^\]]+\]/.test(line) && /(failed to authenticate|authentication failed|already being published|is not configured|closed: .*(error|timeout|denied|refused|EOF|reset))/i.test(line) && !/closed: terminated/.test(line)) {
+      const at = /^(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2})/.exec(line)?.[1] ?? ""
+      lastReject = { at, text: line.replace(/^\S+ \S+ (INF|WAR|ERR) /, "").replace(/\?[^\s'"]*/g, "?…").slice(0, 200) }
+    }
+  }
+  return { listen, lastReject }
+}
+
 export type BackupStatus = { lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings }
-export type RelayStatus = { backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
+export type RelayStatus = { ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 /** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
 export function programAudioTrack(prog: Pick<ApiPath, "tracks" | "tracks2">): ProgramStatus["audioTrack"] {
@@ -783,7 +848,10 @@ export async function relayStatus(): Promise<RelayStatus> {
   let pullFrom: string | null = null
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
   const backup: BackupStatus = { lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover }
+  const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
+  const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: mtx ? parsedLog.listen : null, lan: settings.lanIngest, lanUrl: lanServerUrl(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
   return {
+    ingest,
     backup,
     program,
     totalOutKbps: RELAY_PATHS.reduce((sum, name) => sum + paths[name].outKbps, 0) + direct,
