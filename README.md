@@ -92,6 +92,17 @@ The desk's **Stream audio** card sets each RTMP channel's audio: **Silent** (def
 
 Settings save on the server (`data/audio-settings.json`, files in `data/audio/`) and sync to every desk. Edits are a draft until **Save audio**. Saved changes apply **live** (within about a second, 300 ms crossfade; volume-only changes ramp over 200 ms): silence, tone, bed, playlist, volume and fade switch without restarting ffmpeg or reconnecting RTMP. How: `scripts/audio-feeder.mjs` makes the stream audio (raw PCM, wall-clock paced) and the encoder reads it as a never-ending input: the Slate gets it on fd 3 from a feeder process started next to its ffmpeg, Browser capture runs the feeder in-process and mixes OBS program audio on top. Beds are decoded by short-lived ffmpeg children, one per file; a missing or broken file plays silence until the next one instead of stalling the stream. The server writes `data/rtmp-audio-<channel>.live.json` on save; the feeder reports what is on air (mode, peak dBFS, underruns) in `…applied.json`, shown on the channel card ("Applied live" / "Applying…"). Only a channel started by an older build still shows "Restart to apply new audio"; restart it once. Shuffle reshuffles on every pass through the list.
 
+### Browser capture A/V sync
+
+Capture stamps video and audio on **one timeline** (frame *k* = sample *i* = wall time since start; when the encoder falls more than ~0.5s behind, both skip the same span), so they cannot drift apart. Constant offsets are compensated live:
+
+- **Screencast lag** (Chrome paint → capture, a few ms): stream audio is delayed to match the picture.
+- **OBS program audio**: /stream's player reports how far behind the relay's live edge it is (`data-latency-ms` from hls.js). Program audio, read straight from MediaMTX, is delayed by *player latency + screencast lag − reader lag*, tracked continuously (smoothed, clamped; ±16% sample rate to follow the player without clicks). The old fixed `CAPTURE_PROGRAM_AUDIO_DELAY_MS` (default 1170) is only the fallback until the first player reading.
+- **Desk A/V offset trim** (±500 ms, live): + delays the audio, − holds the picture back instead. On /slate, only + is available (its picture is ffmpeg's own).
+
+**A/V sync test** (Browser capture checkbox): white full-frame flash + 1 kHz beep every wall-clock second, on air. Record or watch on Castr and measure the flash-to-beep offset (target |offset| &lt; 40 ms, no growing drift). The channel health line shows the compensation now applied (`A/V sync: screencast lag …ms → audio +…ms · program delay …ms`).
+
+
 ## Phone Stream Deck (/deck)
 
 Open `/deck` on a phone (same login as the desk; local mode on 127.0.0.1 needs none). Big buttons for

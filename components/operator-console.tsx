@@ -2075,6 +2075,11 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
           Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms{typeof cap.heartbeatAgeMs === "number" ? (cap.heartbeatAgeMs < 6000 ? " · page alive" : ` · page stalled ${Math.round(cap.heartbeatAgeMs / 1000)}s`) : ""}
         </p>
       ) : null}
+      {cap?.sync ? (
+        <p data-testid={`rtmp-sync-${channel}`} className="font-mono text-[11px] text-black/60" title="Audio is delayed by the screencast lag so it matches the picture; program audio follows the /stream player's latency. Trim is the desk's A/V offset.">
+          A/V sync: screencast lag {cap.sync.screencastLagMs ?? "–"}ms → audio +{cap.sync.bedDelayMs}ms{cap.sync.videoDelayMs ? ` · video +${cap.sync.videoDelayMs}ms` : ""}{cap.sync.trimMs ? ` · trim ${cap.sync.trimMs > 0 ? "+" : ""}${cap.sync.trimMs}ms` : ""}{cap.programAudio?.mixing ? ` · program delay ${cap.programAudio.delayMs}ms (player ${cap.programAudio.playerLatencyMs ?? "?"}ms)` : ""}{cap.sync.skippedMs ? ` · dropped ${cap.sync.skippedMs}ms (encoder behind)` : ""}{cap.sync.test ? " · SYNC TEST ON" : ""}
+        </p>
+      ) : null}
       {cap?.programAudio ? (
         <p data-testid={`rtmp-program-audio-${channel}`} className="font-mono text-[11px] text-black/60">
           Program audio: {cap.programAudio.mixing ? `mixing · peak ${typeof cap.programAudio.peakDb === "number" ? `${cap.programAudio.peakDb.toFixed(0)} dBFS` : "silent"}` : cap.programAudio.on ? "waiting for OBS audio" : "off (audio bed)"}
@@ -2094,7 +2099,7 @@ function DiagnosisLine({ value, testid }: { value: { level: Level; text: string 
 }
 
 type AudioModeView = "silent" | "tone" | "bed"
-type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number }
+type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; syncTest?: boolean }
 type AudioFileView = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string }
 type AudioSettingsView = { rev: number; channels: Record<RtmpChannelId, AudioConfigView> }
 const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aac,audio/mpeg,audio/mp4,audio/wav,audio/aac"
@@ -2182,6 +2187,18 @@ function AudioCard() {
                   {mode === "silent" ? "Silent" : mode === "tone" ? "Tone" : "Audio bed / playlist"}
                 </label>
               ))}
+            </div>
+            <div className="flex flex-col items-start gap-1 border-t border-black/10 pt-2">
+              <label className="flex items-center gap-2" title={ch === "slate" ? "Slate: + delays the audio (its picture is ffmpeg's own, so it can't go earlier)." : "+ = audio later, − = audio earlier (the picture is held back instead). Applies live."}>
+                A/V offset <input type="number" data-testid={tid("av-offset")} min={ch === "slate" ? 0 : -500} max={500} step={10} value={cfg.avOffsetMs ?? 0} onChange={(e) => edit(ch, { avOffsetMs: Number(e.target.value) })} className="h-7 w-20 border px-1" /> ms
+                <span className="text-black/60">(+ audio later)</span>
+              </label>
+              {ch === "capture" ? (
+                <label className="flex min-h-7 items-center gap-2">
+                  <input type="checkbox" data-testid={tid("sync-test")} checked={cfg.syncTest === true} onChange={(e) => edit(ch, { syncTest: e.target.checked })} />
+                  A/V sync test: white flash + beep every second (on air!)
+                </label>
+              ) : null}
             </div>
             {cfg.mode === "tone" ? (
               <div className="flex flex-wrap items-center gap-2">
