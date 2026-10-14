@@ -1,5 +1,5 @@
 import { connection } from "next/server"
-import { PROGRAM_PATH } from "@/lib/relay"
+import { BACKUP_PATH, PROGRAM_PATH } from "@/lib/relay"
 import { proxyRelayHls, validHlsPath } from "@/lib/hls-proxy"
 import { canView } from "@/lib/view-key"
 
@@ -12,6 +12,6 @@ export async function GET(request: Request, context: { params: Promise<{ path: s
   await connection()
   if (!canView(request)) return new Response("View key required", { status: 401 })
   const { path } = await context.params
-  if (!validHlsPath(path, [PROGRAM_PATH])) return new Response("Not found", { status: 404 })
+  if (!validHlsPath(path, [PROGRAM_PATH, BACKUP_PATH])) return new Response("Not found", { status: 404 })
   return proxyRelayHls(request, path)
 }

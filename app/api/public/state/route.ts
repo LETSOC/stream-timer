@@ -16,5 +16,9 @@ export async function GET(request: Request) {
   // Lets the HLS player fetch /media segments (which carry no ?k=) on the same browser.
   if (viewKeyMatches(key)) headers["Set-Cookie"] = `${VIEW_COOKIE}=${key}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
   // programReady: one boolean about the OBS feed (no URLs, logins or relay details).
-  return Response.json({ ...publicState(readServerState()), programReady: await programReady().catch(() => false), build: process.env.APP_BUILD ?? null }, { headers })
+  // programReady = the active input; backupReady/mainReady so /stream can prewarm both for an instant switch.
+  const state = readServerState()
+  const [mainReady, backupReady] = await Promise.all([programReady("main").catch(() => false), programReady("backup").catch(() => false)])
+  const programReadyNow = state.stage.programSource === "backup" ? backupReady : mainReady
+  return Response.json({ ...publicState(state), programReady: programReadyNow, mainReady, backupReady, build: process.env.APP_BUILD ?? null }, { headers })
 }

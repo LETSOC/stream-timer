@@ -48,6 +48,8 @@ export type StageOptions = {
   overlay: Overlay
   /** Live switch: show the external OBS program feed (relay path /program). Beaten by break/hold/welcome; beats end card and countdown. */
   program: boolean
+  /** Which input the program feed shows: Main (/program) or Backup (/program-backup). Live switch. */
+  programSource: "main" | "backup"
   /** When the current overlay went up (ms), for the "on break" timer. */
   overlayAt: number | null
 }
@@ -94,6 +96,7 @@ export const DEFAULT_STAGE: StageOptions = {
   deskLive: false,
   overlay: "none",
   program: false,
+  programSource: "main",
   overlayAt: null,
 }
 
@@ -181,6 +184,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     deskLive: pick("deskLive", (v) => v === true),
     overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" ? v : "none")),
     program: pick("program", (v) => v === true),
+    programSource: pick("programSource", (v) => (v === "backup" ? "backup" : "main")),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
   }
 }

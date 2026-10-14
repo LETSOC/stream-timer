@@ -18,6 +18,7 @@
 // Exits non-zero on any failure so rtmp-supervisor.sh restarts it.
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
+import path from "node:path"
 import { chromium } from "playwright"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 
@@ -84,7 +85,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { wanted: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false }
+const prog = { source: "main", wanted: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -95,7 +96,9 @@ function programTargetMs() {
 function startProgramReader() {
   if (prog.reader || !programFile || Date.now() < prog.restartAt) return
   let url = ""
-  try { url = fs.readFileSync(programFile, "utf8").trim() } catch { return }
+  // Main = program-read.url, Backup = program-backup-read.url next to it (both 0600, written by lib/relay).
+  const file = prog.source === "backup" ? path.join(path.dirname(programFile), "program-backup-read.url") : programFile
+  try { url = fs.readFileSync(file, "utf8").trim() } catch { return }
   if (!url) return
   const reader = spawn(ffmpegBin, ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-rw_timeout", "5000000", "-i", url, "-vn", "-ac", "2", "-ar", String(RATE), "-f", "s16le", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"], env: childEnv })
   prog.reader = reader
@@ -111,7 +114,7 @@ function startProgramReader() {
     prog.chunks = []; prog.bytes = 0; prog.primed = false; prog.levelMs = null
     prog.restartAt = Date.now() + 2000
   })
-  log("[audio] program audio: reading the OBS feed")
+  log(`[audio] program audio: reading the ${prog.source === "backup" ? "Backup" : "Main"} feed`)
 }
 function stopProgramReader() {
   if (!prog.reader) return
@@ -424,9 +427,17 @@ setInterval(async () => {
   const info = await page.evaluate(() => {
     const feed = document.querySelector("[data-testid=program-feed]")
     const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
-    return { screen: document.documentElement.dataset.screen ?? "", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
-  }).catch(() => ({ screen: "", lat: null }))
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
+  }).catch(() => ({ source: prog.source, screen: "", lat: null }))
   const screen = info.screen
+  // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
+  // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
+  if (info.source !== prog.source) {
+    log(`[audio] program source → ${info.source === "backup" ? "Backup" : "Main"}`)
+    prog.source = info.source
+    prog.latencyMs = null
+    if (prog.reader) { stopProgramReader(); prog.restartAt = 0 }
+  }
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
   if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.7 + info.lat * 0.3
   const wanted = screen === "program"

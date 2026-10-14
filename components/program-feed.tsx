@@ -7,6 +7,8 @@ import { keepLoaded, programDisplay, type ProgramDisplay } from "@/lib/program-d
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
 export const PROGRAM_OPERATOR_SRC = "/api/relay/hls/program/index.m3u8"
+export const programViewSrc = (path: string) => `/api/program/hls/${path}/index.m3u8`
+export const programOperatorSrc = (path: string) => `/api/relay/hls/${path}/index.m3u8`
 
 function useNow(ms: number) {
   const [now, setNow] = useState(() => Date.now())
@@ -131,14 +133,14 @@ function Standby({ small = false }: { small?: boolean }) {
  * the first frame, then crossfades in. "Waiting for OBS" only after a grace or a real disconnect.
  * Sound on by default (OBS Browser Source captures it); `muted` for previews (?mute=1).
  */
-export function ProgramFeed({ ready, active, muted = false, onDisplay }: { ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void }) {
+export function ProgramFeed({ ready, active, muted = false, onDisplay, source = "main", path = "program", onAir = true }: { ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
   const activeSince = useActiveSince(active, now)
   const load = keepLoaded(ready, notReadySince, now)
   const showing = useRef<ProgramDisplay>("under")
-  const { lastFrameAt, latency } = useProgramHls(videoRef, PROGRAM_VIEW_SRC, load, () => active && !muted)
+  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted)
   const shown = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
   useEffect(() => {
     if (showing.current === shown) return
@@ -163,7 +165,7 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay }: { ready
 
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
   return (
-    <div data-testid="program-feed" data-display={shown} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} aria-hidden={shown === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${shown === "under" ? "pointer-events-none opacity-0" : "z-[5] opacity-100"}`}>
+    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={shown} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} aria-hidden={shown === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${shown === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
       <video ref={videoRef} className="h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture />
       {shown === "standby" ? <Standby /> : null}
     </div>

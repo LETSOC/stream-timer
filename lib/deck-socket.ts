@@ -5,7 +5,7 @@ import { originAllowed } from "@/lib/encoder-auth"
 import { onSaved } from "@/lib/event-bus"
 import { parseAction } from "@/lib/transport"
 import { currentDeckState, runServerTransport } from "@/lib/transport-server"
-import { programReadyCached } from "@/lib/relay"
+import { onProgramSources } from "@/lib/program-monitor"
 
 export const DECK_WS_PATH = "/api/deck/ws"
 
@@ -52,15 +52,8 @@ export function attachDeckSocket(ws: WebSocket, request: Request) {
     lastRev = rev
     send({ type: "state", state: currentDeckState() })
   })
-  // OBS starting/stopping isn't a save: push when the program feed's readiness changes.
-  let lastReady = programReadyCached()
-  const readyTimer = setInterval(() => {
-    const ready = programReadyCached()
-    if (ready !== lastReady) {
-      lastReady = ready
-      send({ type: "state", state: currentDeckState() })
-    }
-  }, 1000)
+  // OBS/backup starting, stalling or failing over isn't (always) a save: the program monitor pings.
+  const offSources = onProgramSources(() => send({ type: "state", state: currentDeckState() }))
   let alive = true
   ws.on("pong", () => (alive = true))
   const timer = setInterval(() => {
@@ -72,7 +65,7 @@ export function attachDeckSocket(ws: WebSocket, request: Request) {
   }, PING_MS)
   ws.on("close", () => {
     clearInterval(timer)
-    clearInterval(readyTimer)
+    offSources()
     off()
   })
   ws.on("message", (data, isBinary) => {

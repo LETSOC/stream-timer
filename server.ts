@@ -8,6 +8,7 @@ import { createServer } from "node:http"
 import next from "next"
 import { WebSocketServer } from "ws"
 import { handleDeckUpgrade } from "./lib/deck-socket"
+import { startProgramMonitor } from "./lib/program-monitor"
 
 const dev = process.argv.includes("--dev")
 const hostname = process.env.BIND_HOST?.trim() || "127.0.0.1"
@@ -26,6 +27,7 @@ async function main() {
     if (handleDeckUpgrade(wss, req, socket, head)) return
     void nextUpgrade(req, socket, head)
   })
+  startProgramMonitor()
   server.listen(port, hostname, () => {
     console.log(`▲ stream-timer ${dev ? "dev" : "production"} on http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port} (deck WebSocket on the same port)`)
   })

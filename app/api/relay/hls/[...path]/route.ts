@@ -1,6 +1,6 @@
 import { connection } from "next/server"
 import { requireOperator } from "@/lib/auth"
-import { PROGRAM_PATH, RELAY_PATHS } from "@/lib/relay"
+import { BACKUP_PATH, PROGRAM_PATH, RELAY_PATHS } from "@/lib/relay"
 import { proxyRelayHls, validHlsPath } from "@/lib/hls-proxy"
 
 /**
@@ -13,7 +13,7 @@ export async function GET(request: Request, context: { params: Promise<{ path: s
   const denied = requireOperator(request)
   if (denied) return denied
   const { path } = await context.params
-  if (!validHlsPath(path, [...RELAY_PATHS, PROGRAM_PATH])) {
+  if (!validHlsPath(path, [...RELAY_PATHS, PROGRAM_PATH, BACKUP_PATH])) {
     return new Response("Not found", { status: 404 })
   }
   return proxyRelayHls(request, path)

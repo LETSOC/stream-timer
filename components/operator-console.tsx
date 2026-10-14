@@ -120,6 +120,7 @@ export function OperatorConsole() {
   const [overlay, setOverlay] = useState<Overlay>("none")
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
   const [program, setProgram] = useState(false)
+  const [programSource, setProgramSource] = useState<"main" | "backup">("main")
   // What /stream has for the draft-managed sections (Event, Links, Look, Socials, End/Break/Hold card, Speakers).
   // The fields above are the desk's draft; only "Save" copies a section into `published`.
   const [published, setPublished] = useState<DeskSnapshot | null>(null)
@@ -303,6 +304,7 @@ export function OperatorConsole() {
     if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
     if (typeof stage.program === "boolean") setProgram(stage.program)
+    if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
   }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
@@ -348,7 +350,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, deskLive: liveMode }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, deskLive: liveMode }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -703,6 +705,7 @@ export function OperatorConsole() {
       setForceEnd(next.stage.forceEnd)
       setHoldCountdown(next.stage.holdCountdown)
     }
+    if (action.type === "programSource") setProgramSource(next.stage.programSource)
     if (action.type === "mode") setLiveMode(next.stage.deskLive)
     if (action.type === "extendEnd" || action.type === "setEnd") {
       // A quick action: goes live straight away, like restore (the sections weren't dirty, see extendEnd).

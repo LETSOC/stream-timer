@@ -8,6 +8,7 @@
  * (random publish/read users), mediamtx.yml (generated each start), pidfiles, logs, state.
  * MediaMTX listens on 127.0.0.1 only; the desk preview goes through /api/relay/hls (operator auth).
  */
+import { parseFailover, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
 import crypto from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
@@ -55,30 +56,46 @@ function readJson<T>(target: string): T | null {
 }
 
 /** `enabled` = forwards on (fan-out). The MediaMTX server itself runs whenever a channel publishes to it or forwards are on. */
-export type RelaySettings = { enabled: boolean; forwards: Record<RelayPath, string[]>; /** OBS program feed armed: MediaMTX stays up and accepts OBS on /program. */ programArmed: boolean }
+export type RelaySettings = {
+  enabled: boolean
+  forwards: Record<RelayPath, string[]>
+  /** OBS program feed armed: MediaMTX stays up and accepts OBS on /program (and the backup on /program-backup). */
+  programArmed: boolean
+  /** Backup input pulled by MediaMTX from this RTMP/RTSP/HLS/SRT URL instead of a publisher ("" = publish). */
+  backupPullUrl: string
+  failover: FailoverSettings
+}
+/** Pure: what may go in `source:` for the backup pull (no file:, no shell, no YAML breakage). */
+export function validPullUrl(url: string): boolean {
+  return url.length <= 2000 && /^(rtmps?|rtsps?|srt|https?):\/\/[^\s'"#{}\[\],&*!|>%@`]+(@[^\s'"#{}\[\],&*!|>%`]+)?$/.test(url) || url === ""
+}
 export function readSettings(): RelaySettings {
   const raw = readJson<Partial<RelaySettings>>(file("settings.json"))
   const list = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [])
-  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture) }, programArmed: raw?.programArmed === true }
+  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture) }, programArmed: raw?.programArmed === true,
+    backupPullUrl: typeof raw?.backupPullUrl === "string" && validPullUrl(raw.backupPullUrl) ? raw.backupPullUrl : "",
+    failover: parseFailover(raw?.failover),
+  }
 }
 function writeSettings(settings: RelaySettings) {
   writePrivate(file("settings.json"), JSON.stringify(settings, null, 2))
 }
 
-type Credentials = { publishUser: string; publishPass: string; readUser: string; readPass: string; /** OBS's own publish login, for /program only. */ programUser?: string; programPass?: string }
+type Credentials = { publishUser: string; publishPass: string; readUser: string; readPass: string; /** OBS's own publish login, for /program only. */ programUser?: string; programPass?: string; /** Backup publisher's own login, for /program-backup only. */ backupUser?: string; backupPass?: string }
 export const PROGRAM_PATH = "program"
+export const BACKUP_PATH = "program-backup"
 function token(bytes = 18) {
   return crypto.randomBytes(bytes).toString("base64url")
 }
 export function credentials(): Credentials {
   const existing = readJson<Credentials>(file("credentials.json"))
   if (existing?.publishPass && existing.readPass) {
-    if (existing.programUser && existing.programPass) return existing
-    const upgraded = { ...existing, programUser: `obs_${token(4)}`, programPass: token() }
+    if (existing.programUser && existing.programPass && existing.backupUser && existing.backupPass) return existing
+    const upgraded = { ...existing, programUser: existing.programUser || `obs_${token(4)}`, programPass: existing.programPass || token(), backupUser: existing.backupUser || `bak_${token(4)}`, backupPass: existing.backupPass || token() }
     writePrivate(file("credentials.json"), JSON.stringify(upgraded))
     return upgraded
   }
-  const created = { publishUser: `pub_${token(4)}`, publishPass: token(), readUser: `read_${token(4)}`, readPass: token(), programUser: `obs_${token(4)}`, programPass: token() }
+  const created = { publishUser: `pub_${token(4)}`, publishPass: token(), readUser: `read_${token(4)}`, readPass: token(), programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token() }
   writePrivate(file("credentials.json"), JSON.stringify(created))
   return created
 }
@@ -87,7 +104,7 @@ export function credentials(): Credentials {
 export function rotateProgramCredentials(): Promise<RelayResult> {
   return withLock(async () => {
     const c = credentials()
-    writePrivate(file("credentials.json"), JSON.stringify({ ...c, programUser: `obs_${token(4)}`, programPass: token() }))
+    writePrivate(file("credentials.json"), JSON.stringify({ ...c, programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token() }))
     await kickProgramUnlocked()
     if (relayRunning()) writeConfigIfChanged()
     return { ok: true, note: "New OBS stream key. Update OBS." }
@@ -99,9 +116,11 @@ export function rotateProgramCredentials(): Promise<RelayResult> {
  * Internal publishers may publish to slate/capture only; OBS's login (only while `programArmed`)
  * may publish to /program only.
  */
-export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean }): string {
+export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string }): string {
   const { host, ports, creds } = input
   const program = input.programArmed && creds.programUser && creds.programPass
+  const pull = input.programArmed && input.backupPullUrl && validPullUrl(input.backupPullUrl) ? input.backupPullUrl : ""
+  const backup = input.programArmed && !pull && creds.backupUser && creds.backupPass
   const local = "['127.0.0.1/32', '::1/128']"
   return [
     "# Generated by stream-timer (lib/relay.ts) on every relay start. Do not edit; do not commit.",
@@ -140,6 +159,12 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
       `    ips: ${local}`,
       `    permissions: [{ action: publish, path: ${PROGRAM_PATH} }]`,
     ] : []),
+    ...(backup ? [
+      `  - user: ${JSON.stringify(creds.backupUser)}`,
+      `    pass: ${JSON.stringify(creds.backupPass)}`,
+      `    ips: ${local}`,
+      `    permissions: [{ action: publish, path: ${BACKUP_PATH} }]`,
+    ] : []),
     `  - user: ${JSON.stringify(creds.readUser)}`,
     `    pass: ${JSON.stringify(creds.readPass)}`,
     `    ips: ${local}`,
@@ -147,6 +172,8 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     "paths:",
     ...RELAY_PATHS.map((name) => `  ${name}: {}`),
     `  ${PROGRAM_PATH}: {}`,
+    // Backup: a second publisher, or MediaMTX pulls it (always on while armed, so failover is instant).
+    pull ? `  ${BACKUP_PATH}: { source: ${JSON.stringify(pull)}, sourceOnDemand: no }` : `  ${BACKUP_PATH}: {}`,
     "",
   ].join("\n")
 }
@@ -179,7 +206,7 @@ export function relayPublishUrl(name: RelayPath): string {
   const c = credentials()
   return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(c.publishUser)}&pass=${encodeURIComponent(c.publishPass)}`
 }
-function relayReadUrl(name: RelayPath | typeof PROGRAM_PATH): string {
+function relayReadUrl(name: RelayPath | typeof PROGRAM_PATH | typeof BACKUP_PATH): string {
   const c = credentials()
   return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(c.readUser)}&pass=${encodeURIComponent(c.readPass)}`
 }
@@ -309,7 +336,7 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
 }
 
 function writeConfigIfChanged() {
-  const yml = buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed })
+  const yml = buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl })
   let current = ""
   try { current = fs.readFileSync(file("mediamtx.yml"), "utf8") } catch { /* first start */ }
   if (current !== yml) writePrivate(file("mediamtx.yml"), yml)
@@ -323,7 +350,7 @@ async function kickProgramUnlocked() {
     const response = await fetch(`${api}/rtmpconns/list`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
     const body = (await response.json()) as { items?: { id: string; path: string; state: string }[] }
     for (const conn of body.items ?? []) {
-      if (conn.path === PROGRAM_PATH && conn.state === "publish") await fetch(`${api}/rtmpconns/kick/${encodeURIComponent(conn.id)}`, { method: "POST", headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500) })
+      if ((conn.path === PROGRAM_PATH || conn.path === BACKUP_PATH) && conn.state === "publish") await fetch(`${api}/rtmpconns/kick/${encodeURIComponent(conn.id)}`, { method: "POST", headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500) })
     }
   } catch { /* nothing to kick */ }
 }
@@ -345,7 +372,7 @@ export function disarmProgram(): Promise<RelayResult> {
     if (relayRunning()) writeConfigIfChanged()
     await kickProgramUnlocked()
     const stopped = await stopServerIfIdleUnlocked()
-    programCache.ready = false
+    programCache.ready = false; sourceCache.at = 0
     return { ok: true, note: stopped ? "Disarmed; relay server stopped (nothing else uses it)." : "Disarmed. The relay keeps running for the channels/forwards." }
   })
 }
@@ -358,11 +385,73 @@ export function programObsUrl(): { server: string; streamKey: string; url: strin
   return { server, streamKey, url: `${server}${streamKey}` }
 }
 
-/** For Browser capture's program audio: the read URL in a 0600 file (never in env/argv of the capture script). */
+/** Backup publisher settings (second computer). Operator-only, on demand. */
+export function backupObsUrl(): { server: string; streamKey: string; url: string } {
+  const c = credentials()
+  const server = `rtmp://127.0.0.1:${relayPorts().rtmp}/`
+  const streamKey = `${BACKUP_PATH}?user=${encodeURIComponent(c.backupUser ?? "")}&pass=${encodeURIComponent(c.backupPass ?? "")}`
+  return { server, streamKey, url: `${server}${streamKey}` }
+}
+
+/**
+ * For Browser capture's program audio: the read URLs in 0600 files (never in env/argv of the capture
+ * script). program-read.url = Main; program-backup-read.url next to it = Backup.
+ */
 export function programReadFile(): string {
   const target = file("program-read.url")
   writePrivate(target, relayReadUrl(PROGRAM_PATH))
+  writePrivate(file("program-backup-read.url"), relayReadUrl(BACKUP_PATH))
   return target
+}
+
+/** Pull URL for the backup ("" = a publisher). Takes effect at once (MediaMTX reloads its config). */
+export function setBackupPull(url: string): Promise<RelayResult> {
+  return withLock(async () => {
+    const clean = url.trim()
+    if (!validPullUrl(clean)) return { ok: false, status: 400, error: "Pull URL must be rtmp://, rtsp://, srt:// or http(s):// (HLS)." }
+    writeSettings({ ...readSettings(), backupPullUrl: clean })
+    if (relayRunning()) writeConfigIfChanged()
+    return { ok: true, note: clean ? "Backup pulls from the URL." : "Backup takes a publisher again." }
+  })
+}
+export function setFailover(raw: unknown): Promise<RelayResult> {
+  return withLock(async () => {
+    writeSettings({ ...readSettings(), failover: parseFailover({ ...readSettings().failover, ...(raw && typeof raw === "object" ? raw : {}) }) })
+    return { ok: true }
+  })
+}
+
+// ---------- both program inputs: health for the switcher and auto-failover ----------
+type SourceTrack = { ready: boolean; bytes: number; bytesAt: number; grewAt: number | null; kbps: number | null; readyTime: string | null }
+const sourceCache = ((globalThis as { __programSources?: { at: number; main: SourceTrack; backup: SourceTrack } }).__programSources ??= {
+  at: 0,
+  main: { ready: false, bytes: 0, bytesAt: 0, grewAt: null, kbps: null, readyTime: null },
+  backup: { ready: false, bytes: 0, bytesAt: 0, grewAt: null, kbps: null, readyTime: null },
+})
+function trackSource(t: SourceTrack, info: ApiPath | undefined, now: number) {
+  if (!info?.ready) return Object.assign(t, { ready: false, bytes: 0, bytesAt: 0, grewAt: null, kbps: null, readyTime: null })
+  if (t.readyTime !== info.readyTime) Object.assign(t, { bytes: info.bytesReceived, bytesAt: now, grewAt: now, kbps: null, readyTime: info.readyTime })
+  if (info.bytesReceived > t.bytes) t.grewAt = now
+  if (now - t.bytesAt >= 1000) {
+    t.kbps = Math.max(0, Math.round(((info.bytesReceived - t.bytes) * 8) / (now - t.bytesAt)))
+    t.bytes = info.bytesReceived
+    t.bytesAt = now
+  }
+  t.ready = true
+}
+/** Poll MediaMTX for both inputs (cached 400ms; one API call). */
+export async function refreshProgramSources(): Promise<void> {
+  const now = Date.now()
+  if (now - sourceCache.at < 400) return
+  sourceCache.at = now
+  const api = readSettings().programArmed && relayRunning() ? await apiPaths() : null
+  trackSource(sourceCache.main, api?.get(PROGRAM_PATH), now)
+  trackSource(sourceCache.backup, api?.get(BACKUP_PATH), now)
+  programCache.ready = sourceCache.main.ready
+}
+export function programSourceHealth(source: ProgramSource, now = Date.now()): ProgramSourceHealth {
+  const t = sourceCache[source]
+  return { ready: t.ready, kbps: t.ready ? t.kbps : null, dataAgeMs: t.ready && t.grewAt !== null ? now - t.grewAt : null }
 }
 
 // Cached /program readiness for /api/public/state (polled every second by every /stream).
@@ -384,15 +473,14 @@ function probeProgramFps(readyTime: string) {
     if (programCache.fpsFor === readyTime) programCache.fps = rate ? Math.round(rate * 100) / 100 : null
   })
 }
-export async function programReady(): Promise<boolean> {
-  if (Date.now() - programCache.at < 700) return programCache.ready
-  programCache.at = Date.now()
-  if (!readSettings().programArmed || !relayRunning()) return (programCache.ready = false)
-  const info = (await apiPaths())?.get(PROGRAM_PATH)
-  return (programCache.ready = info?.ready === true)
+/** Is the given input (default Main) publishing? */
+export async function programReady(source: ProgramSource = "main"): Promise<boolean> {
+  if (!readSettings().programArmed || !relayRunning()) return false
+  await refreshProgramSources()
+  return sourceCache[source].ready
 }
-export function programReadyCached(): boolean | null {
-  return readSettings().programArmed ? programCache.ready : null
+export function programReadyCached(source: ProgramSource = "main"): boolean | null {
+  return readSettings().programArmed ? sourceCache[source].ready : null
 }
 
 export type ProgramStatus = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; fps: number | null; video: string | null; audio: string | null; /** What MediaMTX says OBS sends as audio (null = no audio track). */ audioTrack: { codec: string; channels: number | null; sampleRate: number | null } | null; readers: number; since: string | null }
@@ -595,7 +683,8 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
 /** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
 export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-export type RelayStatus = { program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
+export type BackupStatus = { ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings }
+export type RelayStatus = { backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 /** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
 export function programAudioTrack(prog: Pick<ApiPath, "tracks" | "tracks2">): ProgramStatus["audioTrack"] {
@@ -658,7 +747,12 @@ export async function relayStatus(): Promise<RelayStatus> {
   const lastLines = tailOf("mediamtx").split("\n").filter((line) => /ERR|FATAL/.test(line))
   // Upload estimate: every forward plus any channel publishing straight to a destination.
   const direct = RELAY_PATHS.map((name) => readChannelStatus(name)).filter((item) => item.running && !item.relay).reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
+  await refreshProgramSources()
+  let pullFrom: string | null = null
+  if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
+  const backup: BackupStatus = { ...programSourceHealth("backup"), pullFrom, failover: settings.failover }
   return {
+    backup,
     program,
     totalOutKbps: RELAY_PATHS.reduce((sum, name) => sum + paths[name].outKbps, 0) + direct,
     installed: bin !== null,

@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EndStreamPage } from "@/app/end/page"
@@ -96,6 +96,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [pausedAt, setPausedAt] = useState<number | null>(initial?.pausedAt ?? null)
   const [stage, setStage] = useState<Stage>(() => parseStage(initial?.stage ?? {}))
   const [programReady, setProgramReady] = useState(false)
+  const [sourceReady, setSourceReady] = useState<{ main: boolean; backup: boolean }>({ main: false, backup: false })
 
   useEffect(() => {
     let cancelled = false
@@ -109,7 +110,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { programReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (reloadIfRebuilt(body.build)) return
@@ -117,6 +118,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
           setProgramReady(body.programReady === true)
+          setSourceReady((cur) => (cur.main === (body.mainReady === true) && cur.backup === (body.backupReady === true) ? cur : { main: body.mainReady === true, backup: body.backupReady === true }))
           if (body.stage && typeof body.stage === "object") {
             setStage(parseStage(body.stage))
           }
@@ -163,8 +165,20 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const clock = testClock ?? now
   const pastEnd = Boolean(clock && endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
   const screen = stageScreen(stage, pastEnd)
+  // Main/Backup hand-over: the input on air stays up until the incoming one has a frame (then crossfades
+  // on top), or 4s at most (then the incoming one's own standby rules apply). Both are prewarmed.
+  const wanted = stage.programSource
+  const [air, setAir] = useState<{ source: "main" | "backup"; pendingSince: number | null }>({ source: wanted, pendingSince: null })
+  const [displays, setDisplays] = useState<Record<"main" | "backup", ProgramDisplay>>({ main: "under", backup: "under" })
+  const nowMs = now?.getTime() ?? 0
+  if (air.source !== wanted && air.pendingSince === null) setAir({ source: air.source, pendingSince: nowMs })
+  else if (air.source === wanted && air.pendingSince !== null) setAir({ source: wanted, pendingSince: null })
+  else if (air.source !== wanted && (displays[wanted] === "video" || screen !== "program" || (air.pendingSince !== null && nowMs - air.pendingSince > 4000))) setAir({ source: wanted, pendingSince: null })
+  const handing = air.source !== wanted
+  const onMain = useCallback((d: ProgramDisplay) => setDisplays((cur) => (cur.main === d ? cur : { ...cur, main: d })), [])
+  const onBackup = useCallback((d: ProgramDisplay) => setDisplays((cur) => (cur.backup === d ? cur : { ...cur, backup: d })), [])
   // Switching to program keeps the previous screen up until the feed has a frame (then crossfades).
-  const [programDisplay, setProgramDisplay] = useState<ProgramDisplay>("under")
+  const programDisplay: ProgramDisplay = handing && displays[air.source] === "under" ? displays[wanted] : displays[air.source]
   const [seen, setSeen] = useState<{ screen: typeof screen; lastOther: Exclude<typeof screen, "program"> }>({ screen, lastOther: screen === "program" ? "countdown" : screen })
   if (seen.screen !== screen) setSeen({ screen, lastOther: seen.screen !== "program" ? seen.screen : seen.lastOther })
   const shownScreen = screen === "program" && programDisplay === "under" ? (seen.screen !== "program" ? seen.screen : seen.lastOther) : screen
@@ -185,7 +199,12 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
       {/* Prewarmed whenever OBS is sending, so "Show program" is instant. */}
-      {stage.program || programReady ? <ProgramFeed ready={programReady} active={screen === "program"} muted={params.get("mute") === "1"} onDisplay={setProgramDisplay} /> : null}
+      {(["main", "backup"] as const).map((source) => {
+        const isAir = source === air.source
+        const live = isAir || (handing && source === wanted)
+        if (!(sourceReady[source] || (stage.program && live))) return null
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} onDisplay={source === "main" ? onMain : onBackup} />
+      })}
       {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard
           kind={shownScreen}

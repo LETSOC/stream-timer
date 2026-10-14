@@ -5,6 +5,7 @@
  */
 import { wallTimeInZone } from "@/lib/countdown"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
+import type { FailoverEvent, FailoverSettings, SourceHealth } from "@/lib/program-source"
 import { stageScreen, testClockStale, type StageOptions } from "@/lib/stage"
 
 export const JUMPS = [
@@ -30,6 +31,15 @@ export type TransportAction =
   | { type: "extendEnd"; minutes: number }
   /** Undo for extendEnd: put both end times back exactly as they were. */
   | { type: "setEnd"; endTime: string; endAt: string }
+  /** Program feed input: Main (OBS) or Backup. Doesn't change the screen. */
+  | { type: "programSource"; source: "main" | "backup" }
+
+export type ProgramSourcesView = {
+  main: SourceHealth
+  backup: SourceHealth & { pull: boolean }
+  failover: FailoverSettings
+  last: FailoverEvent | null
+}
 
 export const EXTENDS = [5, 10] as const
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -114,6 +124,8 @@ export function parseAction(value: unknown): TransportAction | null {
       return typeof v.endTime === "string" && HHMM.test(v.endTime) && typeof v.endAt === "string" && (v.endAt === "" || HHMM.test(v.endAt))
         ? { type: "setEnd", endTime: v.endTime, endAt: v.endAt }
         : null
+    case "programSource":
+      return v.source === "main" || v.source === "backup" ? { type: "programSource", source: v.source } : null
     default:
       return null
   }
@@ -164,6 +176,8 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       // forceEnd (operator chose "end") stays; otherwise the new end time decides countdown/LIVE vs end card.
       return field === "endAt" ? next({}, { endAt: to }) : next({ event: { ...state.event, endTime: to } })
     }
+    case "programSource":
+      return next({}, { programSource: action.source })
     case "setEnd":
       return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt })
   }
@@ -184,6 +198,9 @@ export type DeckState = {
   deskLive: boolean
   overlay: StageOptions["overlay"]
   program: boolean
+  programSource: "main" | "backup"
+  /** Live health of both inputs (null = relay not armed). */
+  programSources: ProgramSourcesView | null
   /** Last known: is OBS publishing to the relay's /program path? null = not known (relay not armed). */
   programReady: boolean | null
   overlayAt: number | null
@@ -197,6 +214,7 @@ export function deckState(
   state: TransportState & { rev: number; testSetAt: number | null },
   now = Date.now(),
   programReady: boolean | null = null,
+  sources: ProgramSourcesView | null = null,
 ): DeckState {
   return {
     rev: state.rev,
@@ -212,6 +230,8 @@ export function deckState(
     deskLive: state.stage.deskLive,
     overlay: state.stage.overlay,
     program: state.stage.program,
+    programSource: state.stage.programSource,
+    programSources: sources,
     programReady,
     overlayAt: state.stage.overlayAt,
     forceEnd: state.stage.forceEnd,
