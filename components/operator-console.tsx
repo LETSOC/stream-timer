@@ -16,7 +16,10 @@ import { NumberField } from "@/components/number-field"
 import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
-import { ProgramPlayer } from "@/components/program-feed"
+import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
+import { failoverText, ProgramSourceSwitch, sourceStatus, useFailoverEvents } from "@/components/program-source-switch"
+import type { FailoverSettings, ProgramSource } from "@/lib/program-source"
+import type { ProgramSourcesView } from "@/lib/transport"
 import { StreamPlayer } from "@/components/stream-player"
 import { diagnose, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 import { CAPTURE_BITRATES } from "@/lib/capture-options"
@@ -121,6 +124,8 @@ export function OperatorConsole() {
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
   const [program, setProgram] = useState(false)
   const [programSource, setProgramSource] = useState<"main" | "backup">("main")
+  // Both program inputs' health + failover settings (server monitor), polled; null = relay not armed.
+  const [sources, setSources] = useState<ProgramSourcesView | null>(null)
   // What /stream has for the draft-managed sections (Event, Links, Look, Socials, End/Break/Hold card, Speakers).
   // The fields above are the desk's draft; only "Save" copies a section into `published`.
   const [published, setPublished] = useState<DeskSnapshot | null>(null)
@@ -134,7 +139,7 @@ export function OperatorConsole() {
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
   // One toast at a time; each kind has its own title, duration and timer. Polling never touches it.
-  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend"; text: string; undo?: () => void }
+  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend" | "failover"; text: string; undo?: () => void }
   const [toast, setToastState] = useState<Toast | null>(null)
   const toastTimer = useRef<number | null>(null)
   const toastSeq = useRef(0)
@@ -145,7 +150,7 @@ export function OperatorConsole() {
     setToastState(null)
   }, [])
   const showToast = useCallback((kind: Toast["kind"], text: string, undo?: () => void) => {
-    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000, extend: 8000 }[kind]
+    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000, extend: 8000, failover: 8000 }[kind]
     const id = ++toastSeq.current
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
     setToastState({ id, kind, text, undo })
@@ -156,6 +161,17 @@ export function OperatorConsole() {
   }, [])
   /** Errors and messages that aren't copies or sync. */
   const setToast = useCallback((text: string | null) => (text ? showToast("error", text) : dismissToast()), [showToast, dismissToast])
+  useEffect(() => {
+    let stop = false
+    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSources?: ProgramSourcesView | null } | null) => {
+      if (!stop && body) setSources(body.programSources ?? null)
+    }).catch(() => undefined)
+    void poll()
+    const id = window.setInterval(poll, 1000)
+    return () => { stop = true; window.clearInterval(id) }
+  }, [])
+  // Failovers (and switches from other devices) toast on every desk.
+  useFailoverEvents(sources?.last, (e) => showToast("failover", failoverText(e)))
   // Preview-only aids (never sent to /stream), remembered in localStorage.
   const [trueObs, setTrueObs] = useSectionOpen("aid-true-obs", false)
   const [safeZone, setSafeZone] = useSectionOpen("aid-safe-zone", false)
@@ -743,6 +759,18 @@ export function OperatorConsole() {
       if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endAt || prev.endTime}`)
     })
   }
+  /** Main/Backup: through the server's transport (logged, synced to every device over the deck socket). */
+  async function switchProgramSource(source: ProgramSource) {
+    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source } }) }).catch(() => null)
+    const body = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string; state?: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } } | null
+    if (!response?.ok || !body?.ok) return setToast(body?.error ?? "Could not switch the program source.")
+    if (body.state?.programSource) setProgramSource(body.state.programSource)
+    if (body.state) setSources(body.state.programSources ?? null)
+  }
+  async function saveFailover(patch: Partial<FailoverSettings>) {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
+    if (!response?.ok) setToast("Could not save the failover setting.")
+  }
   const jumpPreview = (seconds: number) => runTransport({ type: "jump", seconds })
   const goLiveNow = () => runTransport({ type: "goLive" })
   const restoreFestival = () => runTransport({ type: "restore" })
@@ -958,6 +986,7 @@ export function OperatorConsole() {
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
               <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
               <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
+              <div className="col-span-2"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} /></div>
               <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
               <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
               <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
@@ -1286,7 +1315,7 @@ export function OperatorConsole() {
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
             {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
-            {previewScreen === "program" ? <ProgramPlayer scope="desk" className="z-10" /> : null}
+            {previewScreen === "program" ? <ProgramPlayer key={programSource} scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
           </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 [&>*:first-child]:basis-full xl:[&>*:first-child]:basis-0 xl:[&>*:first-child]:grow">
@@ -1450,9 +1479,9 @@ export function OperatorConsole() {
           onTouchMove={toast.kind === "copy-failed" ? undefined : dismissToast}
           className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-left text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]"
         >
-          <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
+          <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" || toast.kind === "failover" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
           <span className="min-w-0">
-            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up", extend: "End time" }[toast.kind]}</span>
+            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up", extend: "End time", failover: "Program source" }[toast.kind]}</span>
             <span className={`block font-mono text-[12px] text-white/75 ${toast.kind === "copy-failed" ? "break-all select-all" : "truncate"}`}>{toast.text}</span>
           </span>
           {toast.undo ? <span data-testid="toast-undo" className="shrink-0 rounded-full bg-[#D9FF43] px-3 py-1 font-mono text-[12px] font-bold text-black">Undo</span> : null}
@@ -1910,7 +1939,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayView = { backup?: { ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -1980,6 +2009,56 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
       ) : null}
       {preview && program?.ready ? (
         <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay" ready={program.ready} /></div>
+      ) : null}
+      {program?.armed ? <BackupSection relay={relay} busy={busy} act={act} /> : null}
+    </div>
+  )
+}
+
+/** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
+function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const backup = relay?.backup
+  const [obs, setObs] = useState<{ server: string; streamKey: string } | null>(null)
+  const [pull, setPull] = useState("")
+  const [preview, setPreview] = useState(false)
+  useEffect(() => {
+    if (!obs) return
+    const id = window.setTimeout(() => setObs(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [obs])
+  async function reveal() {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey })
+  }
+  const st = sourceStatus(backup ? { ready: backup.ready, kbps: backup.kbps, dataAgeMs: backup.dataAgeMs } : undefined)
+  return (
+    <div data-testid="backup-section" className="space-y-2 border-t border-black/10 pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[13px] font-bold">/program-backup · backup</span>
+        <span data-testid="backup-state" data-state={st.tone} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${st.tone === "ok" ? "bg-[#128a3e] text-white" : st.tone === "warn" ? "bg-[#b45309] text-white" : "bg-black/5 text-black/70"}`}>{st.text}</span>
+        {backup?.pullFrom ? <span className="font-mono text-[12px] text-black/70">pulling from {backup.pullFrom}</span> : null}
+      </div>
+      <p className="font-mono text-[12px] text-black/70">A second computer publishes here with its own key, or MediaMTX pulls a URL (RTMP/RTSP/SRT/HLS). Pick Main/Backup and auto-failover in Transport.</p>
+      <div className="flex flex-wrap gap-2">
+        <Pill size="sm" tone="outline" data-testid="backup-reveal" disabled={Boolean(backup?.pullFrom)} onClick={() => (obs ? setObs(null) : void reveal())}>{obs ? "Hide backup URL" : "Reveal backup URL"}</Pill>
+        <Pill size="sm" tone="outline" data-testid="backup-preview" aria-pressed={preview} disabled={!backup?.ready} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview"}</Pill>
+      </div>
+      {obs ? (
+        <div data-testid="backup-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
+          <p className="text-black/70">Backup computer › OBS › Stream › Custom (same ingest server). Hides in 30s.</p>
+          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Server</span><code className="min-w-0 flex-1 break-all">{obs.server}</code></div>
+          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Key</span><code data-testid="backup-obs-key" className="min-w-0 flex-1 break-all">{obs.streamKey}</code><Pill size="sm" tone="outline" onClick={() => void copyOrShow("Backup stream key", obs.streamKey)}>Copy</Pill></div>
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
+        <Pill size="sm" data-testid="backup-pull-save" disabled={busy || !pull.trim()} onClick={() => { void act({ action: "backup-pull", url: pull.trim() }, "Backup pulls from the URL."); setPull("") }}>Pull</Pill>
+        {backup?.pullFrom ? <Pill size="sm" tone="outline" data-testid="backup-pull-clear" disabled={busy} onClick={() => void act({ action: "backup-pull", url: "" }, "Backup takes a publisher again.")}>Stop pulling</Pill> : null}
+      </div>
+      {preview && backup?.ready ? (
+        <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay-backup" src={programOperatorSrc("program-backup")} ready={backup.ready} /></div>
       ) : null}
     </div>
   )

@@ -1,10 +1,12 @@
 "use client"
 
+import { failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
+import type { FailoverSettings } from "@/lib/program-source"
 import Link from "next/link"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
-import { ProgramPlayer } from "@/components/program-feed"
+import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { deckScreen, effectiveNow, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
@@ -74,6 +76,15 @@ export function StreamDeck() {
       window.clearInterval(id)
     }
   }, [preview])
+
+  useFailoverEvents(state?.programSources?.last, (e) => {
+    setToast({ tone: e.auto ? "error" : "ok", text: failoverText(e) })
+    if (e.auto && navigator.vibrate) navigator.vibrate([60, 60, 60])
+  })
+  async function saveFailover(patch: Partial<FailoverSettings>) {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
+    if (!response?.ok) setToast({ tone: "error", text: "Could not save the failover setting." })
+  }
 
   const serverNow = now + offset
   const live = state?.deskLive ?? false
@@ -158,7 +169,7 @@ export function StreamDeck() {
             onClick={() => setBig(!big)}
             className={`relative mx-auto mt-2 block aspect-video touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}
           >
-            {preview === "stream" && screen === "program" ? <ProgramPlayer scope="deck" ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
+            {preview === "stream" && screen === "program" ? <ProgramPlayer key={state?.programSource ?? "main"} scope="deck" src={programOperatorSrc(state?.programSource === "backup" ? "program-backup" : "program")} ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
               <span data-testid="deck-preview-hls"><StreamPlayer inline src={`/api/relay/hls/${preview}/index.m3u8`} /></span>
             ) : (
               <span data-testid="deck-preview-placeholder" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono text-[12px] text-white/60">
@@ -207,6 +218,12 @@ export function StreamDeck() {
         {(["countdown", "break", "hold", "welcome"] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
         {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
         {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn&apos;t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
+        {state?.programSources ? (
+          <div className="col-span-2 mt-1">
+            <h2 className="mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Program source</h2>
+            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} />
+          </div>
+        ) : null}
         {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
       </div>
 
