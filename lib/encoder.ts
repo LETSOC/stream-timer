@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { EncoderStatus } from "@/lib/encoder-status";
 import { programReadFile, relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
-import { audioHash, prepareChannelAudio, readAudioSettings, type AudioMode } from "@/lib/audio-bed";
+import { audioHash, prepareChannelAudio, readAppliedAudio, readAudioSettings, type AudioMode } from "@/lib/audio-bed";
 import { captureSourceHealth, EMPTY_HEALTH, healthFromSamples, parseStatsLines, type CaptureSourceStats, type HealthStats, type SourceHealth } from "@/lib/stream-health";
 
 export const ROOT = process.cwd();
@@ -356,7 +356,7 @@ export function rtmpFiles(ch: RtmpChannel) {
   }
 }
 
-type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean; bitrateK?: number; encoder?: string; audio?: { mode: AudioMode; hash: string; warning: string | null } }
+type RtmpMeta = { pid?: number; adopted?: boolean; host?: string; source?: string; size?: string | null; dest?: string; relay?: boolean; bitrateK?: number; encoder?: string; audio?: { mode: AudioMode; hash: string; warning: string | null; /** hot-swappable (audio feeder) */ live?: boolean } }
 
 function readRtmpMeta(ch: RtmpChannel = "slate"): RtmpMeta | null {
   try {
@@ -418,9 +418,15 @@ function channelHealth(ch: RtmpChannel, running: boolean, meta: RtmpMeta | null)
   return captureSourceHealth(encoder, stats)
 }
 
-function channelAudio(ch: RtmpChannel, meta: RtmpMeta | null): { mode: AudioMode; warning: string | null; pending: boolean } {
+function channelAudio(ch: RtmpChannel, meta: RtmpMeta | null): NonNullable<RtmpChannelStatus["audio"]> {
   const live = meta?.audio
   const saved = audioHash(readAudioSettings().channels[ch])
+  if (live?.live) {
+    // Audio feeder: changes apply live (no restart). "applying" while it hasn't caught up yet.
+    const applied = readAppliedAudio(ch)
+    const fresh = applied !== null && Date.now() - applied.updatedAt < 5000
+    return { mode: applied?.mode ?? live.mode, warning: applied?.warning ?? live.warning, pending: false, live: true, applying: !fresh || applied.hash !== saved || applied.pending !== null, peakDb: fresh ? applied.peakDb : null, underruns: applied?.underruns ?? 0 }
+  }
   const runtimeFallback = /\[audio\] audio (bed file missing|settings unreadable)/.test(readTail(rtmpFiles(ch).log, 16384).split(/supervisor[^\n]*started|Mode: /).pop() ?? "")
   const warning = live?.warning ?? (runtimeFallback ? "Audio bed file went missing; streaming silence." : null)
   return { mode: runtimeFallback ? "silent" : (live?.mode ?? "silent"), warning, pending: live ? live.hash !== saved : false }
@@ -498,7 +504,8 @@ export type RtmpChannelStatus = {
   encoder: string | null
   health: SourceHealth | HealthStats
   /** What this channel is playing as audio; pending = saved settings differ (restart to apply). */
-  audio: { mode: AudioMode; warning: string | null; pending: boolean } | null
+  /** pending = saved audio differs and needs a restart (only channels started before live audio). live = hot-swaps; applying = switching now. */
+  audio: { mode: AudioMode; warning: string | null; pending: boolean; live?: boolean; applying?: boolean; peakDb?: number | null; underruns?: number } | null
   connectError: string | null
   failure: string | null
   logTail: string
@@ -795,6 +802,10 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
       RTMP_LOG_FILE: files.log,
       RTMP_FAIL_FILE: files.fail,
       AUDIO_ARGS_FILE: audio.argsFile,
+      AUDIO_LIVE_FILE: audio.liveFile,
+      AUDIO_APPLIED_FILE: audio.appliedFile,
+      NODE_BIN: process.execPath,
+      FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg",
       ...(source.kind === "capture"
         ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_KEY_FILE: path.join(DATA_DIR, "capture-key"), PROGRAM_READ_FILE: programReadFile(), CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
         : {}),
@@ -803,7 +814,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   child.unref()
   fs.closeSync(logFd)
   if (!child.pid) return { ok: false, error: "Could not start the RTMP stream.", status: 500 }
-  const audioMeta = { mode: audio.plan.mode, hash: audio.hash, warning: audio.plan.warning }
+  const audioMeta = { mode: audio.live.mode, hash: audio.hash, warning: audio.live.warning, live: true }
   let host = ""
   try { host = new URL(url).hostname } catch { /* validated above */ }
   fs.writeFileSync(files.meta, JSON.stringify({ pid: child.pid, startedAt: Date.now(), host, source: ch, size: source.kind === "capture" ? source.size : null, ...(source.kind === "capture" ? { bitrateK: source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500), encoder: source.encoder ?? "auto" } : {}), dest: destinationFingerprint(url), audio: audioMeta, ...(source.relay ? { relay: true } : {}) }))

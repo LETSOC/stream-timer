@@ -1713,7 +1713,7 @@ function hostOf(url: string, fallback: string): string {
 
 type RtmpChannelId = "slate" | "capture"
 type RtmpPhase = "stopped" | "starting" | "connected" | "reconnecting" | "stalled" | "failed"
-type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; audio?: { mode: "silent" | "tone" | "bed"; warning: string | null; pending: boolean } | null; connectError: string | null; failure: string | null }
+type RtmpChannelView = { running: boolean; state: RtmpPhase; reconnecting: boolean; restarts: number; adopted: boolean; host: string | null; size: string | null; relay?: boolean; bitrateK?: number | null; encoder?: string | null; health?: SourceHealth | HealthStats; audio?: { mode: "silent" | "tone" | "bed"; warning: string | null; pending: boolean; live?: boolean; applying?: boolean; peakDb?: number | null; underruns?: number } | null; connectError: string | null; failure: string | null }
 const STOPPED_CHANNEL: RtmpChannelView = { running: false, state: "stopped", reconnecting: false, restarts: 0, adopted: false, host: null, size: null, connectError: null, failure: null }
 
 /** One independent RTMP output (Slate or Browser capture): its own destination, Start/Stop, status and messages. */
@@ -1804,7 +1804,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
   return (
     <div data-testid={`rtmp-card-${channel}`} className="min-w-0 break-words [overflow-wrap:anywhere] space-y-2 rounded-2xl border border-black/10 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">{label}</p>
+        <p data-testid={tid("heading")} className="font-mono text-[13px] font-bold tracking-[0.04em]">{channel === "slate" ? "/slate" : "/browser capture"}</p>
         <span data-testid={tid("status")} data-state={live ? phase : "stopped"} className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${phase === "connected" || (live && phase === "stopped") ? "bg-[#128a3e] text-white" : phase === "reconnecting" || phase === "starting" ? "bg-[#b45309] text-white" : phase === "failed" || phase === "stalled" ? "bg-[#d93200] text-white" : "bg-black/5 text-black/70"}`}>
           <span className={`size-1.5 rounded-full ${live ? "animate-pulse bg-white" : "bg-black/30"}`} />
           {pillText}{status.restarts > 0 ? <span title="Times the supervisor restarted the encoder after it exited (dropped connection, crash, or failed connect)"> · {status.restarts} {status.restarts === 1 ? "restart" : "restarts"}</span> : ""}
@@ -1848,7 +1848,16 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
       </div>
       {live && status.relay ? <p data-testid={tid("via-relay")} className="font-mono text-[12px] text-black/70">Publishing to relay /{channel}{status.size ? ` · ${status.size}` : ""}. Forwards are set in the Relay card.</p> : live && status.host ? <p className="font-mono text-[12px] text-black/70">Sending to {status.host}{status.size ? ` · ${status.size}` : ""}</p> : null}
       {live && status.health ? <SourceHealthLine channel={channel} health={status.health} /> : null}
-      {live && status.audio ? <p data-testid={tid("audio")} className="font-mono text-[12px] text-black/70">Audio: {status.audio.mode === "bed" ? "audio bed" : status.audio.mode}{status.audio.pending ? <span data-testid={tid("audio-pending")} className="ml-2 rounded-full bg-[#b45309] px-2 py-0.5 text-[11px] font-bold text-white uppercase">Restart to apply new audio</span> : null}</p> : null}
+      {live && status.audio ? (
+        <p data-testid={tid("audio")} data-live={status.audio.live ? "1" : "0"} data-applying={status.audio.applying ? "1" : "0"} className="font-mono text-[12px] text-black/70">
+          Audio: {status.audio.mode === "bed" ? "audio bed" : status.audio.mode}
+          {status.audio.live ? <span data-testid={tid("audio-level")}> · {typeof status.audio.peakDb === "number" ? `peak ${status.audio.peakDb.toFixed(0)} dBFS` : "silent"}</span> : null}
+          {status.audio.live && status.audio.applying ? <span data-testid={tid("audio-applying")} className="ml-2 rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-bold uppercase">Applying…</span> : null}
+          {status.audio.live && !status.audio.applying ? <span data-testid={tid("audio-hot")} className="ml-2 inline-block rounded-full bg-[#128a3e] px-2 py-0.5 text-[11px] font-bold whitespace-nowrap text-white uppercase" title="Audio changes switch live: no restart, no reconnect">Applied live</span> : null}
+          {status.audio.pending ? <span data-testid={tid("audio-pending")} className="ml-2 rounded-full bg-[#b45309] px-2 py-0.5 text-[11px] font-bold text-white uppercase" title="This channel started before live audio switching; restart it once to get it.">Restart to apply new audio</span> : null}
+          {status.audio.warning ? <span className="block text-[#8a4b06]">{status.audio.warning}</span> : null}
+        </p>
+      ) : null}
       {live && status.audio?.warning ? <p role="alert" data-testid={tid("audio-warning")} className="font-mono text-[12px] font-bold text-[#8a4b06]">{status.audio.warning}</p> : null}
       {live && status.health && !status.relay ? <DiagnosisLine testid={tid("diagnosis")} value={diagnose({ source: { label: label, health: status.health }, forwards: [], totalKbps: status.health.kbps })} /> : null}
       {sameAsOther && !live ? <p role="alert" data-testid={tid("same-dest")} className="font-mono text-[12px] font-bold text-[#b42318]">The other channel is already live on this destination. One stream key takes one publisher; choose a different destination.</p> : null}
@@ -2137,7 +2146,7 @@ function AudioCard() {
   async function save() {
     if (!draft || !saved) return
     const body = await post("/api/audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", channels: draft, baseRev: saved.rev }) })
-    if (body) { setDraft(null); setMessage({ tone: "info", text: "Audio saved. A live channel uses it after a restart." }) }
+    if (body) { setDraft(null); setMessage({ tone: "info", text: "Audio saved. Live channels switch to it now (crossfade, no restart)." }) }
   }
   async function upload(file: File) {
     if (file.size > 50_000_000) return setMessage({ tone: "error", text: "Audio is over 50 MB." })
@@ -2159,18 +2168,18 @@ function AudioCard() {
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Stream audio</p>
         {dirty ? <span data-testid="audio-unsaved" className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[11px] font-bold text-white uppercase">Unsaved</span> : null}
       </div>
-      <p className="font-mono text-[12px] text-black/70">What Slate and Browser capture send as audio: silence, a test tone, or a looped audio bed. AAC 128k, 48 kHz stereo. Changes apply when a channel (re)starts.</p>
+      <p className="font-mono text-[12px] text-black/70">What /slate and /browser capture send as audio: silence, a test tone, or a looped audio bed (one file or a playlist). AAC 128k, 48 kHz stereo. Saved changes switch live within about a second with a short crossfade: no restart, no reconnect.</p>
       {view ? (["slate", "capture"] as const).map((ch) => {
         const cfg = view[ch]
         const tid = (s: string) => `audio-${ch}-${s}`
         return (
           <div key={ch} data-testid={tid("box")} className="space-y-2 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-bold">{ch === "slate" ? "Slate" : "Browser capture"}</span>
+            <p data-testid={tid("title")} className="font-bold">{ch === "slate" ? "/slate" : "/browser capture"}</p>
+            <div role="radiogroup" aria-label={`${ch === "slate" ? "/slate" : "/browser capture"} audio`} className="flex flex-col items-start gap-1">
               {(["silent", "tone", "bed"] as const).map((mode) => (
-                <label key={mode} className="flex items-center gap-1">
+                <label key={mode} className="flex min-h-7 items-center gap-2">
                   <input type="radio" name={`audio-mode-${ch}`} data-testid={tid(`mode-${mode}`)} checked={cfg.mode === mode} onChange={() => edit(ch, { mode })} />
-                  {mode === "silent" ? "Silent" : mode === "tone" ? "Tone" : "Audio bed"}
+                  {mode === "silent" ? "Silent" : mode === "tone" ? "Tone" : "Audio bed / playlist"}
                 </label>
               ))}
             </div>
@@ -2203,7 +2212,7 @@ function AudioCard() {
                   {cfg.files.length > 1 ? (
                     <select data-testid={tid("order")} value={cfg.order} onChange={(e) => edit(ch, { order: e.target.value === "shuffle" ? "shuffle" : "inOrder" })} className="h-7 border px-1">
                       <option value="inOrder">Play in order</option>
-                      <option value="shuffle">Shuffle (each start)</option>
+                      <option value="shuffle">Shuffle (each pass)</option>
                     </select>
                   ) : null}
                   <label>Volume <input type="number" data-testid={tid("volume")} min={-40} max={12} value={cfg.volumeDb} onChange={(e) => edit(ch, { volumeDb: Number(e.target.value) })} className="h-7 w-16 border px-1" /> dB</label>

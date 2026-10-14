@@ -203,7 +203,7 @@ export function serializePlan(plan: AudioPlan): string {
 }
 
 /** Writes data/rtmp-audio-<channel>.args (+ playlist) for a channel start. Returns what will play. */
-export function prepareChannelAudio(channel: AudioChannel): { argsFile: string; plan: AudioPlan; hash: string } {
+export function prepareChannelAudio(channel: AudioChannel): { argsFile: string; plan: AudioPlan; hash: string; liveFile: string; appliedFile: string; live: LiveAudio } {
   const config = readAudioSettings().channels[channel]
   const library = new Map(listAudioFiles().map((item) => [item.id, item]))
   const resolved = config.files.map((id) => {
@@ -215,5 +215,55 @@ export function prepareChannelAudio(channel: AudioChannel): { argsFile: string; 
   if (plan.concatList) fs.writeFileSync(concatPath, plan.concatList)
   const argsFile = path.join(dataDir(), `rtmp-audio-${channel}.args`)
   fs.writeFileSync(argsFile, serializePlan(plan))
-  return { argsFile, plan, hash: audioHash(config) }
+  fs.rmSync(appliedAudioFile(channel), { force: true })
+  const live = writeLiveAudio(channel)
+  return { argsFile, plan, hash: audioHash(config), liveFile: liveAudioFile(channel), appliedFile: appliedAudioFile(channel), live }
+}
+
+// ---------- live (hot-swapped) audio: scripts/audio-feeder.mjs ----------
+
+/** What the feeder plays. Files are absolute paths to the normalized stream copies. */
+export type LiveAudio = { hash: string; mode: AudioMode; toneHz: number; toneDb: number; volumeDb: number; fadeInSec: number; files: string[]; shuffle: boolean; warning: string | null }
+/** What the feeder says is on air (written by it about once a second). */
+export type AppliedAudio = { hash: string | null; mode: AudioMode; at: number; warning: string | null; peakDb: number | null; underruns: number; pending: string | null; updatedAt: number }
+
+/** Pure: saved config + resolved library entries → the feeder's live plan. Missing files are skipped. */
+export function liveAudioPlan(config: AudioConfig, files: (AudioFile | null)[], dir: string): LiveAudio {
+  const present = files.filter((item): item is AudioFile => item !== null)
+  const missing = files.length - present.length
+  const base = { hash: audioHash(config), toneHz: config.toneHz, toneDb: config.toneDb, volumeDb: config.volumeDb, fadeInSec: config.fadeInSec, shuffle: config.order === "shuffle" }
+  if (config.mode === "tone") return { ...base, mode: "tone", files: [], warning: null }
+  if (config.mode === "bed") {
+    if (present.length === 0) return { ...base, mode: "silent", files: [], warning: files.length ? "Audio bed file is missing; streaming silence." : "No audio bed file chosen; streaming silence." }
+    return { ...base, mode: "bed", files: present.map((file) => path.join(dir, `${file.id}.stream.flac`)), warning: missing ? `${missing} audio file(s) missing; playing the rest.` : null }
+  }
+  return { ...base, mode: "silent", files: [], warning: null }
+}
+
+export const liveAudioFile = (channel: AudioChannel) => path.join(dataDir(), `rtmp-audio-${channel}.live.json`)
+export const appliedAudioFile = (channel: AudioChannel) => path.join(dataDir(), `rtmp-audio-${channel}.applied.json`)
+
+/** Writes what a channel's feeder should play now (atomic; the feeder picks it up within ~250ms). */
+export function writeLiveAudio(channel: AudioChannel): LiveAudio {
+  const config = readAudioSettings().channels[channel]
+  const library = new Map(listAudioFiles().map((item) => [item.id, item]))
+  const resolved = config.files.map((id) => {
+    const file = library.get(id)
+    return file && fs.existsSync(streamFilePath(file)) ? file : null
+  })
+  const plan = liveAudioPlan(config, resolved, audioDir())
+  fs.mkdirSync(dataDir(), { recursive: true })
+  const file = liveAudioFile(channel)
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(plan), { mode: 0o600 })
+  fs.renameSync(`${file}.tmp`, file)
+  return plan
+}
+
+export function readAppliedAudio(channel: AudioChannel): AppliedAudio | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(appliedAudioFile(channel), "utf8")) as AppliedAudio
+    return raw && typeof raw === "object" ? raw : null
+  } catch {
+    return null
+  }
 }

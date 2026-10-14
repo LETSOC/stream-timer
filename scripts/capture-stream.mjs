@@ -4,7 +4,7 @@
 // Frames come from the Chrome DevTools screencast (Page.startScreencast), which pushes a JPEG
 // whenever the page repaints. A fixed-rate timer writes the latest frame into ffmpeg's
 // image2pipe at CAPTURE_FPS, so the output is constant frame rate even when the page is still.
-// Audio: AUDIO_ARGS_FILE (lib/audio-bed.ts: silence, tone or a looped bed); silence if missing.
+// Audio: scripts/audio-feeder.mjs (AUDIO_LIVE_FILE: silence, tone or a bed/playlist), switchable live.
 // Program audio: headless Chromium's sound is not part of the screencast, so while /stream shows
 // the OBS program (<html data-screen="program">) this script reads /program's audio straight from
 // the relay (URL in PROGRAM_READ_FILE, 0600) and feeds it to ffmpeg as raw PCM on fd 3, delayed by
@@ -19,6 +19,7 @@
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import { chromium } from "playwright"
+import { createAudioFeeder } from "./audio-feeder.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
 const pageUrl = process.env.CAPTURE_URL
@@ -56,19 +57,6 @@ const encoder = pickEncoder()
 // macOS 13+ on Apple Silicon; probe it and fall back to ABR with a data-rate cap.
 const vtCbr = encoder === "h264_videotoolbox" && vtProbe(["-constant_bit_rate", "1"])
 
-// Stream audio: one ffmpeg arg per line plus "@requires <file>" / "@filter <af>" lines.
-let audioIn = ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
-let audioAf = "aresample=48000:async=1000:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
-if (process.env.AUDIO_ARGS_FILE) {
-  try {
-    const lines = fs.readFileSync(process.env.AUDIO_ARGS_FILE, "utf8").split("\n").filter(Boolean)
-    const missing = lines.filter((l) => l.startsWith("@requires ") && !fs.existsSync(l.slice(10)))
-    const args = lines.filter((l) => !l.startsWith("@"))
-    const af = lines.find((l) => l.startsWith("@filter "))?.slice(8)
-    if (missing.length === 0 && args.length) { audioIn = args; if (af) audioAf = af }
-    else log("[audio] audio bed file missing; streaming silence")
-  } catch { log("[audio] audio settings unreadable; streaming silence") }
-}
 // Keyframe every 2s (YouTube/Castr want ≤ 2s), CBR-ish: maxrate = bitrate, 2s buffer.
 const gop = String(fps * 2)
 const videoArgs = encoder === "h264_videotoolbox"
@@ -77,7 +65,7 @@ const videoArgs = encoder === "h264_videotoolbox"
      "-g", gop, "-keyint_min", gop, "-force_key_frames", `expr:gte(t,n_forced*2)`]
   : ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "high", "-b:v", `${bitrate}k`, "-maxrate", `${bitrate}k`, "-bufsize", `${bitrate * 2}k`, "-nal-hrd", "cbr", "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-x264-params", "force-cfr=1"]
 
-// ---------- program audio (fd 3: s16le, 48k, 3 channels = program L, program R, bed gain) ----------
+// ---------- audio (fd 3: s16le, 48k stereo = stream audio from the live feeder, faded under program audio) ----------
 const RATE = 48000
 const programFile = process.env.PROGRAM_READ_FILE || ""
 const progDelayMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
@@ -140,22 +128,26 @@ function takeProgram(n) {
 const GAIN_STEP = 1 / (0.2 * RATE)
 function pcmBlock(n) {
   const programPcm = prog.wanted ? takeProgram(n) : null
-  const out = Buffer.alloc(n * 6)
-  // Fade the bed out only once program audio is actually flowing (no hole while the reader starts).
+  const bed = feeder ? feeder.readFloat(n) : new Float32Array(n * 2)
+  const out = Buffer.alloc(n * 4)
+  // Fade the stream audio out only once program audio is actually flowing (no hole while the reader starts).
   const target = programPcm ? 0 : 1
   if (programPcm) prog.mixedAt = Date.now()
   for (let i = 0; i < n; i++) {
     if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
     else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
+    let l = bed[i * 2] * prog.gain * 32767
+    let r = bed[i * 2 + 1] * prog.gain * 32767
     if (programPcm) {
-      const l = programPcm.readInt16LE(i * 4)
-      const r = programPcm.readInt16LE(i * 4 + 2)
-      out.writeInt16LE(l, i * 6)
-      out.writeInt16LE(r, i * 6 + 2)
-      const m = Math.max(Math.abs(l), Math.abs(r))
+      const pl = programPcm.readInt16LE(i * 4)
+      const pr = programPcm.readInt16LE(i * 4 + 2)
+      l += pl
+      r += pr
+      const m = Math.max(Math.abs(pl), Math.abs(pr))
       if (m > prog.peak) prog.peak = m
     }
-    out.writeInt16LE(Math.round(prog.gain * 32767), i * 6 + 4)
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(l))), i * 4)
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(r))), i * 4 + 2)
   }
   return out
 }
@@ -166,6 +158,9 @@ delete childEnv.RTMP_URL
 delete childEnv.CAPTURE_URL
 delete childEnv.CAPTURE_KEY_FILE
 delete childEnv.PROGRAM_READ_FILE
+
+// Stream audio, hot-swappable while live (scripts/audio-feeder.mjs; silence if no settings file).
+const feeder = createAudioFeeder({ liveFile: process.env.AUDIO_LIVE_FILE || "", appliedFile: process.env.AUDIO_APPLIED_FILE || "", ffmpegBin, env: childEnv, log })
 
 let browser = null
 let ffmpeg = null
@@ -179,6 +174,7 @@ async function shutdown(code) {
   if (ticker) clearInterval(ticker)
   if (audioTicker) clearInterval(audioTicker)
   try { prog.reader?.kill("SIGTERM") } catch { /* gone */ }
+  try { feeder.stop() } catch { /* gone */ }
   try { ffmpeg?.stdin.end() } catch { /* closed */ }
   try { await browser?.close() } catch { /* gone */ }
   if (ffmpeg && ffmpeg.exitCode === null) {
@@ -258,17 +254,9 @@ latest = await page.screenshot({ type: "jpeg", quality: 85 })
 ffmpeg = spawn(ffmpegBin, [
   "-hide_banner", "-loglevel", "info", "-stats_period", "2",
   "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "pipe:0",
-  ...audioIn,
-  "-f", "s16le", "-ar", String(RATE), "-ac", "3", "-i", "pipe:3",
-  "-filter_complex", [
-    `[1:a]${audioAf}[bed]`,
-    "[2:a]asplit[pa][pb]",
-    "[pa]pan=stereo|c0=c0|c1=c1,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[prog]",
-    "[pb]pan=stereo|c0=c2|c1=c2,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[gain]",
-    "[bed][gain]amultiply[bedg]",
-    "[bedg][prog]amix=inputs=2:normalize=0:duration=longest,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]",
-  ].join(";"),
-  "-map", "0:v", "-map", "[aout]",
+  "-thread_queue_size", "4096", "-f", "s16le", "-ar", String(RATE), "-ac", "2", "-i", "pipe:3",
+  "-map", "0:v", "-map", "1:a",
+  "-af", "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
   "-vf", `scale=${width}:${height}:flags=bicubic,format=yuv420p`,
   ...videoArgs, "-r", String(fps),
   "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
