@@ -203,7 +203,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} onDisplay={source === "main" ? onMain : onBackup} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} />
       })}
       {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard

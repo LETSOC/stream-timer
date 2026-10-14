@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type Hls from "hls.js"
-import { keepLoaded, programDisplay, type ProgramDisplay } from "@/lib/program-display"
+import { keepLoaded, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -133,7 +133,7 @@ function Standby({ small = false }: { small?: boolean }) {
  * the first frame, then crossfades in. "Waiting for OBS" only after a grace or a real disconnect.
  * Sound on by default (OBS Browser Source captures it); `muted` for previews (?mute=1).
  */
-export function ProgramFeed({ ready, active, muted = false, onDisplay, source = "main", path = "program", onAir = true }: { ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean }) {
+export function ProgramFeed({ ready, active, muted = false, onDisplay, source = "main", path = "program", onAir = true, holdFrame = 0 }: { ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
@@ -141,7 +141,8 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   const load = keepLoaded(ready, notReadySince, now)
   const showing = useRef<ProgramDisplay>("under")
   const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted)
-  const shown = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
+  const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
+  const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
   useEffect(() => {
     if (showing.current === shown) return
     showing.current = shown
