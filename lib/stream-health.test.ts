@@ -58,7 +58,12 @@ test("capture: repeats are normal, backlog/lag/no repaint are not", () => {
   assert.equal(captureSourceHealth(ok, cap).level, "ok")
   assert.equal(captureSourceHealth(ok, { ...cap, backpressurePct: 15 }).level, "bad")
   assert.equal(captureSourceHealth(ok, { ...cap, maxLagMs: 400 }).level, "warn")
-  assert.equal(captureSourceHealth(ok, { ...cap, screencastFps: 0.1 }).level, "bad")
+  // Static LIVE/end screen: no repaints but heartbeat fresh → healthy.
+  assert.equal(captureSourceHealth(ok, { ...cap, screencastFps: 0, heartbeatAgeMs: 900 }).level, "ok")
+  assert.equal(captureSourceHealth(ok, { ...cap, heartbeatAgeMs: 10000 }).level, "warn")
+  assert.equal(captureSourceHealth(ok, { ...cap, heartbeatAgeMs: 20000 }).level, "bad")
+  // Old capture process without heartbeat: low repaint only warns.
+  assert.equal(captureSourceHealth(ok, { ...cap, screencastFps: 0.1 }).level, "warn")
 })
 
 test("diagnosis", () => {
@@ -67,6 +72,6 @@ test("diagnosis", () => {
   assert.match(diagnose({ source: null, forwards: [f("A", slow), f("B", slow)], totalKbps: 3000, needKbps: 5256 }).text, /Sending ≈ 3\.0 of ≈ 5\.3 Mbps needed/)
   assert.match(diagnose({ source: null, forwards: [f("YouTube", slow), f("B", ok)], totalKbps: null }).text, /Only YouTube is slow .*that destination/)
   assert.match(diagnose({ source: { label: "Browser capture", health: captureSourceHealth(ok, { ...cap, backpressurePct: 20 }) }, forwards: [f("A", slow), f("B", slow)], totalKbps: null }).text, /encoder can't keep up → CPU/)
-  assert.match(diagnose({ source: { label: "Browser capture", health: captureSourceHealth(ok, { ...cap, screencastFps: 0.1 }) }, forwards: [], totalKbps: null }).text, /Chrome isn't repainting/)
+  assert.match(diagnose({ source: { label: "Browser capture", health: captureSourceHealth(ok, { ...cap, heartbeatAgeMs: 20000 }) }, forwards: [], totalKbps: null }).text, /page stopped ticking/)
   assert.equal(diagnose({ source: { label: "Slate", health: ok }, forwards: [f("A", ok), f("B", ok)], totalKbps: 5200 }).text, "Healthy. Total out ≈ 5.2 Mbps.")
 })

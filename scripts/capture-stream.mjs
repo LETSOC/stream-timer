@@ -114,11 +114,14 @@ browser.on("disconnected", () => { if (!stopping) { log("browser crashed"); void
 const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })
 const page = await context.newPage()
 page.on("crash", () => { log("page crashed"); void shutdown(6) })
-const response = await page.goto(pageUrl, { waitUntil: "networkidle", timeout: 20000 }).catch(() => null)
+// DOM-ready + the page's own ready marker (not "networkidle": /stream polls forever, and slow
+// speaker images would otherwise hold the start for 20s).
+const response = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => null)
 if (!response || !response.ok()) {
   log(`could not load /stream (status ${response?.status() ?? "none"})`)
   await shutdown(7)
 }
+await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 }).catch(() => log("/stream ready marker not seen in 15s; capturing anyway"))
 if (await page.getByText("View key required").count()) {
   log("/stream says the view key is wrong")
   await shutdown(8)
@@ -129,7 +132,6 @@ await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g
 
 let latest = null
 let frames = 0
-let lastFrameAt = Date.now()
 // Health counters, reset every stats window.
 const win = { at: Date.now(), screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0 }
 let freshFrame = false
@@ -138,7 +140,6 @@ cdp.on("Page.screencastFrame", ({ data, sessionId }) => {
   frames += 1
   win.screencast += 1
   freshFrame = true
-  lastFrameAt = Date.now()
   cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined)
 })
 await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: width, maxHeight: height, everyNthFrame: 1 })
@@ -196,14 +197,36 @@ ticker = setInterval(() => {
   written += due
 }, Math.max(5, Math.floor(1000 / fps / 2)))
 
-// Health: the countdown repaints every second, so a long silence means the page is stuck.
-setInterval(() => {
-  const quiet = Date.now() - lastFrameAt
-  if (quiet > 15000) {
-    log(`no repaint for ${Math.round(quiet / 1000)}s; reloading /stream`)
-    lastFrameAt = Date.now()
-    page.reload({ waitUntil: "networkidle", timeout: 20000 }).catch(() => { log("reload failed"); void shutdown(9) })
-  }
+// Stuck detection by page heartbeat (window.__hb, +1/s), not by repaints: a static LIVE/end/hold
+// screen legitimately sends no screencast frames (the writer keeps repeating the last one).
+// Reload only when the page's JS stops ticking; if reloads don't help, exit so the supervisor
+// restarts the whole capture.
+let lastHb = -1
+let lastHbAt = Date.now()
+let reloading = false
+const reloads = []
+setInterval(async () => {
+  if (reloading || stopping) return
+  const hb = await Promise.race([
+    page.evaluate(() => window.__hb ?? -1),
+    new Promise((resolve) => setTimeout(() => resolve(-2), 3000)),
+  ]).catch(() => -2)
+  if (typeof hb === "number" && hb >= 0 && hb !== lastHb) { lastHb = hb; lastHbAt = Date.now(); return }
+  const quiet = Date.now() - lastHbAt
+  if (quiet < 15000) return
+  const now = Date.now()
+  while (reloads.length && now - reloads[0] > 120000) reloads.shift()
+  if (reloads.length >= 3) { log(`page heartbeat still stalled after ${reloads.length} reloads in 2 min; restarting capture`); void shutdown(9); return }
+  reloads.push(now)
+  log(`page heartbeat stalled ${Math.round(quiet / 1000)}s (${hb === -2 ? "page not responding" : "no tick"}); reloading /stream`)
+  reloading = true
+  try {
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 })
+    await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 })
+  } catch { log("reload failed"); void shutdown(9) }
+  lastHb = -1
+  lastHbAt = Date.now()
+  reloading = false
 }, 5000)
 const encHist = []
 if (statsFile) {
@@ -214,6 +237,7 @@ if (statsFile) {
     const stats = {
       at: now,
       screencastFps: +(win.screencast / secs).toFixed(2),
+      heartbeatAgeMs: Date.now() - lastHbAt,
       writtenFps: +(win.written / secs).toFixed(2),
       repeatPct: win.written ? +((win.repeats / win.written) * 100).toFixed(1) : 0,
       backpressurePct: total ? +((win.skipped / total) * 100).toFixed(1) : 0,

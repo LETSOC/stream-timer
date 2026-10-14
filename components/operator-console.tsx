@@ -1980,7 +1980,7 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
       <HealthChip health={health} />
       {cap ? (
         <p className="font-mono text-[11px] text-black/60" title="Chrome only sends a frame when /stream repaints (≥1/s for the countdown); the writer repeats the last one to keep a constant frame rate. Backlog = frames skipped because the encoder fell behind.">
-          Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms
+          Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms{typeof cap.heartbeatAgeMs === "number" ? (cap.heartbeatAgeMs < 6000 ? " · page alive" : ` · page stalled ${Math.round(cap.heartbeatAgeMs / 1000)}s`) : ""}
         </p>
       ) : null}
     </div>

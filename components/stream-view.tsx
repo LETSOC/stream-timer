@@ -35,7 +35,23 @@ export type StreamInitial = { event: EventConfig; testUntil: number | null; paus
 type Stage = StageOptions
 
 /** Server passes the saved public state (only when the view key checks out) so the first paint is already correct. */
+/**
+ * Capture watchdog hooks (scripts/capture-stream.mjs): window.__hb ticks every second even on a
+ * static LIVE/end/hold screen (where Chrome may send no repaints), and <html data-stream-ready>
+ * marks that the client view has mounted. Harmless for OBS.
+ */
+function useCaptureHeartbeat() {
+  useEffect(() => {
+    const w = window as unknown as { __hb?: number }
+    w.__hb = 0
+    document.documentElement.dataset.streamReady = "1"
+    const id = window.setInterval(() => { w.__hb = (w.__hb ?? 0) + 1 }, 1000)
+    return () => window.clearInterval(id)
+  }, [])
+}
+
 export function StreamClient({ initial }: { initial: StreamInitial | null }) {
+  useCaptureHeartbeat()
   return (
     <Suspense fallback={<StreamFallback initial={initial} />}>
       <StreamView initial={initial} />

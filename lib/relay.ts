@@ -179,7 +179,7 @@ function loopAlive(key: string): Pidfile | null {
   return null
 }
 
-function spawnLoop(key: string, tag: string, command: string[], opts: { redact?: boolean } = {}) {
+function spawnLoop(key: string, tag: string, command: string[], opts: { redact?: boolean; forward?: boolean } = {}) {
   ensureDir()
   const log = file(`${key}.log`)
   fs.writeFileSync(log, "", { mode: 0o600 })
@@ -189,7 +189,13 @@ function spawnLoop(key: string, tag: string, command: string[], opts: { redact?:
     cwd: relayDir(),
     detached: true,
     stdio: ["ignore", out, out],
-    env: relayChildEnv({ LOOP_STATE_FILE: file(`${key}-state.json`), LOOP_REDACT: opts.redact ? "1" : "" }),
+    env: relayChildEnv({
+      LOOP_STATE_FILE: file(`${key}-state.json`),
+      LOOP_REDACT: opts.redact ? "1" : "",
+      // Forwards: retry within 5s (a capture relaunch shouldn't leave YouTube dark for 30s), and a
+      // watchdog restarts a forward whose bytes-sent stops growing for 25s. MediaMTX keeps 30s.
+      ...(opts.forward ? { LOOP_MAX_DELAY: "5", LOOP_WATCH_LOG: log, LOOP_STALL_SECS: "25", LOOP_STALL_GRACE: "30" } : {}),
+    }),
   })
   fs.closeSync(out)
   child.unref()
@@ -416,14 +422,14 @@ async function reconcileUnlocked() {
   }
   for (const [key, want] of wanted) {
     if (loopAlive(key)) continue
-    spawnLoop(key, want.tag, forwardCommand(want.name, want.url), { redact: true })
+    spawnLoop(key, want.tag, forwardCommand(want.name, want.url), { redact: true, forward: true })
   }
 }
 
 /** Pure-ish: the forward ffmpeg. The destination URL (with its key) is an argv entry: ffmpeg has no other way to take an RTMP output URL. */
 export function forwardCommand(name: RelayPath, destinationUrl: string): string[] {
   return [process.env.FFMPEG_BIN || "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info", "-nostats", "-progress", "pipe:1", "-stats_period", "5",
-    "-rw_timeout", "10000000", "-i", relayReadUrl(name), "-map", "0", "-c", "copy", "-f", "flv", destinationUrl]
+    "-rw_timeout", "10000000", "-i", relayReadUrl(name), "-map", "0", "-c", "copy", "-f", "flv", "-rw_timeout", "15000000", destinationUrl]
 }
 
 let reconcileAt = 0
