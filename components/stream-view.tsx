@@ -12,6 +12,7 @@ import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOpti
 import { OverlayCard } from "@/components/overlay-card"
 import { ProgramFeed } from "@/components/program-feed"
 import type { ProgramDisplay } from "@/lib/program-display"
+import { endInstant } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
@@ -160,7 +161,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   }, [transparent])
 
   const clock = testClock ?? now
-  const pastEnd = Boolean(clock && wallTimeInZone(event.date, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
+  const pastEnd = Boolean(clock && endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
   const screen = stageScreen(stage, pastEnd)
   // Switching to program keeps the previous screen up until the feed has a frame (then crossfades).
   const [programDisplay, setProgramDisplay] = useState<ProgramDisplay>("under")

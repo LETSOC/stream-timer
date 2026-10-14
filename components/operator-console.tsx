@@ -29,7 +29,7 @@ import {
 } from "@/lib/countdown"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import { useNow } from "@/lib/use-now"
-import { applyTransport, type Screen, type TransportAction } from "@/lib/transport"
+import { applyTransport, endInstant, EXTENDS, extendTarget, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
@@ -133,7 +133,7 @@ export function OperatorConsole() {
   const [testUntil, setTestUntil] = useState<number | null>(null)
   const [previewFlash, setPreviewFlash] = useState(false)
   // One toast at a time; each kind has its own title, duration and timer. Polling never touches it.
-  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error"; text: string }
+  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend"; text: string; undo?: () => void }
   const [toast, setToastState] = useState<Toast | null>(null)
   const toastTimer = useRef<number | null>(null)
   const toastSeq = useRef(0)
@@ -143,11 +143,11 @@ export function OperatorConsole() {
     toastTimer.current = null
     setToastState(null)
   }, [])
-  const showToast = useCallback((kind: Toast["kind"], text: string) => {
-    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000 }[kind]
+  const showToast = useCallback((kind: Toast["kind"], text: string, undo?: () => void) => {
+    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000, extend: 8000 }[kind]
     const id = ++toastSeq.current
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
-    setToastState({ id, kind, text })
+    setToastState({ id, kind, text, undo })
     toastTimer.current = window.setTimeout(() => {
       toastTimer.current = null
       setToastState((current) => (current?.id === id ? null : current))
@@ -674,7 +674,7 @@ export function OperatorConsole() {
 
   const previewNow = pausedAt ?? (now ? new Date(now.getTime() + skewMs) : null)
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
-  const endTarget = wallTimeInZone(date, endAt || endTime, timeZone)
+  const endTarget = endInstant(date, time, endAt || endTime, timeZone)
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
   const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
@@ -687,7 +687,7 @@ export function OperatorConsole() {
     const result = applyTransport(base, action, nowMs())
     if (!result.ok) {
       setToast(result.error)
-      return
+      return false
     }
     const next = result.next
     setTestUntil(next.testUntil)
@@ -704,6 +704,13 @@ export function OperatorConsole() {
       setHoldCountdown(next.stage.holdCountdown)
     }
     if (action.type === "mode") setLiveMode(next.stage.deskLive)
+    if (action.type === "extendEnd" || action.type === "setEnd") {
+      // A quick action: goes live straight away, like restore (the sections weren't dirty, see extendEnd).
+      const end = { endTime: next.event.endTime }
+      updateEvent(end)
+      setEndAt(next.stage.endAt)
+      setPublished((current) => (current ? { ...current, event: { ...current.event, ...end }, stage: { ...current.stage, endAt: next.stage.endAt } } : current))
+    }
     if (action.type === "restore") {
       const restored = { date: next.event.date, time: next.event.time, timeZone: next.event.timeZone }
       // A transport action: the restored date goes live straight away (not a draft).
@@ -711,7 +718,33 @@ export function OperatorConsole() {
       setPublished((current) => (current ? { ...current, event: { ...current.event, ...restored } } : current))
     }
     sendSave({ event: next.event, testUntil: next.testUntil, pausedAt: next.pausedAt, stage: next.stage })
+    return true
   }
+  /**
+   * +5 / +10 min on the end time (the end card override if set, else Event › End time).
+   * If that section has an unsaved draft, the extension goes into the draft (Save publishes it,
+   * like any other edit); otherwise it's saved straight away with an Undo toast.
+   */
+  function extendEnd(minutes: number) {
+    if (drafts.isDirty("endCard") || (!endAt && drafts.isDirty("event"))) {
+      const t = extendTarget(endTime, endAt, minutes)
+      if (t.field === "endAt") setEndAt(t.to)
+      else updateEvent({ endTime: t.to })
+      showToast("extend", `Draft end ${t.to} · Save to apply`)
+      return
+    }
+    const prev = { endTime: published?.event.endTime ?? endTime, endAt: published?.stage.endAt ?? endAt }
+    const t = extendTarget(prev.endTime, prev.endAt, minutes)
+    if (!runTransport({ type: "extendEnd", minutes })) return
+    showToast("extend", `Extended to ${t.to}`, () => {
+      if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endAt || prev.endTime}`)
+    })
+  }
+  const extendButtons = (testid: string) => (
+    <div className="mt-1.5 flex gap-2">
+      {EXTENDS.map((m) => <Pill key={m} size="sm" tone="outline" data-testid={`${testid}-${m}`} disabled={!token} onClick={() => extendEnd(m)}>+{m} min</Pill>)}
+    </div>
+  )
   const jumpPreview = (seconds: number) => runTransport({ type: "jump", seconds })
   const goLiveNow = () => runTransport({ type: "goLive" })
   const restoreFestival = () => runTransport({ type: "restore" })
@@ -959,6 +992,7 @@ export function OperatorConsole() {
               </Field>
               <Field label="End time" htmlFor="endTime">
                 <Input id="endTime" type="time" value={endTime} onChange={(event) => updateEvent({ endTime: event.target.value })} />
+                {endAt ? null : extendButtons("extend-event")}
               </Field>
             </div>
             <Field label="Venue" htmlFor="venue">
@@ -1292,7 +1326,7 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div></Field>
+            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? extendButtons("extend-endcard") : null}</Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
@@ -1413,16 +1447,17 @@ export function OperatorConsole() {
           aria-live="polite"
           data-testid="toast"
           data-kind={toast.kind}
-          title="Tap to dismiss"
-          onClick={toast.kind === "copy-failed" ? undefined : dismissToast}
+          title={toast.undo ? "Tap to undo" : "Tap to dismiss"}
+          onClick={toast.kind === "copy-failed" ? undefined : () => { dismissToast(); toast.undo?.() }}
           onTouchMove={toast.kind === "copy-failed" ? undefined : dismissToast}
           className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-left text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]"
         >
           <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
           <span className="min-w-0">
-            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up" }[toast.kind]}</span>
+            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up", extend: "End time" }[toast.kind]}</span>
             <span className={`block font-mono text-[12px] text-white/75 ${toast.kind === "copy-failed" ? "break-all select-all" : "truncate"}`}>{toast.text}</span>
           </span>
+          {toast.undo ? <span data-testid="toast-undo" className="shrink-0 rounded-full bg-[#D9FF43] px-3 py-1 font-mono text-[12px] font-bold text-black">Undo</span> : null}
         </button>
       ) : null}
       {showHelp ? (

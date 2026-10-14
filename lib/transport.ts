@@ -26,6 +26,39 @@ export type TransportAction =
   | { type: "restore" }
   | { type: "screen"; screen: Screen }
   | { type: "mode"; live: boolean }
+  /** Quick action: push the end time later. Extends the end card override if one is set, else Event › End time. */
+  | { type: "extendEnd"; minutes: number }
+  /** Undo for extendEnd: put both end times back exactly as they were. */
+  | { type: "setEnd"; endTime: string; endAt: string }
+
+export const EXTENDS = [5, 10] as const
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** HH:MM + minutes, wrapping past midnight (the end instant rolls to the next day, see endInstant). */
+export function addMinutes(time: string, minutes: number): string {
+  const [h, m] = time.split(":").map(Number)
+  const total = (((h * 60 + m + minutes) % 1440) + 1440) % 1440
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`
+}
+
+/**
+ * The end card instant. End times are HH:MM on the event date; an end earlier than the start
+ * (e.g. start 22:00, end 00:05) means the next day, so extending across midnight works.
+ */
+export function endInstant(date: string, start: string, end: string, timeZone: string): Date {
+  const at = wallTimeInZone(date, end, timeZone)
+  if (!HHMM.test(start) || !HHMM.test(end) || end >= start) return at
+  const [y, mo, d] = date.split("-").map(Number)
+  const next = new Date(Date.UTC(y, mo - 1, d + 1))
+  return wallTimeInZone(next.toISOString().slice(0, 10), end, timeZone)
+}
+
+/** Where extendEnd writes, and the time it lands on. */
+export function extendTarget(endTime: string, endAt: string, minutes: number): { field: "endAt" | "endTime"; from: string; to: string } {
+  const field = endAt ? "endAt" : "endTime"
+  const from = endAt || endTime
+  return { field, from, to: addMinutes(from, minutes) }
+}
 
 export type TransportState = {
   event: EventConfig
@@ -75,6 +108,12 @@ export function parseAction(value: unknown): TransportAction | null {
       return SCREENS.includes(v.screen as Screen) ? { type: "screen", screen: v.screen as Screen } : null
     case "mode":
       return typeof v.live === "boolean" ? { type: "mode", live: v.live } : null
+    case "extendEnd":
+      return EXTENDS.includes(v.minutes as 5 | 10) ? { type: "extendEnd", minutes: v.minutes as number } : null
+    case "setEnd":
+      return typeof v.endTime === "string" && HHMM.test(v.endTime) && typeof v.endAt === "string" && (v.endAt === "" || HHMM.test(v.endAt))
+        ? { type: "setEnd", endTime: v.endTime, endAt: v.endAt }
+        : null
     default:
       return null
   }
@@ -118,6 +157,15 @@ export function applyTransport(state: TransportState, action: TransportAction, n
     }
     case "mode":
       return next({}, { deskLive: action.live })
+    case "extendEnd": {
+      const from = state.stage.endAt || state.event.endTime
+      if (!HHMM.test(from)) return { ok: false, error: "The end time is not valid." }
+      const { field, to } = extendTarget(state.event.endTime, state.stage.endAt, action.minutes)
+      // forceEnd (operator chose "end") stays; otherwise the new end time decides countdown/LIVE vs end card.
+      return field === "endAt" ? next({}, { endAt: to }) : next({ event: { ...state.event, endTime: to } })
+    }
+    case "setEnd":
+      return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt })
   }
 }
 
@@ -178,6 +226,6 @@ export function deckScreen(s: DeckState, now: number): Screen {
   const stale = s.testStale
   const clock = { event: { date: s.date, time: s.time, timeZone: s.timeZone } as EventConfig, testUntil: stale ? null : s.testUntil, pausedAt: stale ? null : s.pausedAt }
   const at = effectiveNow(clock, now)
-  const end = wallTimeInZone(s.date, s.endAt || s.endTime, s.timeZone).getTime()
+  const end = endInstant(s.date, s.time, s.endAt || s.endTime, s.timeZone).getTime()
   return stageScreen(s, Number.isFinite(end) && end <= at)
 }

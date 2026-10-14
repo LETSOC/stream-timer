@@ -6,7 +6,7 @@ import { beforeEach, test } from "node:test"
 
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { DEFAULT_STAGE } from "@/lib/stage"
-import { applyTransport, deckScreen, deckState, effectiveNow, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
+import { addMinutes, applyTransport, deckScreen, deckState, effectiveNow, endInstant, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
 import { readServerState, writeServerEvent } from "@/lib/event-server"
 import { runServerTransport } from "@/lib/transport-server"
 import { onSaved } from "@/lib/event-bus"
@@ -126,4 +126,37 @@ test("server transport: same write path, rev conflict, bus fires on save", () =>
   off()
   assert.deepEqual(revs, [2, 3])
   assert.ok(fs.existsSync(path.join(dir, "event.json.bak")))
+})
+
+test("extendEnd: +5/+10 on Event end time, or on the end card override when set; Live allowed", () => {
+  const ok = (r: ReturnType<typeof applyTransport>) => (assert.ok(r.ok), r.ok ? r.next : base())
+  const e = ok(applyTransport(base({ event: { ...DEFAULT_EVENT, endTime: "16:15" } as EventConfig, stage: { ...DEFAULT_STAGE, deskLive: true } }), { type: "extendEnd", minutes: 10 }, NOW))
+  assert.equal(e.event.endTime, "16:25")
+  assert.equal(e.stage.endAt, "")
+  const o = ok(applyTransport(base({ stage: { ...DEFAULT_STAGE, endAt: "17:00" } }), { type: "extendEnd", minutes: 5 }, NOW))
+  assert.equal(o.stage.endAt, "17:05")
+  assert.equal(o.event.endTime, DEFAULT_EVENT.endTime)
+  // forceEnd is the operator's choice and stays.
+  const f = ok(applyTransport(base({ stage: { ...DEFAULT_STAGE, forceEnd: true } }), { type: "extendEnd", minutes: 5 }, NOW))
+  assert.equal(f.stage.forceEnd, true)
+  const u = ok(applyTransport(o, { type: "setEnd", endTime: "16:15", endAt: "17:00" }, NOW))
+  assert.equal(u.stage.endAt, "17:00")
+  assert.deepEqual(parseAction({ type: "extendEnd", minutes: 5 }), { type: "extendEnd", minutes: 5 })
+  assert.equal(parseAction({ type: "extendEnd", minutes: 7 }), null)
+  assert.equal(parseAction({ type: "setEnd", endTime: "25:00", endAt: "" }), null)
+  assert.equal(isRisky({ type: "extendEnd", minutes: 5 }), false)
+})
+
+test("end time across midnight lands on the next day; past-end end card comes back to countdown", () => {
+  assert.equal(addMinutes("23:55", 10), "00:05")
+  const late = endInstant("2026-10-14", "22:00", "00:05", "Europe/London")
+  assert.equal(late.toISOString(), "2026-10-14T23:05:00.000Z")
+  assert.equal(endInstant("2026-10-14", "10:00", "16:15", "Europe/London").toISOString(), "2026-10-14T15:15:00.000Z")
+  const s = deckState({ ...base({ event: { ...DEFAULT_EVENT, date: "2026-10-14", time: "08:00", endTime: "09:55", timeZone: "Europe/London" } as EventConfig }), rev: 1, testSetAt: null }, NOW)
+  assert.equal(deckScreen(s, NOW), "end") // 10:00 London > 09:55
+  const ext = applyTransport(base({ event: { ...DEFAULT_EVENT, date: "2026-10-14", time: "08:00", endTime: "09:55", timeZone: "Europe/London" } as EventConfig }), { type: "extendEnd", minutes: 10 }, NOW)
+  assert.ok(ext.ok)
+  if (ext.ok) assert.equal(deckScreen(deckState({ ...ext.next, rev: 2, testSetAt: null }, NOW), NOW), "countdown")
+  const forced = applyTransport(base({ event: { ...DEFAULT_EVENT, date: "2026-10-14", time: "08:00", endTime: "09:55", timeZone: "Europe/London" } as EventConfig, stage: { ...DEFAULT_STAGE, forceEnd: true } }), { type: "extendEnd", minutes: 10 }, NOW)
+  if (forced.ok) assert.equal(deckScreen(deckState({ ...forced.next, rev: 2, testSetAt: null }, NOW), NOW), "end")
 })

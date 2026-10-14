@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer } from "@/components/program-feed"
-import { deckScreen, effectiveNow, eventTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
+import { deckScreen, effectiveNow, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
@@ -36,7 +36,7 @@ export function StreamDeck() {
   const [offset, setOffset] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [armed, setArmed] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ tone: "error" | "ok"; text: string } | null>(null)
+  const [toast, setToast] = useState<{ tone: "error" | "ok"; text: string; undo?: TransportAction } | null>(null)
   const [preview, setPreview] = useStoredPref<Preview>("deck-preview-mode", "off", ["off", "stream", "slate", "capture"])
   const [collapsed, setCollapsed] = useStoredPref<"0" | "1">("deck-preview-collapsed", "0", ["0", "1"])
   const [big, setBig] = useState(false)
@@ -57,7 +57,7 @@ export function StreamDeck() {
   }, [armed])
   useEffect(() => {
     if (!toast) return
-    const id = window.setTimeout(() => setToast(null), 4000)
+    const id = window.setTimeout(() => setToast(null), toast.undo ? 8000 : 4000)
     return () => window.clearTimeout(id)
   }, [toast])
   useEffect(() => {
@@ -88,9 +88,15 @@ export function StreamDeck() {
     }
     setArmed(null)
     setBusy(key)
+    const before = { endTime: state.endTime, endAt: state.endAt }
     const result = await run(action, state.rev)
     setBusy(null)
-    if (result.ok) {
+    if (result.ok && action.type === "extendEnd") {
+      setToast({ tone: "ok", text: `Extended to ${extendTarget(before.endTime, before.endAt, action.minutes).to}`, undo: { type: "setEnd", ...before } })
+      if (navigator.vibrate) navigator.vibrate(30)
+    } else if (result.ok && action.type === "setEnd") {
+      setToast({ tone: "ok", text: `End back to ${action.endAt || action.endTime}` })
+    } else if (result.ok) {
       setToast({ tone: "ok", text: "Done" })
       if (navigator.vibrate) navigator.vibrate(30)
     } else if (result.status !== 401) {
@@ -186,6 +192,11 @@ export function StreamDeck() {
         {button("restore", { type: "restore" }, "Restore festival", "danger", "col-span-2")}
       </div>
 
+      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
+      <div className="grid grid-cols-2 gap-2">
+        {EXTENDS.map((m) => button(`extend-${m}`, { type: "extendEnd", minutes: m }, `+${m} min`, "outline"))}
+      </div>
+
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Jump · time left</h2>
       <div className="grid grid-cols-4 gap-2">
         {JUMPS.map((jump) => button(`jump-${jump.label}`, { type: "jump", seconds: jump.seconds }, jump.label, "outline"))}
@@ -207,7 +218,10 @@ export function StreamDeck() {
       {live ? <p className="mt-2 font-mono text-[12px] text-white/60">Live: test clocks, pause, reset and restore are locked.</p> : null}
 
       {toast ? (
-        <p role="status" data-testid="deck-toast" className={`fixed inset-x-3 bottom-[max(16px,env(safe-area-inset-bottom))] rounded-xl px-4 py-3 text-center font-bold shadow-lg ${toast.tone === "error" ? "bg-[#b42318]" : "bg-[#12b76a]"}`}>{toast.text}</p>
+        <p role="status" data-testid="deck-toast" className={`fixed inset-x-3 bottom-[max(16px,env(safe-area-inset-bottom))] rounded-xl px-4 py-3 text-center font-bold shadow-lg ${toast.tone === "error" ? "bg-[#b42318]" : "bg-[#12b76a]"}`}>
+          {toast.text}
+          {toast.undo ? <> · <button type="button" data-testid="deck-toast-undo" className="underline underline-offset-4" onClick={() => { const undo = toast.undo!; setToast(null); void act("undo-end", undo) }}>Undo</button></> : null}
+        </p>
       ) : null}
     </main>
   )
