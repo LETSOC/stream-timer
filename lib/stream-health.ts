@@ -138,6 +138,8 @@ export type CaptureSourceStats = {
   encoder: string
   bitrateK: number
   size: string
+  /** OBS program audio mixed into the capture (screen=program). peakDb: loudest program sample this window (dBFS), null = silence/none. */
+  programAudio?: { on: boolean; reading: boolean; mixing?: boolean; peakDb?: number | null; bufferedMs: number; underruns: number; delayMs: number }
 }
 
 export type SourceHealth = HealthStats & { capture: CaptureSourceStats | null }

@@ -16,6 +16,7 @@ import { NumberField } from "@/components/number-field"
 import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
+import { ProgramPlayer } from "@/components/program-feed"
 import { StreamPlayer } from "@/components/stream-player"
 import { diagnose, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 import { CAPTURE_BITRATES } from "@/lib/capture-options"
@@ -1252,6 +1253,8 @@ export function OperatorConsole() {
             ) : (
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
             )}
+            {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
+            {previewScreen === "program" ? <ProgramPlayer scope="desk" className="z-10" /> : null}
           </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 [&>*:first-child]:basis-full xl:[&>*:first-child]:basis-0 xl:[&>*:first-child]:grow">
@@ -1864,7 +1867,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null }
+type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
 type RelayView = { program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
@@ -1874,6 +1877,8 @@ const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[
 /** External OBS program feed: OBS publishes to the relay's /program; /stream can show it full-frame. */
 function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
   const program = relay?.program
+  const captureSource = relay?.paths.capture?.source
+  const captureProgramAudio = captureSource && "capture" in captureSource ? captureSource.capture?.programAudio ?? null : null
   const [obs, setObs] = useState<{ server: string; streamKey: string } | null>(null)
   const [preview, setPreview] = useState(false)
   useEffect(() => {
@@ -1899,6 +1904,20 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         </span>
         {state === "receiving" ? <span data-testid="program-stats" className="font-mono text-[12px] text-black/70">{[program?.video ?? video ?? "no video", program?.audio ?? audio ?? "no audio", program?.fps ? `${program.fps} fps` : null, program?.kbps ? `${(program.kbps / 1000).toFixed(1)} Mbps` : null].filter(Boolean).join(" · ")}</span> : null}
       </div>
+      {state === "receiving" ? (
+        <p data-testid="program-audio-track" data-present={program?.audioTrack ? "1" : "0"} className="font-mono text-[12px]">
+          {program?.audioTrack ? (
+            <><span className="rounded-full bg-[#128a3e] px-2 py-0.5 text-[11px] font-bold text-white uppercase">Audio present</span> <span className="text-black/70">{[program.audioTrack.codec, program.audioTrack.channels ? (program.audioTrack.channels === 1 ? "mono" : program.audioTrack.channels === 2 ? "stereo" : `${program.audioTrack.channels} ch`) : null, program.audioTrack.sampleRate ? `${program.audioTrack.sampleRate / 1000} kHz` : null].filter(Boolean).join(" · ")}</span></>
+          ) : (
+            <><span className="rounded-full bg-[#d93200] px-2 py-0.5 text-[11px] font-bold text-white uppercase">No audio track</span> <span className="text-black/70">OBS sends picture only: check OBS › Settings › Audio / the mixer.</span></>
+          )}
+        </p>
+      ) : null}
+      {captureProgramAudio ? (
+        <p data-testid="program-capture-audio" data-mixing={captureProgramAudio.mixing ? "1" : "0"} className="font-mono text-[12px] text-black/70">
+          Browser capture: {captureProgramAudio.mixing ? `mixing program audio · peak ${captureProgramAudio.peakDb === null || captureProgramAudio.peakDb === undefined ? "silent" : `${captureProgramAudio.peakDb.toFixed(0)} dBFS`}` : captureProgramAudio.on ? "program on, audio not flowing yet" : "not mixing program audio (screen isn’t program)"}
+        </p>
+      ) : null}
       <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can&apos;t show it.</p>
       <div className="flex flex-wrap gap-2">
         {program?.armed ? (
@@ -1918,7 +1937,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         </div>
       ) : null}
       {preview && program?.ready ? (
-        <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><StreamPlayer src="/api/relay/hls/program/index.m3u8" /></div>
+        <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay" ready={program.ready} /></div>
       ) : null}
     </div>
   )
@@ -2045,6 +2064,11 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
       {cap ? (
         <p className="font-mono text-[11px] text-black/60" title="Chrome only sends a frame when /stream repaints (≥1/s for the countdown); the writer repeats the last one to keep a constant frame rate. Backlog = frames skipped because the encoder fell behind.">
           Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms{typeof cap.heartbeatAgeMs === "number" ? (cap.heartbeatAgeMs < 6000 ? " · page alive" : ` · page stalled ${Math.round(cap.heartbeatAgeMs / 1000)}s`) : ""}
+        </p>
+      ) : null}
+      {cap?.programAudio ? (
+        <p data-testid={`rtmp-program-audio-${channel}`} className="font-mono text-[11px] text-black/60">
+          Program audio: {cap.programAudio.mixing ? `mixing · peak ${typeof cap.programAudio.peakDb === "number" ? `${cap.programAudio.peakDb.toFixed(0)} dBFS` : "silent"}` : cap.programAudio.on ? "waiting for OBS audio" : "off (audio bed)"}
         </p>
       ) : null}
     </div>

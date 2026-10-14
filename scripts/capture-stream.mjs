@@ -81,7 +81,7 @@ const videoArgs = encoder === "h264_videotoolbox"
 const RATE = 48000
 const programFile = process.env.PROGRAM_READ_FILE || ""
 const progDelayMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
-const prog = { wanted: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0 }
+const prog = { wanted: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0 }
 const delayBytes = Math.round((progDelayMs / 1000) * RATE) * 4
 function startProgramReader() {
   if (prog.reader || !programFile || Date.now() < prog.restartAt) return
@@ -143,12 +143,17 @@ function pcmBlock(n) {
   const out = Buffer.alloc(n * 6)
   // Fade the bed out only once program audio is actually flowing (no hole while the reader starts).
   const target = programPcm ? 0 : 1
+  if (programPcm) prog.mixedAt = Date.now()
   for (let i = 0; i < n; i++) {
     if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
     else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
     if (programPcm) {
-      out.writeInt16LE(programPcm.readInt16LE(i * 4), i * 6)
-      out.writeInt16LE(programPcm.readInt16LE(i * 4 + 2), i * 6 + 2)
+      const l = programPcm.readInt16LE(i * 4)
+      const r = programPcm.readInt16LE(i * 4 + 2)
+      out.writeInt16LE(l, i * 6)
+      out.writeInt16LE(r, i * 6 + 2)
+      const m = Math.max(Math.abs(l), Math.abs(r))
+      if (m > prog.peak) prog.peak = m
     }
     out.writeInt16LE(Math.round(prog.gain * 32767), i * 6 + 4)
   }
@@ -379,9 +384,10 @@ if (statsFile) {
       backpressurePct: total ? +((win.skipped / total) * 100).toFixed(1) : 0,
       maxLagMs: Math.round(win.maxLag),
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
-      programAudio: { on: prog.wanted, reading: prog.reader !== null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: progDelayMs },
+      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: progDelayMs },
       statsLine: lastStatsLine,
     }
+    prog.peak = 0
     // Encoder rates over this window from ffmpeg's cumulative counters (its own fps/speed are averages since start).
     const m = /frame=\s*(\d+).*?size=\s*(\d+(?:\.\d+)?)\s*(KiB|kB|MiB|MB|B).*?time=\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(lastStatsLine)
     if (m) {

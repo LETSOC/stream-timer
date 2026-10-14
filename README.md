@@ -134,6 +134,13 @@ program > end card > countdown (cards go on top of the program; Countdown / End 
 - **Slate** (ffmpeg text) can't show the program; it keeps the countdown. Use Browser capture.
 - OBS must run on the same machine (MediaMTX listens on 127.0.0.1 only).
 
+### Program audio and previews
+
+- **/stream (OBS Browser Source)** plays the program feed **with sound** by default. In the Browser Source properties tick **“Control audio via OBS”** so the sound shows up as its own source in the OBS audio mixer (meter, mute, volume, monitoring) instead of going straight to the desktop output. `?mute=1` mutes it (the deck preview uses that).
+- **Switching** to program keeps the current screen (countdown or card) up until the feed has drawn a frame, then crossfades (300 ms). /stream preloads the feed whenever OBS is sending, so the switch is normally instant. “Waiting for OBS” only appears if no frame arrives within 5 s, OBS has been gone for more than 3 s, or the picture has stalled for more than 4 s (the last frame is held until then).
+- **Desk hero preview, deck preview and the Relay card preview** play the feed over the operator-only HLS path, **muted by default**, with a mute/unmute toggle, volume and a live level meter. The choice is saved per device (and per place). Browsers only allow sound after a tap: if you left it unmuted, the first tap anywhere on the page turns it back on (the button shows “Tap for sound”). The meter reads the audio before the volume, so it moves while muted once sound has been enabled once. On iPhone Safari the meter may stay flat (WebKit limitation with native HLS); the sound still plays.
+- **Relay card** shows “Audio present” (codec, channels, kHz) or “No audio track” from MediaMTX, plus whether Browser capture is mixing program audio and its peak level. The Encoder panel’s capture health line shows the same.
+
 ## Tests
 
 ```bash

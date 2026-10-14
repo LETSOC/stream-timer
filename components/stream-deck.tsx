@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
+import { ProgramPlayer } from "@/components/program-feed"
 import { deckScreen, effectiveNow, eventTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
@@ -151,7 +152,7 @@ export function StreamDeck() {
             onClick={() => setBig(!big)}
             className={`relative mx-auto mt-2 block aspect-video touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}
           >
-            {preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
+            {preview === "stream" && screen === "program" ? <ProgramPlayer scope="deck" ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
               <span data-testid="deck-preview-hls"><StreamPlayer inline src={`/api/relay/hls/${preview}/index.m3u8`} /></span>
             ) : (
               <span data-testid="deck-preview-placeholder" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono text-[12px] text-white/60">

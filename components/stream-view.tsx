@@ -11,6 +11,7 @@ import { useNow } from "@/lib/use-now"
 import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { ProgramFeed } from "@/components/program-feed"
+import type { ProgramDisplay } from "@/lib/program-display"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
@@ -161,11 +162,16 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const clock = testClock ?? now
   const pastEnd = Boolean(clock && wallTimeInZone(event.date, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
   const screen = stageScreen(stage, pastEnd)
-  const ended = screen === "end"
-  // Browser capture reads this to switch its audio to the OBS program feed.
+  // Switching to program keeps the previous screen up until the feed has a frame (then crossfades).
+  const [programDisplay, setProgramDisplay] = useState<ProgramDisplay>("under")
+  const [seen, setSeen] = useState<{ screen: typeof screen; lastOther: Exclude<typeof screen, "program"> }>({ screen, lastOther: screen === "program" ? "countdown" : screen })
+  if (seen.screen !== screen) setSeen({ screen, lastOther: seen.screen !== "program" ? seen.screen : seen.lastOther })
+  const shownScreen = screen === "program" && programDisplay === "under" ? (seen.screen !== "program" ? seen.screen : seen.lastOther) : screen
+  const ended = shownScreen === "end"
+  // Browser capture reads this to switch its audio to the OBS program feed (only once its picture is up).
   useEffect(() => {
-    document.documentElement.dataset.screen = screen
-  }, [screen])
+    document.documentElement.dataset.screen = shownScreen
+  }, [shownScreen])
 
   if (blocked) {
     return (
@@ -177,14 +183,15 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
 
   return (
     <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
-      {stage.program ? <ProgramFeed ready={programReady} visible={screen === "program"} muted={params.get("mute") === "1"} /> : null}
-      {screen === "program" ? null : screen === "break" || screen === "hold" || screen === "welcome" ? (
+      {/* Prewarmed whenever OBS is sending, so "Show program" is instant. */}
+      {stage.program || programReady ? <ProgramFeed ready={programReady} active={screen === "program"} muted={params.get("mute") === "1"} onDisplay={setProgramDisplay} /> : null}
+      {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard
-          kind={screen}
-          title={screen === "break" ? stage.breakTitle : screen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
-          message={screen === "break" ? stage.breakMessage : screen === "welcome" ? stage.welcomeMessage : stage.holdMessage}
-          image={screen === "break" ? stage.breakImage : screen === "welcome" ? stage.welcomeImage : stage.holdImage}
-          fit={screen === "break" ? stage.breakFit : screen === "welcome" ? stage.welcomeFit : stage.holdFit}
+          kind={shownScreen}
+          title={shownScreen === "break" ? stage.breakTitle : shownScreen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
+          message={shownScreen === "break" ? stage.breakMessage : shownScreen === "welcome" ? stage.welcomeMessage : stage.holdMessage}
+          image={shownScreen === "break" ? stage.breakImage : shownScreen === "welcome" ? stage.welcomeImage : stage.holdImage}
+          fit={shownScreen === "break" ? stage.breakFit : shownScreen === "welcome" ? stage.welcomeFit : stage.holdFit}
           since={stage.overlayAt}
           clock={now}
           className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"

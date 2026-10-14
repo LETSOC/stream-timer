@@ -395,7 +395,7 @@ export function programReadyCached(): boolean | null {
   return readSettings().programArmed ? programCache.ready : null
 }
 
-export type ProgramStatus = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; fps: number | null; video: string | null; audio: string | null; readers: number; since: string | null }
+export type ProgramStatus = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; fps: number | null; video: string | null; audio: string | null; /** What MediaMTX says OBS sends as audio (null = no audio track). */ audioTrack: { codec: string; channels: number | null; sampleRate: number | null } | null; readers: number; since: string | null }
 
 /** Channel start (destination "relay"): make sure the MediaMTX server is up. Does not touch forwards. */
 export function ensureRelayServer(): Promise<RelayResult> {
@@ -597,6 +597,14 @@ export type RelayForwardStatus = { destId: string; name: string; host: string; s
 export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 export type RelayStatus = { program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
+/** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
+export function programAudioTrack(prog: Pick<ApiPath, "tracks" | "tracks2">): ProgramStatus["audioTrack"] {
+  const a = prog.tracks2?.find((t) => t.codecProps?.sampleRate || /aac|mpeg-4 audio|opus|mp3|mpeg-1\/2 audio|g711|lpcm|ac-3/i.test(t.codec))
+  if (a) return { codec: a.codec === "MPEG-4 Audio" ? "AAC" : a.codec, channels: a.codecProps?.channelCount ?? null, sampleRate: a.codecProps?.sampleRate ?? null }
+  const name = prog.tracks.find((t) => /aac|mpeg-4 audio|opus|mp3|mpeg-1\/2 audio|g711|lpcm|ac-3/i.test(t))
+  return name ? { codec: name === "MPEG-4 Audio" ? "AAC" : name, channels: null, sampleRate: null } : null
+}
+
 export async function relayStatus(): Promise<RelayStatus> {
   await reconcileRelay().catch(() => undefined)
   const bin = findMediamtxBin()
@@ -644,6 +652,7 @@ export async function relayStatus(): Promise<RelayStatus> {
     kbps: prog?.ready ? programCache.kbps : null, fps: prog?.ready ? programCache.fps : null,
     video: v ? `${v.codec} ${v.codecProps?.width}×${v.codecProps?.height}` : null,
     audio: a ? `${a.codec === "MPEG-4 Audio" ? "AAC" : a.codec} ${Math.round((a.codecProps?.sampleRate ?? 0) / 1000)}k ${a.codecProps?.channelCount === 1 ? "mono" : "stereo"}` : null,
+    audioTrack: prog?.ready ? programAudioTrack(prog) : null,
     readers: prog?.readers.length ?? 0, since: prog?.ready ? prog.readyTime : null,
   }
   const lastLines = tailOf("mediamtx").split("\n").filter((line) => /ERR|FATAL/.test(line))

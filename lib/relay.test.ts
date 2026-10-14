@@ -77,3 +77,10 @@ test("channel supervisors remember they publish via the relay", () => {
   assert.deepEqual(one, { pid: 5, channel: "capture", dest: "0123456789abcdef", relay: true })
   fs.rmSync(dir, { recursive: true, force: true })
 })
+
+test("program audio track: present (tracks2 or names) vs none", async () => {
+  const { programAudioTrack } = await import("@/lib/relay")
+  assert.deepEqual(programAudioTrack({ tracks: ["H264", "MPEG-4 Audio"], tracks2: [{ codec: "H264", codecProps: { width: 1280, height: 720 } }, { codec: "MPEG-4 Audio", codecProps: { sampleRate: 48000, channelCount: 2 } }] }), { codec: "AAC", channels: 2, sampleRate: 48000 })
+  assert.deepEqual(programAudioTrack({ tracks: ["H264", "Opus"] }), { codec: "Opus", channels: null, sampleRate: null })
+  assert.equal(programAudioTrack({ tracks: ["H264"], tracks2: [{ codec: "H264", codecProps: { width: 1280, height: 720 } }] }), null)
+})
