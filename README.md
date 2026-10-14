@@ -92,6 +92,20 @@ The desk's **Stream audio** card sets each RTMP channel's audio: **Silent** (def
 
 Settings save on the server (`data/audio-settings.json`, files in `data/audio/`) and sync to every desk. Edits are a draft until **Save audio**. A live channel keeps the audio it started with and shows "Restart to apply new audio"; stop and start it to switch. If a bed file is missing, the channel streams silence and shows a warning.
 
+## Phone Stream Deck (/deck)
+
+Open `/deck` on a phone (same login as the desk; local mode on 127.0.0.1 needs none). Big buttons for
+Transport: go live, pause/resume, reset clock, restore festival, jumps (15s/10m/30m/1h), countdown /
+break / hold / welcome / end card, Rehearsal/Live. Go live, reset, restore and end card need a second tap.
+It shows the current screen, mode, countdown, paused and test-clock state, and can preview `/stream`
+(no view key needed: your session is enough) or the relay output.
+
+`npm start` / `npm run dev` now run `server.ts`: Next plus a WebSocket at `/api/deck/ws` on the same port
+(43211, `BIND_HOST` as before). Every save pushes state to all decks and desks instantly; the desk's 2s poll
+and HTTP `POST /api/deck/action` stay as fallbacks if the socket is blocked. The socket needs a same-origin
+`Origin` and an operator session (the encoder token is not accepted). `npm run start:next` / `dev:next`
+run plain Next without the socket.
+
 ## Tests
 
 ```bash

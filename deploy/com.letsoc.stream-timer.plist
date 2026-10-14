@@ -8,6 +8,7 @@
      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.letsoc.stream-timer.plist
   Stop:  launchctl bootout gui/$(id -u)/com.letsoc.stream-timer
   Logs:  /tmp/stream-timer.log
+  `npm run start` runs server.ts (Next + the phone-deck WebSocket on the same port 43211; BIND_HOST as before).
   Note: this restarts the desk, not an RTMP stream that was running before a reboot.
 -->
 <plist version="1.0">

@@ -9,6 +9,7 @@ Wants=network-online.target
 User=YOU
 WorkingDirectory=/home/YOU/stream-timer
 Environment=BIND_HOST=127.0.0.1
+# npm run start = tsx server.ts: Next plus the /deck WebSocket on the same port (43211).
 ExecStart=/usr/bin/npm run start
 Restart=always
 RestartSec=5

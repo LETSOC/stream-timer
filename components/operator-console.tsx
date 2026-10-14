@@ -28,6 +28,8 @@ import {
 } from "@/lib/countdown"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import { useNow } from "@/lib/use-now"
+import { applyTransport, type Screen, type TransportAction } from "@/lib/transport"
+import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
@@ -484,6 +486,20 @@ export function OperatorConsole() {
   useEffect(() => {
     syncNowRef.current = () => void pullRemote(true)
   }, [pullRemote])
+  // Instant sync: the deck WebSocket pushes the rev on every save; the 2s poll below stays as the fallback.
+  const { link: wsLink } = useDeckSocket({
+    poll: false,
+    onState: (remote) => {
+      // pullRemote skips while this desk's own autosave is pending; retry briefly so a push isn't lost until the next poll.
+      let tries = 0
+      const pull = () => {
+        if ((revRef.current ?? -1) >= remote.rev || tries++ > 15) return
+        syncNowRef.current()
+        window.setTimeout(pull, 150)
+      }
+      pull()
+    },
+  })
   useEffect(() => {
     if (!hydrated) return
     const id = window.setInterval(() => void pullRemote(), 2000)
@@ -585,16 +601,8 @@ export function OperatorConsole() {
   }
 
   /** Live switch for /stream: break, hold, end card or countdown (mutually exclusive). */
-  function showScreen(next: "break" | "hold" | "welcome" | "end" | "countdown") {
-    const nextOverlay: Overlay = next === "break" || next === "hold" || next === "welcome" ? next : "none"
-    const at = nextOverlay === "none" ? null : nowMs()
-    const nextForceEnd = next === "end"
-    const nextHold = next === "countdown"
-    setOverlay(nextOverlay)
-    setOverlayAt(at)
-    setForceEnd(nextForceEnd)
-    setHoldCountdown(nextHold)
-    sendSave({ ...savePayload, stage: { ...savePayload.stage, overlay: nextOverlay, overlayAt: at, forceEnd: nextForceEnd, holdCountdown: nextHold } })
+  function showScreen(next: Screen) {
+    runTransport({ type: "screen", screen: next })
   }
 
   async function uploadImage(file: File, apply: (url: string) => void) {
@@ -667,35 +675,42 @@ export function OperatorConsole() {
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
   const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
-  async function jumpPreview(seconds: number) {
-    if (!valid) return
-    setPausedAt(null)
-    const nextUntil = nowMs() + seconds * 1000
-    setTestUntil(nextUntil)
-    setSkewMs(target.getTime() - nextUntil)
-    sendSave({ ...savePayload, testUntil: nextUntil, pausedAt: null })
+  /**
+   * Every Transport button goes through lib/transport (the same code the phone deck runs on the
+   * server), then into this desk's state and straight to the server.
+   */
+  function runTransport(action: TransportAction) {
+    const base = { event: published?.event ?? event, testUntil, pausedAt: pausedMs || null, stage: savePayload.stage }
+    const result = applyTransport(base, action, nowMs())
+    if (!result.ok) {
+      setToast(result.error)
+      return
+    }
+    const next = result.next
+    setTestUntil(next.testUntil)
+    setPausedAt(next.pausedAt !== null ? new Date(next.pausedAt) : null)
+    if (next.pausedAt === null) {
+      const nextTarget = wallTimeInZone(next.event.date, next.event.time, next.event.timeZone).getTime()
+      setSkewMs(next.testUntil !== null && Number.isFinite(nextTarget) ? nextTarget - next.testUntil : 0)
+    }
+    if (action.type === "screen") {
+      setOverlay(next.stage.overlay)
+      setOverlayAt(next.stage.overlayAt)
+      setForceEnd(next.stage.forceEnd)
+      setHoldCountdown(next.stage.holdCountdown)
+    }
+    if (action.type === "mode") setLiveMode(next.stage.deskLive)
+    if (action.type === "restore") {
+      const restored = { date: next.event.date, time: next.event.time, timeZone: next.event.timeZone }
+      // A transport action: the restored date goes live straight away (not a draft).
+      updateEvent(restored)
+      setPublished((current) => (current ? { ...current, event: { ...current.event, ...restored } } : current))
+    }
+    sendSave({ event: next.event, testUntil: next.testUntil, pausedAt: next.pausedAt, stage: next.stage })
   }
-
-  function goLiveNow() {
-    if (!valid) return
-    const nextUntil = nowMs() - 1000
-    setPausedAt(null)
-    setTestUntil(nextUntil)
-    setSkewMs(target.getTime() - nextUntil)
-    sendSave({ ...savePayload, testUntil: nextUntil, pausedAt: null })
-  }
-
-  function restoreFestival() {
-    const restored = { date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }
-    setPausedAt(null)
-    setTestUntil(null)
-    setSkewMs(0)
-    updateEvent(restored)
-    // A transport action: the restored date goes live straight away (not a draft).
-    const nextEvent = { ...(published?.event ?? event), ...restored }
-    setPublished((current) => (current ? { ...current, event: { ...current.event, ...restored } } : current))
-    sendSave({ ...savePayload, event: nextEvent, testUntil: null, pausedAt: null })
-  }
+  const jumpPreview = (seconds: number) => runTransport({ type: "jump", seconds })
+  const goLiveNow = () => runTransport({ type: "goLive" })
+  const restoreFestival = () => runTransport({ type: "restore" })
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -765,6 +780,10 @@ export function OperatorConsole() {
                 Save all ({drafts.dirty.length})
               </Pill>
             ) : null}
+            <Link href="/deck" data-testid="deck-link" title={wsLink === "live" ? "Instant sync on (WebSocket)" : "Instant sync off: syncing every 2s"} className={`${pillClass("outline", "sm")} inline-flex items-center gap-1.5 no-underline`}>
+              <span aria-hidden className={`size-2 rounded-full ${wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"}`} />
+              Deck
+            </Link>
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
@@ -878,8 +897,8 @@ export function OperatorConsole() {
 
           <Panel title="Transport" pill={liveMode ? "Live · locked" : "Rehearsal"}>
             <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1 rounded-full bg-black/5 p-1">
-              <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => setLiveMode(false)} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
-              <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => setLiveMode(true)} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
+              <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => runTransport({ type: "mode", live: false })} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
+              <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => runTransport({ type: "mode", live: true })} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
             </div>
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <div className="flex flex-wrap gap-2">
@@ -889,29 +908,14 @@ export function OperatorConsole() {
                 [1800, "30min"],
                 [3600, "1 hour"],
               ].map(([seconds, label]) => (
-                <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => void jumpPreview(Number(seconds))}>{label} left</Pill>
+                <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => jumpPreview(Number(seconds))}>{label} left</Pill>
               ))}
             </div>
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-              <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => {
-                if (pausedAt) {
-                  // Resume from the paused value: shift the test clock by the paused duration.
-                  const resumeNow = Date.now()
-                  if (valid) {
-                    const nextUntil = target.getTime() - pausedAt.getTime() + resumeNow
-                    setTestUntil(nextUntil)
-                    setSkewMs(target.getTime() - nextUntil)
-                  } else {
-                    setSkewMs(pausedAt.getTime() - resumeNow)
-                  }
-                  setPausedAt(null)
-                  return
-                }
-                if (previewNow) setPausedAt(previewNow)
-              }}>
+              <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => runTransport({ type: pausedAt ? "resume" : "pause" })}>
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
-              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => { setPausedAt(null); setSkewMs(0); setTestUntil(null) }}>Reset clock</ConfirmButton>
+              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
               <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("live")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
