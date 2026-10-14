@@ -6,7 +6,7 @@ import path from "node:path"
 import { test } from "node:test"
 import { DEFAULT_AUDIO, liveAudioPlan, type AudioFile } from "@/lib/audio-bed"
 // @ts-expect-error plain ESM script without types
-import { createAudioFeeder, sourceGain, sourceKey } from "../scripts/audio-feeder.mjs"
+import { createAudioFeeder, createDelayLine, sourceGain, sourceKey, syncBeep } from "../scripts/audio-feeder.mjs"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const peak = (a: Float32Array) => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0)
@@ -19,6 +19,8 @@ test("liveAudioPlan: modes, missing files, shuffle flag", () => {
   const b = liveAudioPlan({ ...DEFAULT_AUDIO, mode: "bed", files: ["x", "y"], order: "shuffle", volumeDb: -6 }, [file("x"), null], "/a")
   assert.deepEqual(b.files, ["/a/x.stream.flac"]); assert.equal(b.shuffle, true); assert.match(b.warning ?? "", /1 audio file/)
   assert.equal(liveAudioPlan({ ...DEFAULT_AUDIO, mode: "bed", files: ["x"] }, [null], "/a").mode, "silent")
+  const o = liveAudioPlan({ ...DEFAULT_AUDIO, avOffsetMs: -40, syncTest: true }, [], "/a")
+  assert.equal(o.avOffsetMs, -40); assert.equal(o.syncTest, true)
 })
 
 test("sourceKey: volume is not a source change; tone/files are", () => {
@@ -63,4 +65,24 @@ test("feeder hot-swaps silent → tone → bed → volume without a new process"
     feeder.stop()
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test("delay line: exact delay, grow and shrink", () => {
+  const line = createDelayLine()
+  const ramp = (from: number, n: number) => Float32Array.from({ length: n * 2 }, (_, i) => from + Math.floor(i / 2) + 1)
+  line.setDelayMs(1) // 48 frames
+  const a = line.process(ramp(0, 32)) as Float32Array
+  assert.equal(peak(a), 0, "first 32 frames: silence")
+  const b = line.process(ramp(32, 32)) as Float32Array
+  assert.equal(b[0], 0); assert.equal(b[2 * 16], 1, "frame 1 comes out 48 frames late")
+  line.setDelayMs(0)
+  const c = line.process(ramp(64, 8)) as Float32Array
+  assert.equal(c[0], 65, "shrinking drops the queue")
+})
+
+test("sync beep: 100ms of 1 kHz at each wall second", () => {
+  const b = syncBeep(48000, 999_000) as Float32Array
+  const on = (ms: number) => Math.abs(b[Math.round((ms * 48)) * 2]) + Math.abs(b[(Math.round(ms * 48) + 6) * 2])
+  assert.ok(on(1.2) > 0.01 && on(50) > 0.01)
+  assert.equal(on(150), 0); assert.equal(on(900), 0)
 })

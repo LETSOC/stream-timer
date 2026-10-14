@@ -229,9 +229,13 @@ export function createAudioFeeder({ liveFile, appliedFile, ffmpegBin = "ffmpeg",
   const statTimer = setInterval(() => { underruns = voices.reduce((s, v) => s + (v.src.underruns ?? 0), 0); writeApplied(); peak = 0 }, 1000)
   pollTimer.unref?.(); statTimer.unref?.()
 
-  /** n frames of the mix as float stereo (for callers that mix more in, e.g. program audio). */
-  function readFloat(n) {
+  /**
+   * n frames of the mix as float stereo (for callers that mix more in, e.g. program audio).
+   * wallMs = the wall-clock time the first frame stands for (A/V sync test: beeps on each second).
+   */
+  function readFloat(n, wallMs = Date.now()) {
     startPending()
+    if (wanted?.syncTest) return syncBeep(n, wallMs)
     const mix = new Float32Array(n * 2)
     for (const v of voices) {
       const data = v.src.read(n)
@@ -248,9 +252,66 @@ export function createAudioFeeder({ liveFile, appliedFile, ffmpegBin = "ffmpeg",
     for (let i = 0; i < mix.length; i++) { const a = Math.abs(mix[i]); if (a > peak) peak = a }
     return mix
   }
-  function read(n) { return toS16(readFloat(n)) }
+  function read(n, wallMs) { return toS16(readFloat(n, wallMs)) }
   function stop() { clearInterval(pollTimer); clearInterval(statTimer); for (const v of voices) v.src.stop(); pending?.voice.src.stop() }
-  return { read, readFloat, stop, status: () => ({ ...applied, voices: voices.length, pending: pending !== null }) }
+  /** Live sync settings from the desk: A/V offset trim (ms, + = audio later) and the sync test switch. */
+  const sync = () => ({ avOffsetMs: Math.max(-500, Math.min(500, Number(wanted?.avOffsetMs) || 0)), syncTest: wanted?.syncTest === true })
+  return { read, readFloat, stop, sync, status: () => ({ ...applied, ...sync(), voices: voices.length, pending: pending !== null }) }
+}
+
+/** A/V sync test: a 1 kHz beep (-12 dBFS) for the first 100ms of every wall-clock second, silence otherwise. */
+export function syncBeep(n, wallMs) {
+  const out = new Float32Array(n * 2)
+  const amp = dbToGain(-12)
+  for (let i = 0; i < n; i++) {
+    const t = wallMs + (i * 1000) / RATE
+    const ms = ((t % 1000) + 1000) % 1000
+    if (ms < 100) {
+      const v = amp * Math.sin((2 * Math.PI * 1000 * t) / 1000)
+      out[i * 2] = v
+      out[i * 2 + 1] = v
+    }
+  }
+  return out
+}
+
+/**
+ * Fixed audio delay (float stereo). setDelay jumps (rare, manual trims). Used for the A/V offset trim
+ * and Browser capture's screencast-lag compensation.
+ */
+export function createDelayLine() {
+  let buf = new Float32Array(0) // queued frames (interleaved)
+  let delay = 0 // frames
+  return {
+    setDelayMs(ms) { delay = Math.max(0, Math.round((ms * RATE) / 1000)) },
+    delayMs() { return (delay * 1000) / RATE },
+    process(input) {
+      const n = input.length / 2
+      if (delay === 0 && buf.length === 0) return input
+      const joined = new Float32Array(buf.length + input.length)
+      joined.set(buf); joined.set(input, buf.length)
+      const total = joined.length / 2
+      const need = n + delay
+      let out
+      if (total >= need) {
+        // Enough: output the oldest n frames beyond the delay, keep `delay` frames queued (drops any surplus after a shorter delay).
+        const start = total - need
+        out = joined.subarray(start * 2, (start + n) * 2)
+        buf = joined.slice((start + n) * 2)
+      } else {
+        // Delay grew: pad with silence first.
+        const pad = need - total
+        out = new Float32Array(n * 2)
+        if (pad >= n) buf = joined
+        else {
+          const take = n - pad
+          out.set(joined.subarray(0, take * 2), pad * 2)
+          buf = joined.slice(take * 2)
+        }
+      }
+      return out
+    },
+  }
 }
 
 export function toS16(mix) {
@@ -271,13 +332,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === fs.realpathSync(proces
   for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, done)
   const startedAt = Date.now()
   let written = 0
+  const line = createDelayLine()
   // 100ms head start so ffmpeg never waits on audio at the start; then exactly wall-clock rate.
   const LEAD = Math.round(0.1 * RATE)
   setInterval(() => {
     const due = Math.floor(((Date.now() - startedAt) * RATE) / 1000) + LEAD - written
     if (due <= 0) return
     const n = Math.min(due, RATE)
-    if (!out.write(feeder.read(n))) { /* ffmpeg is behind: it will drain; keep pace by wall clock */ }
+    // Slate: + trim delays the audio; the video is ffmpeg's own, so a negative trim can't move audio earlier.
+    line.setDelayMs(Math.max(0, feeder.sync().avOffsetMs))
+    if (!out.write(toS16(line.process(feeder.readFloat(n, startedAt + (written * 1000) / RATE))))) { /* ffmpeg is behind: it will drain; keep pace by wall clock */ }
     written += due
   }, 20)
 }
