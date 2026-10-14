@@ -740,11 +740,6 @@ export function OperatorConsole() {
       if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endAt || prev.endTime}`)
     })
   }
-  const extendButtons = (testid: string) => (
-    <div className="mt-1.5 flex gap-2">
-      {EXTENDS.map((m) => <Pill key={m} size="sm" tone="outline" data-testid={`${testid}-${m}`} disabled={!token} onClick={() => extendEnd(m)}>+{m} min</Pill>)}
-    </div>
-  )
   const jumpPreview = (seconds: number) => runTransport({ type: "jump", seconds })
   const goLiveNow = () => runTransport({ type: "goLive" })
   const restoreFestival = () => runTransport({ type: "restore" })
@@ -992,7 +987,7 @@ export function OperatorConsole() {
               </Field>
               <Field label="End time" htmlFor="endTime">
                 <Input id="endTime" type="time" value={endTime} onChange={(event) => updateEvent({ endTime: event.target.value })} />
-                {endAt ? null : extendButtons("extend-event")}
+                {endAt ? null : <div className="mt-1.5 flex gap-2">{EXTENDS.map((m) => <Pill key={m} size="sm" tone="outline" data-testid={`extend-event-${m}`} disabled={!token} onClick={() => extendEnd(m)}>+{m} min</Pill>)}</div>}
               </Field>
             </div>
             <Field label="Venue" htmlFor="venue">
@@ -1326,7 +1321,7 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? extendButtons("extend-endcard") : null}</Field>
+            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex gap-2">{EXTENDS.map((m) => <Pill key={m} size="sm" tone="outline" data-testid={`extend-endcard-${m}`} disabled={!token} onClick={() => extendEnd(m)}>+{m} min</Pill>)}</div> : null}</Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
