@@ -1941,7 +1941,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { backup?: { ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayView = { backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -1952,7 +1952,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
   const program = relay?.program
   const captureSource = relay?.paths.capture?.source
   const captureProgramAudio = captureSource && "capture" in captureSource ? captureSource.capture?.programAudio ?? null : null
-  const [obs, setObs] = useState<{ server: string; streamKey: string } | null>(null)
+  const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null } | null>(null)
   const [preview, setPreview] = useState(false)
   useEffect(() => {
     if (!obs) return
@@ -1962,8 +1962,8 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
   async function reveal() {
     const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-program" }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
-    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string } | null
-    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey })
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null })
   }
   const state = !program?.armed ? "off" : program.ready ? "receiving" : "waiting"
   const video = program?.tracks.find((t) => /264|265|hevc|av1|vp9/i.test(t)) ?? null
@@ -2002,10 +2002,14 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         <Pill size="sm" tone="outline" data-testid="program-preview" aria-pressed={preview} disabled={!program?.ready} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview"}</Pill>
         <ConfirmButton data-testid="program-rotate" className={pillClass("outline", "sm")} disabled={busy || !program?.armed} confirmLabel="New key? OBS must be updated · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-program" }, "New OBS stream key. Reveal it and update OBS.") }}>New key</ConfirmButton>
       </div>
+      <label className="flex items-start gap-2 font-mono text-[12px] text-black/70">
+        <input type="checkbox" data-testid="lan-ingest" className="mt-0.5" checked={relay?.backup?.lanIngest === true} disabled={busy} onChange={(e) => void act({ action: "lan-ingest", on: e.target.checked }, e.target.checked ? "Accepting program ingest from the LAN." : "Program ingest is local-only.")} />
+        <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
+      </label>
       {obs ? (
         <div data-testid="program-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
           <p className="text-black/70">OBS › Settings › Stream › Service: Custom. Hides in 30s.</p>
-          <CredRow label="Server" value={obs.server} copyLabel="OBS server" testid="program-obs-server" />
+          <CredRow label="Server" value={obs.server} copyLabel="OBS server" testid="program-obs-server" />{obs.lanServer ? <CredRow label="LAN" value={obs.lanServer} copyLabel="LAN server" testid="program-obs-server-lan" /> : null}
           <CredRow label="Key" value={obs.streamKey} copyLabel="OBS stream key" testid="program-obs-key" />
         </div>
       ) : null}
@@ -2031,7 +2035,7 @@ function CredRow({ label, value, copyLabel, testid }: { label: string; value: st
 /** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
 function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
   const backup = relay?.backup
-  const [obs, setObs] = useState<{ server: string; streamKey: string } | null>(null)
+  const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null } | null>(null)
   const [pull, setPull] = useState("")
   const [preview, setPreview] = useState(false)
   useEffect(() => {
@@ -2042,8 +2046,8 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
   async function reveal() {
     const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup" }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
-    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string } | null
-    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey })
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null })
   }
   const st = sourceStatus(backup ? { ready: backup.ready, kbps: backup.kbps, dataAgeMs: backup.dataAgeMs } : undefined)
   return (
@@ -2061,7 +2065,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
       {obs ? (
         <div data-testid="backup-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
           <p className="text-black/70">Backup computer › OBS › Stream › Custom (same ingest server). Hides in 30s.</p>
-          <CredRow label="Server" value={obs.server} copyLabel="Backup server" testid="backup-obs-server" />
+          <CredRow label="Server" value={obs.server} copyLabel="Backup server" testid="backup-obs-server" />{obs.lanServer ? <CredRow label="LAN" value={obs.lanServer} copyLabel="LAN server" testid="backup-obs-server-lan" /> : null}
           <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
         </div>
       ) : null}

@@ -1,6 +1,6 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
-import { armProgram, backupObsUrl, disarmProgram, programObsUrl, setBackupPull, setFailover, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { armProgram, backupObsUrl, disarmProgram, programObsUrl, setBackupPull, setFailover, setLanIngest, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -44,6 +44,8 @@ export async function POST(request: Request) {
     case "backup-pull":
       if (typeof body.url !== "string") return Response.json({ error: "Expected { url }." }, { status: 400 })
       return reply(await setBackupPull(body.url))
+    case "lan-ingest":
+      return reply(await setLanIngest(body.on === true))
     case "failover":
       return reply(await setFailover(body.failover))
     default:

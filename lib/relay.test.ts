@@ -3,14 +3,14 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
-import { buildMediamtxConfig, credentials, validPullUrl, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
+import { buildMediamtxConfig, credentials, validPullUrl, pickLanIp, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
 import { parseOwnSupervisorList } from "./encoder.ts"
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true } })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true }, lanIngest: false })
 })
 
 test("credentials are random, stable, and stored 0600", () => {
@@ -100,4 +100,22 @@ test("program backup: own publish login, or a pull source; pull URLs validated",
   assert.ok(!validPullUrl("file:///etc/passwd"))
   assert.ok(!validPullUrl("rtmp://x/y\n  evil: 1"))
   assert.ok(!validPullUrl("rtmp://x/{a}"))
+})
+
+test("LAN ingest: RTMP on the ingest host, only OBS logins from anywhere (publish-only), reads/API/internal stay loopback", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", programUser: "obs", programPass: "op", backupUser: "bak", backupPass: "bp" }
+  const ports = { rtmp: 19350, hls: 18888, api: 19997 }
+  const lan = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, ingestHost: "0.0.0.0" })
+  assert.match(lan, /rtmpAddress: 0\.0\.0\.0:19350/)
+  assert.match(lan, /hlsAddress: 127\.0\.0\.1:18888/)
+  assert.match(lan, /apiAddress: 127\.0\.0\.1:19997/)
+  assert.match(lan, /user: "obs"\n.*\n    ips: \['0\.0\.0\.0\/0', '::\/0'\]\n    permissions: \[\{ action: publish, path: program \}\]/)
+  assert.match(lan, /user: "bak"\n.*\n    ips: \['0\.0\.0\.0\/0', '::\/0'\]\n    permissions: \[\{ action: publish, path: program-backup \}\]/)
+  assert.match(lan, /user: "r"\n.*\n    ips: \['127\.0\.0\.1\/32', '::1\/128'\]/)
+  assert.match(lan, /user: "p"\n.*\n    ips: \['127\.0\.0\.1\/32', '::1\/128'\]/)
+  // Not armed: ingest stays local even with the setting on
+  assert.match(buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: false, ingestHost: "0.0.0.0" }), /rtmpAddress: 127\.0\.0\.1:19350/)
+  assert.doesNotMatch(buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true }), /0\.0\.0\.0/)
+  assert.equal(pickLanIp({ lo0: [{ family: "IPv4", address: "127.0.0.1", internal: true }], utun3: [{ family: "IPv4", address: "10.8.0.2", internal: false }], en0: [{ family: "IPv6", address: "fe80::1", internal: false }, { family: "IPv4", address: "192.168.1.23", internal: false }] }), "192.168.1.23")
+  assert.equal(pickLanIp({ lo: [{ family: 4, address: "127.0.0.1", internal: true }] }), null)
 })

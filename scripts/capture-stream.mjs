@@ -85,7 +85,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { source: "main", wanted: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false }
+const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -202,9 +202,13 @@ function pcmBlock(n, wallMs) {
   bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
   const bed = bedLine.process(feeder ? feeder.readFloat(n, wallMs) : new Float32Array(n * 2))
   const out = Buffer.alloc(n * 4)
-  // Fade the stream audio out only once program audio is actually flowing (no hole while the reader starts).
-  const target = programPcm ? 0 : 1
-  if (programPcm) prog.mixedAt = Date.now()
+  // While the program (Main or Backup) is on air the bed/tone is suppressed: program audio only.
+  // On entering the program the bed fades out once program audio first flows (no hole while the reader
+  // starts, 3s cap); after that it stays out through Main↔Backup switches, reader restarts, priming and
+  // underruns, and only comes back when /stream leaves the program for a card/countdown.
+  if (programPcm) { prog.mixedAt = Date.now(); prog.flowed = true }
+  const suppress = prog.wanted && (prog.flowed || Date.now() - prog.wantedSince > 3000)
+  const target = suppress ? 0 : 1
   for (let i = 0; i < n; i++) {
     if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
     else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
@@ -440,8 +444,9 @@ setInterval(async () => {
   }
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
   if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.7 + info.lat * 0.3
-  const wanted = screen === "program"
-  if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) log("[audio] /stream shows the program: audio follows OBS") }
+  // A failed/empty page read (reload, busy page) is not "left the program": keep the last state.
+  const wanted = screen === "" ? prog.wanted : screen === "program"
+  if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) { prog.wantedSince = Date.now(); prog.flowed = false; log("[audio] /stream shows the program: audio follows OBS") } }
   else if (prog.wanted) log("[audio] /stream left the program: audio bed back")
   prog.wanted = wanted
   if (wanted) startProgramReader()

@@ -8,6 +8,7 @@
  * (random publish/read users), mediamtx.yml (generated each start), pidfiles, logs, state.
  * MediaMTX listens on 127.0.0.1 only; the desk preview goes through /api/relay/hls (operator auth).
  */
+import os from "node:os"
 import { parseFailover, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
 import crypto from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
@@ -31,6 +32,29 @@ const port = (name: string, fallback: number) => {
 export const relayPorts = () => ({ rtmp: port("RELAY_RTMP_PORT", 19350), hls: port("RELAY_HLS_PORT", 18888), api: port("RELAY_API_PORT", 19997) })
 /** Interface MediaMTX binds. Keep 127.0.0.1: the app proxies the preview; publishers are local. */
 const bindHost = () => process.env.RELAY_BIND || "127.0.0.1"
+/** Where the RTMP ingest listens when "Accept program ingest from LAN" is on. */
+const ingestHost = () => process.env.INGEST_HOST || "0.0.0.0"
+
+/** Pure: this machine's LAN IPv4 for the second laptop's OBS (private ranges first, en0/eth0 preferred). */
+export function pickLanIp(ifaces: Record<string, { family: string | number; address: string; internal: boolean }[] | undefined>): string | null {
+  const found: { name: string; address: string }[] = []
+  for (const [name, list] of Object.entries(ifaces)) for (const a of list ?? []) if ((a.family === "IPv4" || a.family === 4) && !a.internal && !a.address.startsWith("169.254.")) found.push({ name, address: a.address })
+  const priv = (ip: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)
+  const score = (f: { name: string; address: string }) => (priv(f.address) ? 0 : 10) + (/^(en0|eth0|wlan0|en1)$/.test(f.name) ? 0 : 1) + (/^(utun|tun|tap|docker|br-|veth|bridge|vboxnet|zt)/.test(f.name) ? 5 : 0)
+  return found.sort((a, b) => score(a) - score(b))[0]?.address ?? null
+}
+export function lanServerUrl(): string | null {
+  if (!readSettings().lanIngest) return null
+  const host = process.env.INGEST_HOST && process.env.INGEST_HOST !== "0.0.0.0" ? process.env.INGEST_HOST : pickLanIp(os.networkInterfaces())
+  return host ? `rtmp://${host}:${relayPorts().rtmp}/` : null
+}
+export function setLanIngest(on: boolean): Promise<RelayResult> {
+  return withLock(async () => {
+    writeSettings({ ...readSettings(), lanIngest: on })
+    if (relayRunning()) writeConfigIfChanged()
+    return { ok: true, note: on ? "Program ingest accepts OBS from the LAN (keys still required)." : "Program ingest is local-only again." }
+  })
+}
 const STALL_MS = 20_000
 
 // ---------- files ----------
@@ -64,6 +88,8 @@ export type RelaySettings = {
   /** Backup input pulled by MediaMTX from this RTMP/RTSP/HLS/SRT URL instead of a publisher ("" = publish). */
   backupPullUrl: string
   failover: FailoverSettings
+  /** Accept OBS on /program and /program-backup from the LAN (RTMP ingest on 0.0.0.0 / INGEST_HOST). Default off. */
+  lanIngest: boolean
 }
 /** Pure: what may go in `source:` for the backup pull (no file:, no shell, no YAML breakage). */
 export function validPullUrl(url: string): boolean {
@@ -75,6 +101,7 @@ export function readSettings(): RelaySettings {
   return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture) }, programArmed: raw?.programArmed === true,
     backupPullUrl: typeof raw?.backupPullUrl === "string" && validPullUrl(raw.backupPullUrl) ? raw.backupPullUrl : "",
     failover: parseFailover(raw?.failover),
+    lanIngest: raw?.lanIngest === true,
   }
 }
 function writeSettings(settings: RelaySettings) {
@@ -116,8 +143,13 @@ export function rotateProgramCredentials(): Promise<RelayResult> {
  * Internal publishers may publish to slate/capture only; OBS's login (only while `programArmed`)
  * may publish to /program only.
  */
-export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string }): string {
+export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string }): string {
   const { host, ports, creds } = input
+  // LAN ingest: only the RTMP listener moves; HLS and the API stay on `host`. Only the program/backup
+  // publish logins may connect from other addresses, and only to publish their own path. Reads,
+  // the API and the internal slate/capture publishers stay loopback-only.
+  const lan = Boolean(input.programArmed && input.ingestHost && input.ingestHost !== host)
+  const obsIps = lan ? "['0.0.0.0/0', '::/0']" : null
   const program = input.programArmed && creds.programUser && creds.programPass
   const pull = input.programArmed && input.backupPullUrl && validPullUrl(input.backupPullUrl) ? input.backupPullUrl : ""
   const backup = input.programArmed && !pull && creds.backupUser && creds.backupPass
@@ -137,7 +169,7 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     "metrics: no",
     "pprof: no",
     "rtmp: yes",
-    `rtmpAddress: ${host}:${ports.rtmp}`,
+    `rtmpAddress: ${lan ? input.ingestHost : host}:${ports.rtmp}`,
     "hls: yes",
     `hlsAddress: ${host}:${ports.hls}`,
     "hlsVariant: lowLatency",
@@ -156,13 +188,13 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     ...(program ? [
       `  - user: ${JSON.stringify(creds.programUser)}`,
       `    pass: ${JSON.stringify(creds.programPass)}`,
-      `    ips: ${local}`,
+      `    ips: ${obsIps ?? local}`,
       `    permissions: [{ action: publish, path: ${PROGRAM_PATH} }]`,
     ] : []),
     ...(backup ? [
       `  - user: ${JSON.stringify(creds.backupUser)}`,
       `    pass: ${JSON.stringify(creds.backupPass)}`,
-      `    ips: ${local}`,
+      `    ips: ${obsIps ?? local}`,
       `    permissions: [{ action: publish, path: ${BACKUP_PATH} }]`,
     ] : []),
     `  - user: ${JSON.stringify(creds.readUser)}`,
@@ -336,7 +368,7 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
 }
 
 function writeConfigIfChanged() {
-  const yml = buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl })
+  const yml = buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined })
   let current = ""
   try { current = fs.readFileSync(file("mediamtx.yml"), "utf8") } catch { /* first start */ }
   if (current !== yml) writePrivate(file("mediamtx.yml"), yml)
@@ -378,19 +410,19 @@ export function disarmProgram(): Promise<RelayResult> {
 }
 
 /** OBS settings (Server + Stream Key). Operator-only, on demand; never in status or logs. */
-export function programObsUrl(): { server: string; streamKey: string; url: string } {
+export function programObsUrl(): { server: string; streamKey: string; url: string; lanServer: string | null } {
   const c = credentials()
   const server = `rtmp://127.0.0.1:${relayPorts().rtmp}/`
   const streamKey = `${PROGRAM_PATH}?user=${encodeURIComponent(c.programUser ?? "")}&pass=${encodeURIComponent(c.programPass ?? "")}`
-  return { server, streamKey, url: `${server}${streamKey}` }
+  return { server, streamKey, url: `${server}${streamKey}`, lanServer: lanServerUrl() }
 }
 
 /** Backup publisher settings (second computer). Operator-only, on demand. */
-export function backupObsUrl(): { server: string; streamKey: string; url: string } {
+export function backupObsUrl(): { server: string; streamKey: string; url: string; lanServer: string | null } {
   const c = credentials()
   const server = `rtmp://127.0.0.1:${relayPorts().rtmp}/`
   const streamKey = `${BACKUP_PATH}?user=${encodeURIComponent(c.backupUser ?? "")}&pass=${encodeURIComponent(c.backupPass ?? "")}`
-  return { server, streamKey, url: `${server}${streamKey}` }
+  return { server, streamKey, url: `${server}${streamKey}`, lanServer: lanServerUrl() }
 }
 
 /**
@@ -683,7 +715,7 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
 /** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
 export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-export type BackupStatus = { ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings }
+export type BackupStatus = { lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings }
 export type RelayStatus = { backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 /** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
@@ -750,7 +782,7 @@ export async function relayStatus(): Promise<RelayStatus> {
   await refreshProgramSources()
   let pullFrom: string | null = null
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
-  const backup: BackupStatus = { ...programSourceHealth("backup"), pullFrom, failover: settings.failover }
+  const backup: BackupStatus = { lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover }
   return {
     backup,
     program,
