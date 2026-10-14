@@ -2005,14 +2005,25 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
       {obs ? (
         <div data-testid="program-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
           <p className="text-black/70">OBS › Settings › Stream › Service: Custom. Hides in 30s.</p>
-          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Server</span><code data-testid="program-obs-server" className="min-w-0 flex-1 break-all">{obs.server}</code><Pill size="sm" tone="outline" onClick={() => void copyOrShow("OBS server", obs.server)}>Copy</Pill></div>
-          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Key</span><code data-testid="program-obs-key" className="min-w-0 flex-1 break-all">{obs.streamKey}</code><Pill size="sm" tone="outline" onClick={() => void copyOrShow("OBS stream key", obs.streamKey)}>Copy</Pill></div>
+          <CredRow label="Server" value={obs.server} copyLabel="OBS server" testid="program-obs-server" />
+          <CredRow label="Key" value={obs.streamKey} copyLabel="OBS stream key" testid="program-obs-key" />
         </div>
       ) : null}
       {preview && program?.ready ? (
         <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay" ready={program.ready} /></div>
       ) : null}
       {program?.armed ? <BackupSection relay={relay} busy={busy} act={act} /> : null}
+    </div>
+  )
+}
+
+/** One revealed secret: label · value (mono, wraps anywhere) · Copy, aligned on any width. */
+function CredRow({ label, value, copyLabel, testid }: { label: string; value: string; copyLabel: string; testid: string }) {
+  return (
+    <div className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-start gap-2">
+      <span className="pt-1 text-black/60">{label}</span>
+      <code data-testid={testid} className="min-w-0 pt-1 font-mono break-all">{value}</code>
+      <Pill size="sm" tone="outline" data-testid={`${testid}-copy`} onClick={() => void copyOrShow(copyLabel, value)}>Copy</Pill>
     </div>
   )
 }
@@ -2050,8 +2061,8 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
       {obs ? (
         <div data-testid="backup-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
           <p className="text-black/70">Backup computer › OBS › Stream › Custom (same ingest server). Hides in 30s.</p>
-          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Server</span><code className="min-w-0 flex-1 break-all">{obs.server}</code></div>
-          <div className="flex flex-wrap items-center gap-2"><span className="w-16 shrink-0 text-black/60">Key</span><code data-testid="backup-obs-key" className="min-w-0 flex-1 break-all">{obs.streamKey}</code><Pill size="sm" tone="outline" onClick={() => void copyOrShow("Backup stream key", obs.streamKey)}>Copy</Pill></div>
+          <CredRow label="Server" value={obs.server} copyLabel="Backup server" testid="backup-obs-server" />
+          <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
