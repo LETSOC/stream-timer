@@ -1039,7 +1039,7 @@ export function OperatorConsole() {
 
           <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
             <p className="font-mono text-[12px] text-black/70">Slate and Browser capture are separate outputs. Run either, or both at once to different destinations.</p>
-            <div className="grid gap-3">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
               {(["slate", "capture"] as const).map((ch) => {
                 const other = ch === "slate" ? "capture" : "slate"
                 const pick = (c: RtmpChannelId) => (c === "slate" ? dests.selectedId : dests.selectedCaptureId)
@@ -1789,8 +1789,8 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 
   const pillText = busy === "starting" ? "Starting…" : busy === "stopping" ? "Stopping…" : status.connectError && live && phase !== "connected" ? "Can't connect" : { stopped: live ? "Live" : "Off", starting: "Connecting…", connected: status.adopted ? "Live (found running)" : "Live", reconnecting: "Reconnecting", stalled: "Stalled · no frames", failed: "Failed" }[phase]
   return (
-    <div data-testid={`rtmp-card-${channel}`} className="space-y-2 rounded-2xl border border-black/10 bg-white p-3">
-      <div className="flex items-center justify-between gap-2">
+    <div data-testid={`rtmp-card-${channel}`} className="min-w-0 break-words [overflow-wrap:anywhere] space-y-2 rounded-2xl border border-black/10 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">{label}</p>
         <span data-testid={tid("status")} data-state={live ? phase : "stopped"} className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${phase === "connected" || (live && phase === "stopped") ? "bg-[#128a3e] text-white" : phase === "reconnecting" || phase === "starting" ? "bg-[#b45309] text-white" : phase === "failed" || phase === "stalled" ? "bg-[#d93200] text-white" : "bg-black/5 text-black/70"}`}>
           <span className={`size-1.5 rounded-full ${live ? "animate-pulse bg-white" : "bg-black/30"}`} />
@@ -1801,13 +1801,13 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
       <div className="flex flex-wrap items-center gap-2 font-mono text-[12px] text-black/70">
         <label htmlFor={tid("destination")}>Destination</label>
         {dests.length ? (
-          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
+          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 max-w-full flex-1 basis-40 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
             <option value="">Choose…</option>
             <option value="relay">Relay (MediaMTX) → /{channel}</option>
             {dests.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.host}</option>)}
           </select>
         ) : (
-          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 flex-1 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
+          <select id={tid("destination")} data-testid={tid("destination")} disabled={live} className="h-8 min-w-0 max-w-full flex-1 basis-40 border px-2" value={selectedId ?? ""} onChange={(event) => onSelect(event.target.value || null)}>
             <option value="">Add a destination below, or…</option>
             <option value="relay">Relay (MediaMTX) → /{channel}</option>
           </select>
@@ -1825,9 +1825,9 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
             </select>
             <label htmlFor="capture-encoder">Encoder</label>
             <select id="capture-encoder" data-testid="capture-encoder" disabled={live} value={captureEncoder} onChange={(event) => { const v = event.target.value === "libx264" || event.target.value === "videotoolbox" ? event.target.value : "auto"; setCaptureEncoderState(v); window.localStorage.setItem("rtmp-capture-encoder", v) }} className="h-8 border px-2">
-              <option value="auto">Auto (VideoToolbox on Mac)</option>
+              <option value="auto">Auto (VideoToolbox if it can hold CBR, else libx264)</option>
               <option value="libx264">libx264 (CPU)</option>
-              <option value="videotoolbox">VideoToolbox</option>
+              <option value="videotoolbox">VideoToolbox (always)</option>
             </select>
             <span className="basis-full">Keyframe every 2s, constant bitrate (maxrate = bitrate, 2s buffer), + 128k audio.</span>
           </>
@@ -1839,7 +1839,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
       {live && status.audio?.warning ? <p role="alert" data-testid={tid("audio-warning")} className="font-mono text-[12px] font-bold text-[#8a4b06]">{status.audio.warning}</p> : null}
       {live && status.health && !status.relay ? <DiagnosisLine testid={tid("diagnosis")} value={diagnose({ source: { label: label, health: status.health }, forwards: [], totalKbps: status.health.kbps })} /> : null}
       {sameAsOther && !live ? <p role="alert" data-testid={tid("same-dest")} className="font-mono text-[12px] font-bold text-[#b42318]">The other channel is already live on this destination. One stream key takes one publisher; choose a different destination.</p> : null}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Pill data-testid={tid("start")} disabled={!canStart || !selected || busy !== null || live} aria-busy={busy === "starting"} onClick={start}>{busy === "starting" ? "Starting…" : `Start ${label.toLowerCase()}`}</Pill>
         <ConfirmButton data-testid={tid("stop")} className={pillClass("danger")} disabled={busy !== null || !live} confirmLabel={`Stop ${label.toLowerCase()}? · confirm`} onConfirm={stop}>{busy === "stopping" ? "Stopping…" : "Stop"}</ConfirmButton>
       </div>
@@ -1889,8 +1889,8 @@ function RelayCard({ dests }: { dests: Dest[] }) {
   }
   const running = relay?.running === true
   return (
-    <div data-testid="relay-card" className="space-y-3 rounded-2xl border border-black/10 bg-white p-3">
-      <div className="flex items-center justify-between gap-2">
+    <div data-testid="relay-card" className="min-w-0 break-words [overflow-wrap:anywhere] space-y-3 rounded-2xl border border-black/10 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Relay (MediaMTX)</p>
         {running && relay?.totalOutKbps ? <span data-testid="relay-total-out" title="Sum of all forwards plus direct channels: roughly your upload use" className="font-mono text-[12px] text-black/70">↑ {(relay.totalOutKbps / 1000).toFixed(1)} Mbps out</span> : null}
         <span className="flex flex-wrap items-center gap-1">
@@ -1905,7 +1905,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
       <p className="font-mono text-[12px] text-black/70">Optional. Pick “Relay” as a channel’s destination and start it: it publishes to the relay server (preview works) without going anywhere else. Tick destinations per path, then Start forwards to fan out (one ffmpeg -c copy each, restarted on failure). Stop forwards ends the fan-out only; channels keep publishing. The server stops by itself when nothing uses it.{relay?.version ? ` MediaMTX ${relay.version}.` : ""}</p>
       {relay && !relay.installed ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">MediaMTX not found. On the Mac: brew install mediamtx, or run scripts/install-mediamtx.sh, or set MEDIAMTX_BIN.</p> : null}
       {relay?.error ? <p role="alert" className="font-mono text-[12px] font-bold text-[#b42318]">{relay.error}</p> : null}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Pill size="sm" data-testid="relay-start" disabled={busy || relay?.enabled === true || !relay?.installed} onClick={() => void act({ action: "start" }, "Forwards started.")}>Start forwards</Pill>
         <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !relay?.enabled} confirmLabel="Stop all forwards? Channels keep publishing · confirm" onConfirm={() => void act({ action: "stop" }, "Forwards stopped. Channels keep publishing to the relay.")}>Stop forwards</ConfirmButton>
       </div>
@@ -2064,9 +2064,9 @@ function AudioCard() {
   }
   const byId = new Map(files.map((f) => [f.id, f]))
   return (
-    <div data-testid="audio-card" className="space-y-3 rounded-2xl border border-black/10 bg-white p-3">
+    <div data-testid="audio-card" className="min-w-0 break-words [overflow-wrap:anywhere] space-y-3 rounded-2xl border border-black/10 bg-white p-3">
       <audio ref={audioRef} onEnded={() => setPlaying(null)} hidden />
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-mono text-[13px] font-bold tracking-[0.12em] uppercase">Stream audio</p>
         {dirty ? <span data-testid="audio-unsaved" className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[11px] font-bold text-white uppercase">Unsaved</span> : null}
       </div>

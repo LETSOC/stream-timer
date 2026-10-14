@@ -34,10 +34,22 @@ function pickEncoder() {
   const want = (process.env.CAPTURE_ENCODER || "auto").toLowerCase()
   if (want === "libx264") return "libx264"
   if (want !== "videotoolbox" && !(want === "auto" && process.platform === "darwin")) return "libx264"
-  const probe = spawnSync(ffmpegBin, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30", "-frames:v", "2", "-c:v", "h264_videotoolbox", "-b:v", "1000k", "-f", "null", "-"], { timeout: 8000 })
-  return probe.status === 0 ? "h264_videotoolbox" : "libx264"
+  if (!vtProbe([])) return "libx264"
+  // auto: only use VideoToolbox when it can hold a constant bitrate; its average-bitrate mode
+  // undershoots badly on static pages. An explicit "videotoolbox" still gets it (with a warning).
+  if (want === "auto" && !vtProbe(["-constant_bit_rate", "1"])) return "libx264"
+  return "h264_videotoolbox"
+}
+function vtProbe(extra) {
+  const probe = spawnSync(ffmpegBin, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=320x180:r=30", "-frames:v", "2", "-c:v", "h264_videotoolbox", "-b:v", "1000k", ...extra, "-f", "null", "-"], { timeout: 8000 })
+  return probe.status === 0
 }
 const encoder = pickEncoder()
+// VideoToolbox's default rate control is average-bitrate VBR and ignores -maxrate as a floor, so a
+// mostly static page encodes at a fraction of the set bitrate (e.g. 636k of 2500k), which YouTube
+// can treat as an unhealthy/idle stream. True CBR (-constant_bit_rate 1) needs FFmpeg 6.1+ and
+// macOS 13+ on Apple Silicon; probe it and fall back to ABR with a data-rate cap.
+const vtCbr = encoder === "h264_videotoolbox" && vtProbe(["-constant_bit_rate", "1"])
 
 // Stream audio: one ffmpeg arg per line plus "@requires <file>" / "@filter <af>" lines.
 let audioIn = ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
@@ -55,7 +67,9 @@ if (process.env.AUDIO_ARGS_FILE) {
 // Keyframe every 2s (YouTube/Castr want ≤ 2s), CBR-ish: maxrate = bitrate, 2s buffer.
 const gop = String(fps * 2)
 const videoArgs = encoder === "h264_videotoolbox"
-  ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-profile:v", "high", "-b:v", `${bitrate}k`, "-maxrate", `${bitrate}k`, "-bufsize", `${bitrate * 2}k`, "-g", gop, "-keyint_min", gop]
+  ? ["-c:v", "h264_videotoolbox", "-realtime", "1", "-profile:v", "high", "-b:v", `${bitrate}k`,
+     ...(vtCbr ? ["-constant_bit_rate", "1"] : ["-maxrate", `${bitrate}k`, "-bufsize", `${bitrate * 2}k`]),
+     "-g", gop, "-keyint_min", gop, "-force_key_frames", `expr:gte(t,n_forced*2)`]
   : ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "high", "-b:v", `${bitrate}k`, "-maxrate", `${bitrate}k`, "-bufsize", `${bitrate * 2}k`, "-nal-hrd", "cbr", "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-x264-params", "force-cfr=1"]
 
 const childEnv = { ...process.env }
@@ -82,7 +96,8 @@ async function shutdown(code) {
 }
 for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => { log(`${sig}: stopping`); void shutdown(0) })
 
-log(`starting ${width}x${height} @ ${fps}fps, ${bitrate}k, ${encoder}, keyframe every 2s`)
+log(`starting ${width}x${height} @ ${fps}fps, ${bitrate}k, ${encoder}${encoder === "h264_videotoolbox" ? (vtCbr ? " (constant bitrate)" : " (average bitrate)") : ""}, keyframe every 2s`)
+if (encoder === "h264_videotoolbox" && !vtCbr) log("VideoToolbox here can't do constant bitrate (needs FFmpeg 6.1+ and macOS 13+ on Apple Silicon); a static page may send well under the set bitrate. Pick libx264 for a padded constant bitrate.")
 browser = await chromium.launch({
   headless: true,
   handleSIGTERM: false,
