@@ -37,6 +37,7 @@ import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/secti
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
+import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
@@ -77,7 +78,7 @@ export function OperatorConsole() {
   const selectedDest = dests.items.find((item) => item.id === (manageId ?? dests.selectedId)) ?? dests.items[0] ?? null
   const slateDest = dests.items.find((item) => item.id === dests.selectedId) ?? null
   const rtmpUrl = slateDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
-  const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | null>(null)
+  const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | "dest" | null>(null)
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
   const [showLink, setShowLink] = useState(true)
@@ -405,11 +406,14 @@ export function OperatorConsole() {
       window.setTimeout(() => setRevealed((current) => (current?.id === id ? null : current)), 30_000)
     }
   }
+  // Two-step copy for secrets: the URL must be fetched first, and an awaited fetch would end the
+  // click gesture (iOS/http copy then fails). First tap reveals + arms; the next tap copies synchronously.
   async function copyDest(id: string) {
-    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal", id }) }).catch(() => null)
-    if (!response || handleUnauthorized(response)) return
-    const body = (await response.json().catch(() => null)) as { url?: string } | null
-    if (response.ok && body?.url) void copy("stream", body.url)
+    if (revealed?.id === id) {
+      void copy("dest", revealed.url, "destination URL")
+      return
+    }
+    await revealDest(id)
   }
   function forgetLegacy() {
     window.localStorage.removeItem("hyphen-countdown-rtmp")
@@ -726,23 +730,20 @@ export function OperatorConsole() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  async function copy(kind: "stream" | "file" | "link" | "params", value: string) {
-    // navigator.clipboard is missing on plain-http non-localhost origins (e.g. LAN IP).
-    const copiedOk = await navigator.clipboard?.writeText(value).then(() => true, () => false)
-    if (!copiedOk) {
-      showToast("copy-failed", value)
-      return
-    }
+  // Call synchronously from the click (no await before it): on plain-http LAN origins only the
+  // in-gesture execCommand fallback works. If the browser refuses, a dialog shows the text selected.
+  async function copy(kind: "stream" | "file" | "link" | "params" | "dest", value: string, label = "text") {
+    const result = await copyOrShow(label, value)
+    if (result !== "copied") return
     setCopied(kind)
     window.setTimeout(() => setCopied(null), 1600)
-    if (kind === "link" || kind === "params") {
-      showToast("copy", value)
-    }
+    showToast("copy", kind === "dest" ? "Destination URL (with stream key)" : value)
   }
 
   return (
     <div data-desk-root data-pin-spacer={pinPreview ? "true" : undefined} className={`min-h-dvh bg-[#F6F6F3] text-black ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
       <BackToTop />
+      <CopyFallbackHost />
       <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1083,7 +1084,7 @@ export function OperatorConsole() {
                     <>
                       <Pill size="sm" tone="outline" data-testid="dest-rename" onClick={() => setDestForm({ mode: destForm.mode === "rename" ? null : "rename", name: selectedDest.name, url: "" })}>Rename</Pill>
                       <Pill size="sm" tone="outline" data-testid="dest-reveal" aria-pressed={revealed?.id === selectedDest.id} onClick={() => void revealDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? "Hide" : "Reveal"}</Pill>
-                      <Pill size="sm" tone="outline" data-testid="dest-copy" onClick={() => void copyDest(selectedDest.id)}>Copy</Pill>
+                      <Pill size="sm" tone="outline" data-testid="dest-copy" onClick={() => void copyDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? (copied === "dest" ? "Copied" : "Tap to copy") : "Copy"}</Pill>
                       <ConfirmButton data-testid="dest-delete" className={pillClass("danger", "sm")} disabled={[dests.selectedId, dests.selectedCaptureId].includes(selectedDest.id) && rtmpLive} confirmLabel={`Delete ${selectedDest.name}? · confirm`} onConfirm={() => void destAction({ action: "delete", id: selectedDest.id })}>Delete</ConfirmButton>
                     </>
                   ) : null}
