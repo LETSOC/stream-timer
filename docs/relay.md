@@ -78,6 +78,7 @@ Relay card › /program › tick **Accept program ingest from LAN** (saved, defa
   to **publish** their own path. Reading, the API and the internal Slate/Capture publishers stay
   loopback-only, so nobody on the LAN can watch or take over a path. The keys are still required
   (rotate with **New key** if one leaks). The setting only applies while the program feed is armed.
+- Turning it on or off restarts MediaMTX's RTMP listener: connected publishers drop for a moment (OBS reconnects by itself if "Automatically reconnect" is on, the default).
 - The reveal panels then also show **LAN** `rtmp://<this Mac's LAN IP>:19350/` (private IPv4, en0
   first) with Copy. Use it as the second laptop's OBS Server.
 - macOS: the first time, the firewall may ask whether **mediamtx** may accept incoming connections:

@@ -2003,8 +2003,8 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         <ConfirmButton data-testid="program-rotate" className={pillClass("outline", "sm")} disabled={busy || !program?.armed} confirmLabel="New key? OBS must be updated · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-program" }, "New OBS stream key. Reveal it and update OBS.") }}>New key</ConfirmButton>
       </div>
       <label className="flex items-start gap-2 font-mono text-[12px] text-black/70">
-        <input type="checkbox" data-testid="lan-ingest" className="mt-0.5" checked={relay?.backup?.lanIngest === true} disabled={busy} onChange={(e) => void act({ action: "lan-ingest", on: e.target.checked }, e.target.checked ? "Accepting program ingest from the LAN." : "Program ingest is local-only.")} />
-        <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
+        <input type="checkbox" data-testid="lan-ingest" className="mt-0.5 size-4 shrink-0" checked={relay?.backup?.lanIngest === true} disabled={busy} onChange={(e) => void act({ action: "lan-ingest", on: e.target.checked }, e.target.checked ? "Accepting program ingest from the LAN." : "Program ingest is local-only.")} />
+        <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. Toggling briefly reconnects OBS. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
       </label>
       {obs ? (
         <div data-testid="program-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
