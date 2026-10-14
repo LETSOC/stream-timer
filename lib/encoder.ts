@@ -796,7 +796,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
       RTMP_FAIL_FILE: files.fail,
       AUDIO_ARGS_FILE: audio.argsFile,
       ...(source.kind === "capture"
-        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
+        ? { RTMP_RUNNER: "capture", CAPTURE_URL: source.pageUrl, CAPTURE_KEY_FILE: path.join(DATA_DIR, "capture-key"), CAPTURE_SIZE: source.size, CAPTURE_BITRATE: String(source.bitrateK ?? (source.size === "1920x1080" ? 4500 : 2500)), CAPTURE_ENCODER: source.encoder ?? "auto", CAPTURE_STATS_FILE: (files as { stats: string }).stats, NODE_BIN: process.execPath, FFMPEG_BIN: process.env.FFMPEG_BIN || "ffmpeg" }
         : {}),
     }),
   })

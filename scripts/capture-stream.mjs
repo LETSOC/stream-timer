@@ -76,6 +76,7 @@ const childEnv = { ...process.env }
 delete childEnv.ENCODER_TOKEN
 delete childEnv.RTMP_URL
 delete childEnv.CAPTURE_URL
+delete childEnv.CAPTURE_KEY_FILE
 
 let browser = null
 let ffmpeg = null
@@ -112,6 +113,22 @@ browser = await chromium.launch({
 browser.on("disconnected", () => { if (!stopping) { log("browser crashed"); void shutdown(5) } })
 
 const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })
+// Internal capture credential (data/capture-key, 0600), not the OBS view key, so rotating the
+// view key doesn't blank this capture. Sent as a header, and only to this server's own origin
+// (never to third-party images/fonts on the page). Re-read per request so a fresh file is picked up.
+const pageOrigin = new URL(pageUrl).origin
+const captureKeyFile = process.env.CAPTURE_KEY_FILE
+const readCaptureKey = () => { try { return fs.readFileSync(captureKeyFile, "utf8").trim() } catch { return "" } }
+if (captureKeyFile) {
+  if (!readCaptureKey()) log("capture key file missing; /stream will need the view key")
+  await context.route("**/*", (route) => {
+    const req = route.request()
+    let sameOrigin = false
+    try { sameOrigin = new URL(req.url()).origin === pageOrigin } catch { /* data: etc */ }
+    const key = sameOrigin ? readCaptureKey() : ""
+    return key ? route.continue({ headers: { ...req.headers(), "x-stream-capture-key": key } }) : route.continue()
+  })
+}
 const page = await context.newPage()
 page.on("crash", () => { log("page crashed"); void shutdown(6) })
 // DOM-ready + the page's own ready marker (not "networkidle": /stream polls forever, and slow
