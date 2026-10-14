@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { deckScreen, effectiveNow, eventTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
@@ -36,7 +36,9 @@ export function StreamDeck() {
   const [busy, setBusy] = useState<string | null>(null)
   const [armed, setArmed] = useState<string | null>(null)
   const [toast, setToast] = useState<{ tone: "error" | "ok"; text: string } | null>(null)
-  const [preview, setPreview] = useState<Preview>("off")
+  const [preview, setPreview] = useStoredPref<Preview>("deck-preview-mode", "off", ["off", "stream", "slate", "capture"])
+  const [collapsed, setCollapsed] = useStoredPref<"0" | "1">("deck-preview-collapsed", "0", ["0", "1"])
+  const [big, setBig] = useState(false)
   const [relayReady, setRelayReady] = useState<{ slate: boolean; capture: boolean }>({ slate: false, capture: false })
 
   useEffect(() => {
@@ -65,7 +67,7 @@ export function StreamDeck() {
       if (!cancelled && body?.paths) setRelayReady({ slate: body.paths.slate?.ready === true, capture: body.paths.capture?.ready === true })
     }
     void load()
-    const id = window.setInterval(() => void load(), 3000)
+    const id = window.setInterval(() => void load(), 2000)
     return () => {
       cancelled = true
       window.clearInterval(id)
@@ -121,8 +123,10 @@ export function StreamDeck() {
   }
 
   return (
-    <main className="min-h-dvh bg-[#0b0b0f] px-3 pt-[max(12px,env(safe-area-inset-top))] pb-[max(24px,env(safe-area-inset-bottom))] text-white">
-      <header className="mb-3 flex items-center gap-2">
+    <main className="min-h-dvh bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pb-[max(88px,calc(env(safe-area-inset-bottom)+72px))] text-white">
+      {/* Pinned: header + preview stay on screen while the buttons scroll underneath. */}
+      <div data-testid="deck-sticky" className="sticky top-0 z-20 -mx-3 mb-3 border-b border-white/10 bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pt-[max(10px,env(safe-area-inset-top))] pb-2 shadow-[0_8px_16px_rgba(0,0,0,0.6)]">
+      <header className="mb-2 flex items-center gap-2">
         <h1 className="mr-auto text-lg font-black tracking-tight uppercase">Stream Deck</h1>
         <span data-testid="deck-link-state" data-state={link} className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px]">
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]} ${link === "connecting" ? "animate-pulse" : ""}`} />
@@ -130,6 +134,34 @@ export function StreamDeck() {
         </span>
         <Link href="/" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Desk</Link>
       </header>
+        <PreviewBar preview={preview} setPreview={setPreview} collapsed={collapsed === "1"} toggle={() => setCollapsed(collapsed === "1" ? "0" : "1")} />
+        {collapsed === "1" || preview === "off" ? null : (
+          <div
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                setBig(!big)
+              }
+            }}
+            data-testid="deck-preview-box"
+            data-big={big ? "1" : "0"}
+            aria-label={big ? "Make preview smaller" : "Make preview bigger"}
+            onClick={() => setBig(!big)}
+            className={`relative mx-auto mt-2 block aspect-video touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}
+          >
+            {preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
+              <span data-testid="deck-preview-hls"><StreamPlayer inline src={`/api/relay/hls/${preview}/index.m3u8`} /></span>
+            ) : (
+              <span data-testid="deck-preview-placeholder" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono text-[12px] text-white/60">
+                <span className="text-[13px] font-bold text-white/80">No signal on {preview === "slate" ? "Slate" : "Capture"} out</span>
+                Start the {preview === "slate" ? "Slate" : "Browser capture"} channel with the relay on.
+              </span>
+            )}
+          </div>
+        )}
+      </div>
 
       <section aria-label="Current state" data-testid="deck-state" data-screen={screen ?? ""} data-rev={state?.rev ?? ""} className="mb-3 rounded-2xl bg-white/5 p-4">
         <p className="truncate font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">{state?.name ?? "Loading…"}</p>
@@ -171,23 +203,6 @@ export function StreamDeck() {
       </div>
       {live ? <p className="mt-2 font-mono text-[12px] text-white/60">Live: test clocks, pause, reset and restore are locked.</p> : null}
 
-      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Preview</h2>
-      <div role="radiogroup" aria-label="Preview" className="grid grid-cols-4 gap-1 rounded-2xl bg-white/5 p-1">
-        {(["off", "stream", "slate", "capture"] as const).map((name) => (
-          <button key={name} type="button" role="radio" aria-checked={preview === name} data-testid={`deck-preview-${name}`} onClick={() => setPreview(name)} className={`min-h-11 rounded-xl font-mono text-[13px] ${preview === name ? "bg-white text-black" : "text-white/80"}`}>
-            {name === "off" ? "Off" : name === "stream" ? "/stream" : name === "slate" ? "Slate out" : "Capture out"}
-          </button>
-        ))}
-      </div>
-      {preview === "stream" ? <StreamFrame /> : null}
-      {preview === "slate" || preview === "capture" ? (
-        relayReady[preview] ? (
-          <div className="mt-2 aspect-video overflow-hidden rounded-xl bg-black" data-testid="deck-preview-hls"><StreamPlayer src={`/api/relay/hls/${preview}/index.m3u8`} /></div>
-        ) : (
-          <p className="mt-2 rounded-xl bg-white/5 p-3 font-mono text-[12px] text-white/60">Nothing on the relay&apos;s {preview} path yet. Start the {preview === "slate" ? "Slate" : "Browser capture"} channel with the relay on.</p>
-        )
-      ) : null}
-
       {toast ? (
         <p role="status" data-testid="deck-toast" className={`fixed inset-x-3 bottom-[max(16px,env(safe-area-inset-bottom))] rounded-xl px-4 py-3 text-center font-bold shadow-lg ${toast.tone === "error" ? "bg-[#b42318]" : "bg-[#12b76a]"}`}>{toast.text}</p>
       ) : null}
@@ -195,9 +210,53 @@ export function StreamDeck() {
   )
 }
 
+const PREVIEW_LABEL: Record<Preview, string> = { off: "Off", stream: "/stream", slate: "Slate", capture: "Capture" }
+
+function PreviewBar({ preview, setPreview, collapsed, toggle }: { preview: Preview; setPreview: (value: Preview) => void; collapsed: boolean; toggle: () => void }) {
+  return (
+    <div className="flex items-center gap-1">
+      <div role="radiogroup" aria-label="Preview" className="grid flex-1 grid-cols-4 gap-1 rounded-xl bg-white/5 p-0.5">
+        {(["off", "stream", "slate", "capture"] as const).map((name) => (
+          <button key={name} type="button" role="radio" aria-checked={preview === name} data-testid={`deck-preview-${name}`} onClick={() => setPreview(name)} className={`min-h-9 rounded-lg font-mono text-[12px] ${preview === name ? "bg-white text-black" : "text-white/80"}`}>
+            {PREVIEW_LABEL[name]}
+          </button>
+        ))}
+      </div>
+      <button type="button" data-testid="deck-preview-collapse" aria-expanded={!collapsed} disabled={preview === "off"} onClick={toggle} className="min-h-9 min-w-11 rounded-lg bg-white/10 font-mono text-[12px] disabled:opacity-35">
+        {collapsed ? "Show" : "Hide"}
+      </button>
+    </div>
+  )
+}
+
+/** A per-device setting in localStorage, read without a hydration mismatch (server renders the fallback). */
+function useStoredPref<T extends string>(key: string, fallback: T, allowed: readonly T[]): [T, (value: T) => void] {
+  const value = useSyncExternalStore(
+    (notify) => {
+      prefListeners.add(notify)
+      window.addEventListener("storage", notify)
+      return () => {
+        prefListeners.delete(notify)
+        window.removeEventListener("storage", notify)
+      }
+    },
+    () => {
+      const stored = window.localStorage.getItem(key) as T | null
+      return stored && allowed.includes(stored) ? stored : fallback
+    },
+    () => fallback,
+  )
+  const set = (next: T) => {
+    window.localStorage.setItem(key, next)
+    for (const notify of prefListeners) notify()
+  }
+  return [value, set]
+}
+const prefListeners = new Set<() => void>()
+
 /** /stream at 1280×720 scaled to the phone width. Same-origin: the operator session is enough, no view key in the URL. */
 function StreamFrame() {
-  const box = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLSpanElement>(null)
   const [scale, setScale] = useState(0.3)
   useEffect(() => {
     const node = box.current
@@ -207,8 +266,8 @@ function StreamFrame() {
     return () => observer.disconnect()
   }, [])
   return (
-    <div ref={box} className="relative mt-2 aspect-video overflow-hidden rounded-xl bg-black">
+    <span ref={box} className="absolute inset-0 block overflow-hidden">
       <iframe data-testid="deck-preview-frame" title="/stream preview" src="/stream" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1280, height: 720, transform: `scale(${scale})` }} />
-    </div>
+    </span>
   )
 }

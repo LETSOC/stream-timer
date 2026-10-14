@@ -3,7 +3,12 @@
 import { useEffect, useRef } from "react";
 import type Hls from "hls.js";
 
-export function StreamPlayer({ src }: { src: string }) {
+/**
+ * `inline`: for phones. No native controls, and a tap never opens the iOS fullscreen player
+ * (playsInline + webkit-playsinline, pointer events off the <video>, and any fullscreen that
+ * still starts is exited at once). The parent handles taps.
+ */
+export function StreamPlayer({ src, inline = false }: { src: string; inline?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -49,22 +54,37 @@ export function StreamPlayer({ src }: { src: string }) {
 
     void start();
 
+    // iOS can still enter its native player (e.g. double-tap); bounce straight back out.
+    const node = video as HTMLVideoElement & { webkitExitFullscreen?: () => void };
+    const exitNative = () => {
+      try {
+        node.webkitExitFullscreen?.();
+      } catch {
+        /* not in fullscreen */
+      }
+    };
+    if (inline) node.addEventListener("webkitbeginfullscreen", exitNative);
+
     return () => {
       cancelled = true;
+      if (inline) node.removeEventListener("webkitbeginfullscreen", exitNative);
       hls?.destroy();
       video.removeAttribute("src");
       video.load();
     };
-  }, [src]);
+  }, [src, inline]);
 
   return (
     <video
       ref={videoRef}
-      className="absolute inset-0 h-full w-full bg-[#111111] object-contain"
+      className={`absolute inset-0 h-full w-full bg-[#111111] object-contain ${inline ? "pointer-events-none" : ""}`}
       autoPlay
       muted
       playsInline
-      controls
+      controls={!inline}
+      disablePictureInPicture={inline || undefined}
+      disableRemotePlayback={inline || undefined}
+      {...(inline ? { "webkit-playsinline": "true", "x-webkit-airplay": "deny" } : {})}
     />
   );
 }
