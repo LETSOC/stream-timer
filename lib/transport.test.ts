@@ -160,3 +160,21 @@ test("end time across midnight lands on the next day; past-end end card comes ba
   const forced = applyTransport(base({ event: { ...DEFAULT_EVENT, date: "2026-10-14", time: "08:00", endTime: "09:55", timeZone: "Europe/London" } as EventConfig, stage: { ...DEFAULT_STAGE, forceEnd: true } }), { type: "extendEnd", minutes: 10 }, NOW)
   if (forced.ok) assert.equal(deckScreen(deckState({ ...forced.next, rev: 2, testSetAt: null }, NOW), NOW), "end")
 })
+
+test("extendEnd −5/−10: shortens, rolls back across midnight, refuses before start/now", () => {
+  const ev = (time: string, endTime: string) => ({ ...DEFAULT_EVENT, date: "2026-10-14", time, endTime, timeZone: "Europe/London" }) as EventConfig
+  // NOW = 10:00 London. Start 08:00, end 16:15 → 16:05
+  const a = applyTransport(base({ event: ev("08:00", "16:15") }), { type: "extendEnd", minutes: -10 }, NOW)
+  assert.ok(a.ok && a.next.event.endTime === "16:05")
+  // Late show: start 22:00, end 00:05 (next day) → 23:55 same day
+  const b = applyTransport(base({ event: ev("22:00", "00:05") }), { type: "extendEnd", minutes: -10 }, NOW)
+  assert.ok(b.ok && b.next.event.endTime === "23:55")
+  // Would end before the start
+  const c = applyTransport(base({ event: ev("22:00", "22:05") }), { type: "extendEnd", minutes: -10 }, NOW)
+  assert.ok(!c.ok && /before the start/.test(c.error))
+  // Would end in the past (10:03 − 5 = 09:58 < 10:00)
+  const d = applyTransport(base({ event: ev("08:00", "10:03") }), { type: "extendEnd", minutes: -5 }, NOW)
+  assert.ok(!d.ok && /already past/.test(d.error))
+  assert.deepEqual(parseAction({ type: "extendEnd", minutes: -10 }), { type: "extendEnd", minutes: -10 })
+  assert.equal(parseAction({ type: "extendEnd", minutes: -7 }), null)
+})

@@ -103,7 +103,7 @@ export function StreamDeck() {
     const result = await run(action, state.rev)
     setBusy(null)
     if (result.ok && action.type === "extendEnd") {
-      setToast({ tone: "ok", text: `Extended to ${extendTarget(before.endTime, before.endAt, action.minutes).to}`, undo: { type: "setEnd", ...before } })
+      setToast({ tone: "ok", text: `${action.minutes < 0 ? "Shortened" : "Extended"} to ${extendTarget(before.endTime, before.endAt, action.minutes).to}`, undo: { type: "setEnd", ...before } })
       if (navigator.vibrate) navigator.vibrate(30)
     } else if (result.ok && action.type === "setEnd") {
       setToast({ tone: "ok", text: `End back to ${action.endAt || action.endTime}` })
@@ -204,8 +204,9 @@ export function StreamDeck() {
       </div>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
-      <div className="grid grid-cols-2 gap-2">
-        {EXTENDS.map((m) => button(`extend-${m}`, { type: "extendEnd", minutes: m }, `+${m} min`, "outline"))}
+      <div className="flex items-center gap-1.5">
+        {EXTENDS.map((m) => button(`extend-${m < 0 ? `minus${-m}` : m}`, { type: "extendEnd", minutes: m }, m < 0 ? `−${-m}` : `+${m}`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[16px]! tabular-nums"))}
+        <span className="font-mono text-[12px] text-white/60">min</span>
       </div>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Jump · time left</h2>

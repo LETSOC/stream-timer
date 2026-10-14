@@ -41,7 +41,7 @@ export type ProgramSourcesView = {
   last: FailoverEvent | null
 }
 
-export const EXTENDS = [5, 10] as const
+export const EXTENDS = [-10, -5, 5, 10] as const
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
 
 /** HH:MM + minutes, wrapping past midnight (the end instant rolls to the next day, see endInstant). */
@@ -61,6 +61,19 @@ export function endInstant(date: string, start: string, end: string, timeZone: s
   const [y, mo, d] = date.split("-").map(Number)
   const next = new Date(Date.UTC(y, mo - 1, d + 1))
   return wallTimeInZone(next.toISOString().slice(0, 10), end, timeZone)
+}
+
+/**
+ * Shortening must not put the end before the start or before now (the shown clock, incl. test clock);
+ * end times before the start roll to the next day (endInstant), so 00:05 − 10 = 23:55 works.
+ */
+export function endGuard(state: Pick<TransportState, "event" | "testUntil" | "pausedAt">, to: string, now: number): string | null {
+  const end = endInstant(state.event.date, state.event.time, to, state.event.timeZone).getTime()
+  const start = eventTarget(state.event).getTime()
+  if (!Number.isFinite(end)) return "The end time is not valid."
+  if (Number.isFinite(start) && end <= start) return `Can't end at ${to}: that's before the start (${state.event.time}).`
+  if (end <= effectiveNow(state, now)) return `Can't end at ${to}: that's already past.`
+  return null
 }
 
 /** Where extendEnd writes, and the time it lands on. */
@@ -119,7 +132,7 @@ export function parseAction(value: unknown): TransportAction | null {
     case "mode":
       return typeof v.live === "boolean" ? { type: "mode", live: v.live } : null
     case "extendEnd":
-      return EXTENDS.includes(v.minutes as 5 | 10) ? { type: "extendEnd", minutes: v.minutes as number } : null
+      return EXTENDS.includes(v.minutes as (typeof EXTENDS)[number]) ? { type: "extendEnd", minutes: v.minutes as number } : null
     case "setEnd":
       return typeof v.endTime === "string" && HHMM.test(v.endTime) && typeof v.endAt === "string" && (v.endAt === "" || HHMM.test(v.endAt))
         ? { type: "setEnd", endTime: v.endTime, endAt: v.endAt }
@@ -173,6 +186,11 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       const from = state.stage.endAt || state.event.endTime
       if (!HHMM.test(from)) return { ok: false, error: "The end time is not valid." }
       const { field, to } = extendTarget(state.event.endTime, state.stage.endAt, action.minutes)
+      // The end must move by exactly the minutes (else it wrapped past the start onto another day).
+      const at = (t: string) => endInstant(state.event.date, state.event.time, t, state.event.timeZone).getTime()
+      if (Math.abs(at(to) - at(from) - action.minutes * 60_000) > 60_000) return { ok: false, error: action.minutes < 0 ? `Can't end at ${to}: that's before the start (${state.event.time}).` : `Can't extend past ${to}: the end would be more than a day after the start.` }
+      const guard = endGuard(state, to, now)
+      if (guard) return { ok: false, error: guard }
       // forceEnd (operator chose "end") stays; otherwise the new end time decides countdown/LIVE vs end card.
       return field === "endAt" ? next({}, { endAt: to }) : next({ event: { ...state.event, endTime: to } })
     }
