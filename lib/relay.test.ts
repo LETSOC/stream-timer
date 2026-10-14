@@ -142,6 +142,8 @@ test("parseIngestLog: listener address and last refused publish (redacted)", () 
     "2026/10/15 00:14:58 WAR [RTMP] [conn 192.168.1.40:57022] failed to authenticate: authentication failed",
     "2026/10/15 00:15:00 INF [RTMP] [conn 192.168.1.40:57022] closed: failed to authenticate: authentication failed",
     "2026/10/15 00:15:30 INF [RTMP] [conn 192.168.1.40:57030] closed: terminated",
+    "2026/10/15 00:16:10 INF [RTMP] [conn 127.0.0.1:61022] closed: read tcp 127.0.0.1:19350->127.0.0.1:61022: read: connection reset by peer",
+    "2026/10/15 00:16:12 INF [RTMP] [conn 127.0.0.1:61030] closed: EOF",
   ].join("\n")
   const r = parseIngestLog(log)
   assert.equal(r.listen, "0.0.0.0:19350")

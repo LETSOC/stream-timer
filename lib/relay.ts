@@ -475,14 +475,22 @@ export function liveConfigMatches(yml: string, live: { rtmpAddress?: string; aut
  * file and re-trigger the reload when they disagree twice in a row. Called by the program monitor.
  */
 const configCheck = ((globalThis as { __mtxConfigCheck?: { at: number; misses: number; reloads: number } }).__mtxConfigCheck ??= { at: 0, misses: 0, reloads: 0 })
+async function liveGlobalConfig(): Promise<{ rtmpAddress?: string; authInternalUsers?: { user: string }[] } | null> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${relayPorts().api}/v3/config/global/get`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+    return response.ok ? ((await response.json()) as { rtmpAddress?: string; authInternalUsers?: { user: string }[] }) : null
+  } catch {
+    return null
+  }
+}
 export async function verifyMediamtxConfig(now = Date.now()): Promise<void> {
   if (now - configCheck.at < 2000 || !relayRunning()) return
   configCheck.at = now
   try {
-    const response = await fetch(`http://127.0.0.1:${relayPorts().api}/v3/config/global/get`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
-    if (!response.ok) return
+    const live = await liveGlobalConfig()
+    if (!live) return
     const yml = desiredConfig()
-    if (liveConfigMatches(yml, (await response.json()) as { rtmpAddress?: string; authInternalUsers?: { user: string }[] })) { configCheck.misses = 0; return }
+    if (liveConfigMatches(yml, live)) { configCheck.misses = 0; return }
     if (++configCheck.misses < 2) return
     configCheck.misses = 0
     configCheck.reloads += 1
@@ -772,7 +780,10 @@ export function parseIngestLog(log: string): { listen: string | null; lastReject
   for (const line of log.split("\n")) {
     const l = /\[RTMP\] (?:started|listener opened) .*?on ([^\s(]+)/.exec(line)
     if (l) listen = l[1]
-    if (/\[RTMP\] \[conn [^\]]+\]/.test(line) && /(failed to authenticate|authentication failed|already being published|is not configured|closed: .*(error|timeout|denied|refused|EOF|reset))/i.test(line) && !/closed: terminated/.test(line)) {
+    // Only real publish refusals: auth failures, a path that isn't allowed/configured, or a taken path.
+    // A reader/preview hanging up (connection reset, EOF, timeout) is not a refusal.
+    const conn = /\[RTMP\] \[conn ([^\]]+)\]/.exec(line)
+    if (conn && /(failed to authenticate|authentication failed|already being published|is not configured|not allowed|permission denied)/i.test(line) && !/closed: terminated/.test(line)) {
       const at = /^(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2})/.exec(line)?.[1] ?? ""
       lastReject = { at, text: line.replace(/^\S+ \S+ (INF|WAR|ERR) /, "").replace(/\?[^\s'"]*/g, "?…").slice(0, 200) }
     }
@@ -849,7 +860,9 @@ export async function relayStatus(): Promise<RelayStatus> {
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
   const backup: BackupStatus = { lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover }
   const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
-  const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: mtx ? parsedLog.listen : null, lan: settings.lanIngest, lanUrl: lanServerUrl(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
+  // Live bind from MediaMTX itself (the startup log line scrolls out of the tail on a busy relay).
+  const live = api ? await liveGlobalConfig() : null
+  const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: live?.rtmpAddress ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
   return {
     ingest,
     backup,
