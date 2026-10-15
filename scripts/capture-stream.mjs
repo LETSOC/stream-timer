@@ -21,6 +21,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { chromium } from "playwright"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
+import { createJitterMeter, deadBandMs, splice, spliceFrames } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
 const pageUrl = process.env.CAPTURE_URL
@@ -89,6 +90,10 @@ const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, rea
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
+// Per input (Main / Backup): its own player latency, jitter meter and audio format, so a switch never
+// reuses the other input's state (a local Main and a remote Backup behave very differently).
+const inputs = { main: { latencyMs: null, jitter: createJitterMeter(), format: null }, backup: { latencyMs: null, jitter: createJitterMeter(), format: null } }
+let lastSpliceAt = 0
 function programTargetMs() {
   const base = prog.latencyMs === null ? progFallbackMs : prog.latencyMs + screencastLag() - readerLagMs
   return Math.max(100, Math.min(5000, base + sync.trimMs + videoDelayMs()))
@@ -102,8 +107,20 @@ function readUrlFor(source) {
 function spawnReader(source, sink) {
   const url = readUrlFor(source)
   if (!url) return null
-  const reader = spawn(ffmpegBin, ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-rw_timeout", "5000000", "-i", url, "-vn", "-ac", "2", "-ar", String(RATE), "-f", "s16le", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"], env: childEnv })
+  // Always 48k stereo; aresample async=1 = hard compensation only (pad silence / trim for real timestamp
+  // gaps > 100ms), never soft stretching, so a remote publisher's jittery timestamps can't bend pitch.
+  const reader = spawn(ffmpegBin, ["-nostdin", "-hide_banner", "-nostats", "-loglevel", "info", "-fflags", "nobuffer", "-rw_timeout", "5000000", "-i", url, "-vn", "-af", `aresample=${RATE}:async=1:min_hard_comp=0.100:first_pts=0`, "-ac", "2", "-ar", String(RATE), "-f", "s16le", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"], env: childEnv })
   reader.sink = sink
+  let errText = ""
+  reader.stderr.on("data", (d) => {
+    if (errText.length > 8000) return
+    errText += d.toString()
+    const m = /Stream #\d+:\d+[^:]*: Audio: ([^,\s]+)[^,]*, (\d+) Hz, ([^,]+)/.exec(errText)
+    if (m && !inputs[source].format) {
+      inputs[source].format = { codec: m[1], sampleRate: Number(m[2]), channels: m[3].trim() }
+      log(`[audio] ${source === "backup" ? "Backup" : "Main"} input audio: ${m[1]} ${m[2]} Hz ${m[3].trim()}${Number(m[2]) !== RATE ? ` (not ${RATE}: resampled)` : ""}`)
+    }
+  })
   reader.stdout.on("data", (chunk) => {
     const into = reader.sink
     if (!into) return // stopped/replaced: late data must not leak into the on-air queue
@@ -114,6 +131,7 @@ function spawnReader(source, sink) {
     if (into.bytes > max) dropFrom(into, into.bytes - max)
   })
   reader.on("exit", () => {
+    inputs[source].format = null
     if (prog.reader === reader) {
       prog.reader = null
       prog.chunks = []; prog.bytes = 0; prog.primed = false; prog.levelMs = null
@@ -160,8 +178,10 @@ function stopSpare() {
 /** Switch the on-air program audio to `source`: promote the warm reader if it has audio queued. */
 function switchProgramSource(source) {
   const old = prog.reader
+  inputs[prog.source].latencyMs = prog.latencyMs
   prog.source = source
-  prog.latencyMs = null
+  prog.latencyMs = inputs[source].latencyMs // last known for this input (not the other one's), else fallback
+  inputs[source].jitter.reset()
   prog.ramp = 0 // ~30ms fade-in on the new input: no click at the splice
   if (spare.reader && spare.source === source && spare.bytes > 0) {
     const r = spare.reader
@@ -205,8 +225,8 @@ function readProgramFrames(frames) {
 }
 /**
  * `n` stereo frames of program audio delayed by programTargetMs(), or null while it (re)fills.
- * Keeps the queue at the target by consuming faster/slower (linear resample, up to ±16%: as fast
- * as hls.js itself speeds up to catch the live edge, so the sound follows the picture). Big jumps
+ * Keeps the queue at the target with a jitter-aware dead band and short crossfaded splices
+ * (scripts/program-jitter.mjs): no rate changes, so no pitch wobble from a bursty remote input. Big jumps
  * (the player stalled or re-synced): > 300ms too much → drop once; > 300ms too little → hold
  * (silence, the picture is frozen then too) until the queue is back.
  */
@@ -218,36 +238,32 @@ function takeProgram(n) {
     prog.primed = true
     prog.levelMs = (prog.bytes / 4 / RATE) * 1000
   }
+  const now = Date.now()
   const queuedMs = (prog.bytes / 4 / RATE) * 1000
-  prog.levelMs = prog.levelMs === null ? queuedMs : prog.levelMs * 0.85 + queuedMs * 0.15 // ~120ms smoothing (reader bursts)
+  const input = inputs[prog.source]
+  input.jitter.add(queuedMs, now)
+  const spread = input.jitter.spreadMs()
+  // ~2s average: arrival bursts from a remote publisher average out instead of steering the output.
+  const alpha = Math.min(1, n / (2 * RATE))
+  prog.levelMs = prog.levelMs === null ? queuedMs : prog.levelMs * (1 - alpha) + queuedMs * alpha
+  prog.jitterMs = spread
   let err = prog.levelMs - target
-  if (err > 300) { dropProgram(prog.bytes - targetBytes); prog.levelMs = target; prog.jumps += 1; err = 0 }
-  if (err < -300 || prog.holding) {
+  const jump = Math.max(300, spread * 1.5)
+  if (err > jump) { dropProgram(prog.bytes - targetBytes); prog.levelMs = target; prog.jumps += 1; err = 0 }
+  if (err < -jump || prog.holding) {
     // Hold: silence until the queue is back at the target.
     if (!prog.holding) { prog.holding = true; prog.jumps += 1 }
     if (queuedMs >= target) { prog.holding = false; prog.levelMs = queuedMs }
     return Buffer.alloc(n * 4)
   }
-  const rate = Math.abs(err) < 5 ? 0 : Math.max(-0.16, Math.min(0.16, err / 500))
-  if (rate) prog.corrections += 1
-  const consume = Math.max(1, Math.round(n * (1 + rate)))
-  if (prog.bytes < consume * 4 + 4) { prog.primed = false; prog.underruns += 1; return null }
-  // One extra frame for interpolation (left in the queue).
-  const raw = readProgramFrames(consume)
-  if (consume === n) return raw
-  const next = prog.chunks.length ? prog.chunks[0] : null
-  const out = Buffer.allocUnsafe(n * 4)
-  for (let i = 0; i < n; i++) {
-    const pos = (i * consume) / n
-    const k = Math.floor(pos)
-    const f = pos - k
-    for (let c = 0; c < 2; c++) {
-      const a = raw.readInt16LE(k * 4 + c * 2)
-      const b = k + 1 < consume ? raw.readInt16LE((k + 1) * 4 + c * 2) : next && next.length >= 4 ? next.readInt16LE(c * 2) : a
-      out.writeInt16LE(Math.round(a + (b - a) * f), i * 4 + c * 2)
-    }
-  }
-  return out
+  // Outside the dead band: one short crossfaded splice (≤5ms, ≥100ms apart). Pitch never changes.
+  const fade = 240
+  const maxD = Math.floor((n - fade) / 3)
+  const d = maxD > 0 && now - lastSpliceAt >= 100 ? spliceFrames(err, deadBandMs(spread), RATE, Math.min(240, maxD)) : 0
+  if (d) { lastSpliceAt = now; prog.corrections += 1; prog.levelMs -= (d / RATE) * 1000 }
+  const consume = n + d
+  if (prog.bytes < consume * 4) { prog.primed = false; prog.underruns += 1; return null }
+  return splice(readProgramFrames(consume), n, d, fade)
 }
 const GAIN_STEP = 1 / (0.2 * RATE)
 let bedLine = null // delay line (screencast lag + positive trim), created with the feeder
@@ -496,7 +512,7 @@ setInterval(async () => {
   // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
   if (info.source !== prog.source) switchProgramSource(info.source)
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
-  if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.7 + info.lat * 0.3
+  if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.92 + info.lat * 0.08 // ~3s: remote players jitter
   // A failed/empty page read (reload, busy page) is not "left the program": keep the last state.
   const wanted = screen === "" ? prog.wanted : screen === "program"
   if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) { prog.wantedSince = Date.now(); prog.flowed = false; log("[audio] /stream shows the program: audio follows OBS") } }
@@ -578,7 +594,7 @@ if (statsFile) {
       backpressurePct: total ? +((win.skipped / total) * 100).toFixed(1) : 0,
       maxLagMs: Math.round(win.maxLag),
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
-      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps },
+      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, formats: { main: inputs.main.format, backup: inputs.backup.format } },
       sync: { screencastLagMs: sync.lagMs === null ? null : Math.round(sync.lagMs), trimMs: sync.trimMs, videoDelayMs: Math.round(videoDelayMs()), bedDelayMs: Math.round(bedLine.delayMs()), skippedMs: Math.round(skippedMs), test: sync.test },
       statsLine: lastStatsLine,
     }

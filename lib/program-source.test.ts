@@ -40,11 +40,11 @@ test("autoReturn off: stays on backup; manual backup is not auto-returned", () =
 })
 test("parseFailover clamps and defaults", () => {
   assert.deepEqual(parseFailover(null), DEFAULT_FAILOVER)
-  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false })
+  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000 })
 })
 
 test("backup dies while on air and main is fine: back to main (auto on), not with auto off", () => {
-  const settings = { auto: true, stallSec: 3, returnSec: 10, autoReturn: false }
+  const settings = { auto: true, stallSec: 3, returnSec: 10, autoReturn: false, switchBufferMs: 1000 }
   const ok = { ready: true, kbps: 2000, dataAgeMs: 100 }
   const dead = { ready: false, kbps: null, dataAgeMs: null }
   let memory = FRESH_MEMORY

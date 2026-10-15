@@ -133,7 +133,7 @@ function Standby({ small = false }: { small?: boolean }) {
  * the first frame, then crossfades in. "Waiting for OBS" only after a grace or a real disconnect.
  * Sound on by default (OBS Browser Source captures it); `muted` for previews (?mute=1).
  */
-export function ProgramFeed({ ready, active, muted = false, onDisplay, source = "main", path = "program", onAir = true, holdFrame = 0 }: { ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
+export function ProgramFeed({ ready, active, muted = false, onDisplay, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false }: { /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
@@ -165,10 +165,11 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   }, [shown, muted])
 
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
+  const visual: ProgramDisplay = incoming ? "under" : shown
   return (
-    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={shown} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} aria-hidden={shown === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${shown === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
+    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
       <video ref={videoRef} className="h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture />
-      {shown === "standby" ? <Standby /> : null}
+      {visual === "standby" ? <Standby /> : null}
     </div>
   )
 }

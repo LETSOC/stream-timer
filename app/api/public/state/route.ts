@@ -2,7 +2,7 @@ import { connection } from "next/server"
 import { VIEW_COOKIE } from "@/lib/auth"
 import { publicState, readServerState } from "@/lib/event-server"
 import { canView, viewKeyMatches } from "@/lib/view-key"
-import { programReady } from "@/lib/relay"
+import { programReady, readSettings } from "@/lib/relay"
 
 /**
  * Read-only state for OBS pages (/stream, /end). Only what they render:
@@ -20,5 +20,5 @@ export async function GET(request: Request) {
   const state = readServerState()
   const [mainReady, backupReady] = await Promise.all([programReady("main").catch(() => false), programReady("backup").catch(() => false)])
   const programReadyNow = state.stage.programSource === "backup" ? backupReady : mainReady
-  return Response.json({ ...publicState(state), programReady: programReadyNow, mainReady, backupReady, build: process.env.APP_BUILD ?? null }, { headers })
+  return Response.json({ ...publicState(state), programReady: programReadyNow, mainReady, backupReady, switchBufferMs: readSettings().failover.switchBufferMs, build: process.env.APP_BUILD ?? null }, { headers })
 }

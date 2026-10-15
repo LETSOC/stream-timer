@@ -42,3 +42,20 @@ export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
 export function keepLoaded(ready: boolean, notReadySince: number | null, now: number): boolean {
   return ready || (notReadySince !== null && now - notReadySince <= NOT_READY_MS)
 }
+
+/** Default Main/Backup switch buffer: the incoming input must have played this long before it goes on air. */
+export const SWITCH_BUFFER_MS = 1000
+/**
+ * Pure: may a Main/Backup hand-over complete now? The input on air stays on (never "Waiting for OBS"
+ * mid-switch) until the incoming one has played `bufferMs` continuously; if the one on air is already
+ * gone, take the incoming one as soon as it has a frame (or after 4s, then its own standby rules).
+ * 30s cap so a never-arriving input can't pin the old one forever.
+ */
+export function handoverDone(input: { screenIsProgram: boolean; pendingSince: number; now: number; incomingVideoSince: number | null; airDisplay: ProgramDisplay; bufferMs: number }): boolean {
+  const { screenIsProgram, pendingSince, now, incomingVideoSince, airDisplay, bufferMs } = input
+  if (!screenIsProgram) return true
+  if (incomingVideoSince !== null && now - incomingVideoSince >= bufferMs) return true
+  const airGone = airDisplay !== "video"
+  if (airGone && (incomingVideoSince !== null || now - pendingSince > 4000)) return true
+  return now - pendingSince > 30_000
+}

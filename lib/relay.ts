@@ -824,7 +824,7 @@ export function parseIngestLog(log: string): { listen: string | null; lastReject
   return { listen, lastReject }
 }
 
-export type BackupStatus = { lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings }
+export type BackupStatus = { lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings; audioTrack: ProgramStatus["audioTrack"] }
 export type RelayStatus = { ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 /** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
@@ -891,7 +891,8 @@ export async function relayStatus(): Promise<RelayStatus> {
   await refreshProgramSources()
   let pullFrom: string | null = null
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
-  const backup: BackupStatus = { lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover }
+  const bk = api?.get(BACKUP_PATH)
+  const backup: BackupStatus = { lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover, audioTrack: bk?.ready ? programAudioTrack(bk) : null }
   const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
   // Live bind from MediaMTX itself (the startup log line scrolls out of the tail on a busy relay).
   const live = api ? await liveGlobalConfig() : null

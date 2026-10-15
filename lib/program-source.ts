@@ -16,8 +16,10 @@ export type FailoverSettings = {
   returnSec: number
   /** false = stay on Backup until the operator switches back. */
   autoReturn: boolean
+  /** Main↔Backup switch buffer, ms: the incoming input plays this long (hidden) before it goes on air. */
+  switchBufferMs: number
 }
-export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true }
+export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000 }
 
 export function parseFailover(raw: unknown): FailoverSettings {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
@@ -27,6 +29,7 @@ export function parseFailover(raw: unknown): FailoverSettings {
     stallSec: num(r.stallSec, 1, 60, DEFAULT_FAILOVER.stallSec),
     returnSec: num(r.returnSec, 2, 600, DEFAULT_FAILOVER.returnSec),
     autoReturn: r.autoReturn !== false,
+    switchBufferMs: num(r.switchBufferMs, 0, 5000, DEFAULT_FAILOVER.switchBufferMs),
   }
 }
 

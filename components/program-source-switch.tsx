@@ -47,6 +47,7 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
   const f = view?.failover
   const [stall, setStall] = useState<string | null>(null)
   const [ret, setRet] = useState<string | null>(null)
+  const [buf, setBuf] = useState<string | null>(null)
   const muted = dark ? "text-white/60" : "text-black/60"
   const tones = { ok: dark ? "text-[#6ce9a6]" : "text-[#067647]", warn: "text-[#f79009]", off: muted }
   return (
@@ -78,6 +79,9 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
             <input type="checkbox" data-testid="failover-return" checked={f.autoReturn} disabled={disabled} onChange={(e) => onFailover({ autoReturn: e.target.checked })} />
             return to Main after
             <input type="number" min={2} max={600} data-testid="failover-return-sec" disabled={disabled || !f.autoReturn} value={ret ?? String(f.returnSec)} onChange={(e) => setRet(e.target.value)} onBlur={() => { if (ret !== null && Number(ret) > 0) onFailover({ returnSec: Number(ret) }); setRet(null) }} className={`w-14 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s healthy
+          </label>
+          <label className="flex items-center gap-1">switch buffer
+            <input type="number" min={0} max={5} step={0.5} data-testid="failover-switch-buffer" disabled={disabled} value={buf ?? String(f.switchBufferMs / 1000)} onChange={(e) => setBuf(e.target.value)} onBlur={() => { if (buf !== null && Number(buf) >= 0) onFailover({ switchBufferMs: Math.round(Number(buf) * 1000) }); setBuf(null) }} className={`w-12 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s
           </label>
         </div>
       ) : null}
