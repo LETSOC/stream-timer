@@ -18,8 +18,14 @@ export type FailoverSettings = {
   autoReturn: boolean
   /** Main↔Backup switch buffer, ms: the incoming input plays this long (hidden) before it goes on air. */
   switchBufferMs: number
+  /** Return to Main after an automatic failover: "auto" (after returnSec healthy) or "ask" (prompt, never by itself). */
+  returnMode: "auto" | "ask"
+  /** Flapping guard: more than flapCount Main failures within flapWindowSec → hold Backup until Main is stable flapStableSec. */
+  flapCount: number
+  flapWindowSec: number
+  flapStableSec: number
 }
-export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000 }
+export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60 }
 
 export function parseFailover(raw: unknown): FailoverSettings {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
@@ -30,6 +36,10 @@ export function parseFailover(raw: unknown): FailoverSettings {
     returnSec: num(r.returnSec, 2, 600, DEFAULT_FAILOVER.returnSec),
     autoReturn: r.autoReturn !== false,
     switchBufferMs: num(r.switchBufferMs, 0, 5000, DEFAULT_FAILOVER.switchBufferMs),
+    returnMode: r.returnMode === "ask" ? "ask" : "auto",
+    flapCount: num(r.flapCount, 1, 20, DEFAULT_FAILOVER.flapCount),
+    flapWindowSec: num(r.flapWindowSec, 30, 3600, DEFAULT_FAILOVER.flapWindowSec),
+    flapStableSec: num(r.flapStableSec, 5, 1800, DEFAULT_FAILOVER.flapStableSec),
   }
 }
 
@@ -43,17 +53,26 @@ export function healthy(h: SourceHealth, stallMs: number): boolean {
 }
 
 /** What the monitor remembers between ticks. */
-export type FailoverMemory = { mainBadSince: number | null; mainGoodSince: number | null; backupBadSince?: number | null; /** we switched to backup by ourselves (auto-return only undoes our own switch) */ failedOver: boolean }
-export const FRESH_MEMORY: FailoverMemory = { mainBadSince: null, mainGoodSince: null, failedOver: false }
+export type FailoverMemory = { mainBadSince: number | null; mainGoodSince: number | null; backupBadSince?: number | null; /** we switched to backup by ourselves (auto-return only undoes our own switch) */ failedOver: boolean
+  /** times Main failed (confirmed stall), for the flapping guard; mainFailCounted = this bad spell already counted */
+  mainFails?: number[]; mainFailCounted?: boolean; flapNoted?: boolean; /** Main has been healthy at some point (a never-started Main isn't a failure) */ mainSeenOk?: boolean }
+export const FRESH_MEMORY: FailoverMemory = { mainBadSince: null, mainGoodSince: null, failedOver: false, mainFails: [], mainFailCounted: false, flapNoted: false }
 
-export type FailoverStep = { memory: FailoverMemory; switchTo: ProgramSource | null; reason: string | null }
+/** Return-to-Main status after an automatic failover (shown on desk + deck). */
+export type ReturnStatus = { flapping: boolean; holdText: string | null; askReturn: boolean }
+export type FailoverStep = { memory: FailoverMemory; switchTo: ProgramSource | null; reason: string | null; /** log-only event (no switch), e.g. flapping detected */ note?: string | null; status?: ReturnStatus }
+
+/** More than flapCount Main failures inside the window. */
+export function isFlapping(fails: number[], settings: FailoverSettings, now: number): boolean {
+  return fails.filter((t) => now - t <= settings.flapWindowSec * 1000).length > settings.flapCount
+}
 
 /**
  * One tick. Main is "bad" while not healthy; after stallSec bad (and Backup healthy) → Backup.
  * After an automatic failover, Main healthy for returnSec → back to Main (if autoReturn).
  * An operator's manual choice is never overridden except by a new stall of Main while on Main.
  */
-export function failoverStep(input: { active: ProgramSource; main: SourceHealth; backup: SourceHealth; settings: FailoverSettings; memory: FailoverMemory; now: number }): FailoverStep {
+export function failoverStep(input: { active: ProgramSource; main: SourceHealth; backup: SourceHealth; settings: FailoverSettings; memory: FailoverMemory; now: number; /** Main passes the READY checks (Ask-me prompt waits for it); default true */ mainReady?: boolean }): FailoverStep {
   const { active, main, backup, settings, now } = input
   const tickMs = 1000 // health granularity: data age under a second counts as "flowing"
   const mainOk = healthy(main, Math.max(tickMs, 1500))
@@ -63,8 +82,29 @@ export function failoverStep(input: { active: ProgramSource; main: SourceHealth;
     mainGoodSince: mainOk ? (input.memory.mainGoodSince ?? now) : null,
     failedOver: active === "backup" ? input.memory.failedOver : false,
     backupBadSince: backupOk ? null : (input.memory.backupBadSince ?? now),
+    mainFails: (input.memory.mainFails ?? []).filter((t) => now - t <= settings.flapWindowSec * 1000),
+    mainFailCounted: mainOk ? false : (input.memory.mainFailCounted ?? false),
+    flapNoted: input.memory.flapNoted ?? false,
+    mainSeenOk: mainOk || (input.memory.mainSeenOk ?? false),
   }
-  if (!settings.auto) return { memory: { ...memory, failedOver: false }, switchTo: null, reason: null }
+  // A confirmed Main stall counts once per bad spell (wherever we are on air).
+  if (!mainOk && memory.mainSeenOk && !memory.mainFailCounted && memory.mainBadSince !== null && now - memory.mainBadSince >= settings.stallSec * 1000) {
+    memory.mainFails = [...(memory.mainFails ?? []), now]
+    memory.mainFailCounted = true
+  }
+  const flapping = isFlapping(memory.mainFails ?? [], settings, now)
+  let note: string | null = null
+  if (flapping && !memory.flapNoted) { memory.flapNoted = true; note = `Main flapping (${memory.mainFails?.length} failures in ${Math.round(settings.flapWindowSec / 60)} min) · holding Backup` }
+  if (!flapping) memory.flapNoted = false
+  const returnWindow = (flapping ? settings.flapStableSec : settings.returnSec) * 1000
+  const stableFor = memory.mainGoodSince === null ? 0 : now - memory.mainGoodSince
+  const holding = settings.auto && active === "backup" && memory.failedOver
+  const status: ReturnStatus = {
+    flapping,
+    holdText: holding && settings.returnMode === "auto" && flapping ? `Main flapping · holding Backup (returns after ${settings.flapStableSec}s stable${mainOk ? `, ${Math.floor(stableFor / 1000)}s so far` : ""})` : null,
+    askReturn: holding && settings.returnMode === "ask" && input.mainReady !== false && mainOk,
+  }
+  if (!settings.auto) return { memory: { ...memory, failedOver: false }, switchTo: null, reason: null, note: null, status: { flapping, holdText: null, askReturn: false } }
   if (active === "main" && memory.mainBadSince !== null && now - memory.mainBadSince >= settings.stallSec * 1000 && backupOk) {
     return { memory: { ...memory, failedOver: true }, switchTo: "backup", reason: `Main stalled ${Math.round((now - memory.mainBadSince) / 1000)}s` }
   }
@@ -72,10 +112,10 @@ export function failoverStep(input: { active: ProgramSource; main: SourceHealth;
   if (active === "backup" && memory.backupBadSince != null && now - memory.backupBadSince >= settings.stallSec * 1000 && mainOk) {
     return { memory: { ...memory, failedOver: false }, switchTo: "main", reason: `Backup stalled ${Math.round((now - memory.backupBadSince) / 1000)}s` }
   }
-  if (active === "backup" && memory.failedOver && settings.autoReturn && memory.mainGoodSince !== null && now - memory.mainGoodSince >= settings.returnSec * 1000) {
-    return { memory: { ...memory, failedOver: false }, switchTo: "main", reason: `Main healthy ${settings.returnSec}s` }
+  if (active === "backup" && memory.failedOver && settings.autoReturn && settings.returnMode === "auto" && memory.mainGoodSince !== null && stableFor >= returnWindow) {
+    return { memory: { ...memory, failedOver: false }, switchTo: "main", reason: flapping ? `Main stable ${settings.flapStableSec}s after flapping` : `Main healthy ${settings.returnSec}s`, note, status: { ...status, holdText: null } }
   }
-  return { memory, switchTo: null, reason: null }
+  return { memory, switchTo: null, reason: null, note, status }
 }
 
 export type FailoverEvent = { at: number; from: ProgramSource; to: ProgramSource; reason: string; auto: boolean }

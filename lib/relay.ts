@@ -272,7 +272,7 @@ export function relayPublishUrl(name: RelayPath): string {
   const c = credentials()
   return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(c.publishUser)}&pass=${encodeURIComponent(c.publishPass)}`
 }
-function relayReadUrl(name: RelayPath | typeof PROGRAM_PATH | typeof BACKUP_PATH): string {
+export function relayReadUrl(name: RelayPath | typeof PROGRAM_PATH | typeof BACKUP_PATH): string {
   const c = credentials()
   return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(c.readUser)}&pass=${encodeURIComponent(c.readPass)}`
 }

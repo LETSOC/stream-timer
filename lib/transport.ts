@@ -5,7 +5,8 @@
  */
 import { wallTimeInZone } from "@/lib/countdown"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
-import type { FailoverEvent, FailoverSettings, SourceHealth } from "@/lib/program-source"
+import type { FailoverEvent, FailoverSettings, ReturnStatus, SourceHealth } from "@/lib/program-source"
+import type { InputReadout } from "@/lib/input-state"
 import { stageScreen, testClockStale, type StageOptions } from "@/lib/stage"
 
 export const JUMPS = [
@@ -35,8 +36,9 @@ export type TransportAction =
   | { type: "programSource"; source: "main" | "backup" }
 
 export type ProgramSourcesView = {
-  main: SourceHealth
-  backup: SourceHealth & { pull: boolean }
+  main: SourceHealth & Partial<InputReadout>
+  backup: SourceHealth & Partial<InputReadout> & { pull: boolean }
+  returnStatus?: ReturnStatus | null
   failover: FailoverSettings
   last: FailoverEvent | null
   /** newest first, up to 20, persisted across restarts */

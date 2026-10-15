@@ -40,11 +40,11 @@ test("autoReturn off: stays on backup; manual backup is not auto-returned", () =
 })
 test("parseFailover clamps and defaults", () => {
   assert.deepEqual(parseFailover(null), DEFAULT_FAILOVER)
-  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000 })
+  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60 })
 })
 
 test("backup dies while on air and main is fine: back to main (auto on), not with auto off", () => {
-  const settings = { auto: true, stallSec: 3, returnSec: 10, autoReturn: false, switchBufferMs: 1000 }
+  const settings = { auto: true, stallSec: 3, returnSec: 10, autoReturn: false, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60 } as const
   const ok = { ready: true, kbps: 2000, dataAgeMs: 100 }
   const dead = { ready: false, kbps: null, dataAgeMs: null }
   let memory = FRESH_MEMORY
@@ -67,4 +67,61 @@ test("manual switch refuses an input with no signal, allows leaving a dead one",
   assert.equal(manualSwitchError({ main: dead, backup: ok }, "main", "backup"), null)
   assert.equal(manualSwitchError({ main: dead, backup: dead }, "backup", "backup"), null)
   assert.equal(manualSwitchError(null, "main", "backup"), null)
+})
+
+test("flapping guard: >3 Main failures in 5 min holds Backup until Main is stable 60s", () => {
+  const s = { ...DEFAULT_FAILOVER, auto: true }
+  const bad: SourceHealth = { ready: false, kbps: null, dataAgeMs: null }
+  let mem: FailoverMemory = FRESH_MEMORY
+  let active: ProgramSource = "main"
+  let t = 0
+  const run = (main: SourceHealth, secs: number) => {
+    let last
+    for (let i = 0; i < secs * 2; i++) {
+      t += 500
+      last = failoverStep({ active, main, backup: good, settings: s, memory: mem, now: t })
+      mem = last.memory
+      if (last.switchTo) active = last.switchTo
+    }
+    return last!
+  }
+  run(good, 2)
+  for (let k = 0; k < 3; k++) { run(bad, 4); assert.equal(active, "backup"); run(good, 11); assert.equal(active, "main", `returned after fail ${k + 1}`) }
+  const step = run(bad, 4) // 4th failure → flapping
+  assert.equal(active, "backup"); assert.equal(mem.mainFails?.length, 4); assert.equal(step.status?.flapping, true)
+  const held = run(good, 30)
+  assert.equal(active, "backup", "held on Backup while flapping")
+  assert.match(held.status?.holdText ?? "", /Main flapping · holding Backup \(returns after 60s stable/)
+  run(good, 31)
+  assert.equal(active, "main", "returns after 60s stable")
+})
+
+test("flap note logged once, failures counted once per bad spell", () => {
+  const s = { ...DEFAULT_FAILOVER, auto: true, flapCount: 1 }
+  const bad: SourceHealth = { ready: false, kbps: null, dataAgeMs: null }
+  let mem: FailoverMemory = FRESH_MEMORY, t = 0, notes = 0
+  const tick = (main: SourceHealth, active: ProgramSource) => { t += 500; const r = failoverStep({ active, main, backup: good, settings: s, memory: mem, now: t }); mem = r.memory; if (r.note) notes++; return r }
+  tick(good, "backup")
+  for (let i = 0; i < 20; i++) tick(bad, "backup")
+  assert.equal(mem.mainFails?.length, 1)
+  for (let i = 0; i < 4; i++) tick(good, "backup")
+  for (let i = 0; i < 20; i++) tick(bad, "backup")
+  assert.equal(mem.mainFails?.length, 2); assert.equal(notes, 1)
+})
+
+test("Ask me: never auto-returns, offers Return now once Main is ready", () => {
+  const s = { ...DEFAULT_FAILOVER, auto: true, returnMode: "ask" as const }
+  let mem: FailoverMemory = { ...FRESH_MEMORY, failedOver: true }, t = 0, r
+  for (let i = 0; i < 200; i++) { t += 500; r = failoverStep({ active: "backup", main: good, backup: good, settings: s, memory: mem, now: t, mainReady: i > 10 }); mem = r.memory; assert.equal(r.switchTo, null) }
+  assert.equal(r!.status?.askReturn, true)
+  r = failoverStep({ active: "backup", main: good, backup: good, settings: s, memory: mem, now: t + 500, mainReady: false })
+  assert.equal(r.status?.askReturn, false)
+  assert.equal(parseFailover({ returnMode: "ask" }).returnMode, "ask"); assert.equal(parseFailover({ returnMode: "x" }).returnMode, "auto")
+})
+
+test("a Main that never started isn't counted as a failure", () => {
+  const s = { ...DEFAULT_FAILOVER, auto: true }
+  let mem: FailoverMemory = FRESH_MEMORY, t = 0
+  for (let i = 0; i < 20; i++) { t += 500; mem = failoverStep({ active: "main", main: { ready: false, kbps: null, dataAgeMs: null }, backup: good, settings: s, memory: mem, now: t }).memory }
+  assert.equal(mem.mainFails?.length, 0)
 })
