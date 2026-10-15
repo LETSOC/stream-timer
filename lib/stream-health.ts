@@ -124,6 +124,8 @@ export type CaptureSourceStats = {
   at: number
   /** JPEG frames Chrome pushed per second (only on repaint; 0 is normal on a static LIVE/end/hold screen). */
   screencastFps: number
+  /** hash of the capture code it started with (scripts/code-version.mjs) */
+  codeVersion?: string
   /** ms since /stream's window.__hb last advanced (page JS alive). Missing on older capture processes. */
   heartbeatAgeMs?: number | null
   /** Frames written into ffmpeg per second (should equal the target fps). */
@@ -144,10 +146,10 @@ export type CaptureSourceStats = {
   sync?: { screencastLagMs: number | null; trimMs: number; videoDelayMs: number; bedDelayMs: number; skippedMs: number; test: boolean }
 }
 
-export type SourceHealth = HealthStats & { capture: CaptureSourceStats | null }
+export type SourceHealth = HealthStats & { capture: CaptureSourceStats | null; codeStale?: boolean }
 
 /** Adds the capture-side flags on top of the encoder's own stats. */
-export function captureSourceHealth(encoder: HealthStats, capture: CaptureSourceStats | null, now = Date.now()): SourceHealth {
+export function captureSourceHealth(encoder: HealthStats, capture: CaptureSourceStats | null, now = Date.now(), codeVersion?: string): SourceHealth {
   if (!capture) return { ...encoder, capture: null }
   const warnings = [...encoder.warnings]
   let level: Level = encoder.level === "idle" ? "ok" : encoder.level
@@ -157,6 +159,8 @@ export function captureSourceHealth(encoder: HealthStats, capture: CaptureSource
     else if (level === "ok") level = "warn"
   }
   if (now - capture.at > 8000) flag(true, "capture stats stale")
+  const stale = Boolean(codeVersion && capture.codeVersion !== codeVersion)
+  if (stale) flag(false, "capture running old code: restart Browser capture")
   if (capture.backpressurePct > 2) flag(capture.backpressurePct > 10, `encoder backlog: ${capture.backpressurePct.toFixed(0)}% frames skipped`)
   if (capture.writtenFps < capture.fps - 2) flag(capture.writtenFps < capture.fps * 0.8, `writer ${capture.writtenFps.toFixed(1)} fps`)
   if (capture.maxLagMs > 250) flag(capture.maxLagMs > 1000, `timer lag ${Math.round(capture.maxLagMs)}ms (CPU)`)
@@ -164,7 +168,7 @@ export function captureSourceHealth(encoder: HealthStats, capture: CaptureSource
   if (typeof capture.heartbeatAgeMs === "number") {
     if (capture.heartbeatAgeMs > 8000) flag(capture.heartbeatAgeMs > 15000, `page heartbeat ${Math.round(capture.heartbeatAgeMs / 1000)}s old`)
   } else if (capture.screencastFps < 0.3) flag(false, `Chrome repaint ${capture.screencastFps.toFixed(1)}/s`)
-  return { ...encoder, level, warnings, capture }
+  return { ...encoder, level, warnings, capture, codeStale: stale }
 }
 
 export type ForwardHealthInput = { name: string; health: HealthStats }

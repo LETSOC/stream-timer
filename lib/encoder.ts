@@ -1,3 +1,4 @@
+import { captureCodeVersion } from "../scripts/code-version.mjs"
 import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -415,7 +416,7 @@ function channelHealth(ch: RtmpChannel, running: boolean, meta: RtmpMeta | null)
         return { fps: enc.fps, kbps: enc.kbps, speed: enc.speed, dup: enc.dup, drop: enc.drop, bytes: enc.bytes, ageMs: Math.round(Date.now() - stats!.at), level, warnings }
       })()
     : { ...EMPTY_HEALTH, ageMs: Date.now() - stats.at }
-  return captureSourceHealth(encoder, stats)
+  return captureSourceHealth(encoder, stats, Date.now(), captureCodeVersionCached())
 }
 
 function channelAudio(ch: RtmpChannel, meta: RtmpMeta | null): NonNullable<RtmpChannelStatus["audio"]> {
@@ -1029,4 +1030,12 @@ async function stopEncoderUnlocked(): Promise<StopResult> {
     /* already gone */
   }
   return result;
+}
+
+let codeVersionCache: { at: number; value: string } | null = null
+/** Hash of the capture code on disk now (5s cache); compared with what the running capture reports. */
+function captureCodeVersionCached(): string {
+  if (codeVersionCache && Date.now() - codeVersionCache.at < 5000) return codeVersionCache.value
+  codeVersionCache = { at: Date.now(), value: captureCodeVersion(path.join(process.cwd(), "scripts")) }
+  return codeVersionCache.value
 }

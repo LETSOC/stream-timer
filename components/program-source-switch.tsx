@@ -86,6 +86,16 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
         </div>
       ) : null}
       {view?.last ? <p data-testid="program-source-last" className={`font-mono text-[11px] ${muted}`}>Last: {failoverText(view.last)} · {new Date(view.last.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</p> : null}
+      {view?.history && view.history.length > 1 ? (
+        <details data-testid="program-source-history" className={`font-mono text-[11px] ${muted}`}>
+          <summary className="cursor-pointer">Switch history ({view.history.length})</summary>
+          <ol className="mt-1 space-y-0.5">
+            {view.history.map((e) => (
+              <li key={`${e.at}-${e.to}`} data-testid="program-source-history-item">{new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · {failoverText(e)}</li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
     </div>
   )
 }

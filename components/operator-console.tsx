@@ -164,8 +164,9 @@ export function OperatorConsole() {
   const setToast = useCallback((text: string | null) => (text ? showToast("error", text) : dismissToast()), [showToast, dismissToast])
   useEffect(() => {
     let stop = false
-    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSources?: ProgramSourcesView | null } | null) => {
+    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } | null) => {
       if (!stop && body) setSources(body.programSources ?? null)
+      if (!stop && (body?.programSource === "main" || body?.programSource === "backup")) setProgramSource(body.programSource)
     }).catch(() => undefined)
     void poll()
     const id = window.setInterval(poll, 1000)
@@ -2230,6 +2231,7 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
     <div data-testid={`rtmp-health-${channel}`} data-level={health.level} className="space-y-0.5 rounded-lg bg-black/[0.03] px-2 py-1">
       <p className="font-mono text-[11px] text-black/60">Encoder {cap ? (cap.encoder === "h264_videotoolbox" ? "VideoToolbox" : "libx264") : "libx264"}</p>
       <HealthChip health={health} />
+      {"codeStale" in health && health.codeStale ? <p data-testid={`rtmp-code-stale-${channel}`} className="rounded bg-[#fdb022]/25 px-1.5 py-0.5 font-mono text-[11px] font-bold text-[#7a4b00]">Capture is running old code (updated since it started). Stop and start Browser capture to use it.</p> : null}
       {cap ? (
         <p className="font-mono text-[11px] text-black/60" title="Chrome only sends a frame when /stream repaints (≥1/s for the countdown); the writer repeats the last one to keep a constant frame rate. Backlog = frames skipped because the encoder fell behind.">
           Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms{typeof cap.heartbeatAgeMs === "number" ? (cap.heartbeatAgeMs < 6000 ? " · page alive" : ` · page stalled ${Math.round(cap.heartbeatAgeMs / 1000)}s`) : ""}

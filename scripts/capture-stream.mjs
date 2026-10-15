@@ -21,6 +21,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { chromium } from "playwright"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
+import { captureCodeVersion } from "./code-version.mjs"
 import { createJitterMeter, deadBandMs, splice, spliceFrames } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
@@ -81,6 +82,7 @@ const videoArgs = encoder === "h264_videotoolbox"
 //    ±2% sample drop/repeat so it follows the player without clicks;
 //  - the desk's A/V offset trim (+ = audio later, - = audio earlier: delays the video instead).
 const RATE = 48000
+const CODE_VERSION = captureCodeVersion(path.dirname(new URL(import.meta.url).pathname))
 const programFile = process.env.PROGRAM_READ_FILE || ""
 /** Fallback program delay while /stream hasn't reported its player latency yet. */
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
@@ -587,6 +589,7 @@ if (statsFile) {
     const total = win.written + win.skipped
     const stats = {
       at: now,
+      codeVersion: CODE_VERSION,
       screencastFps: +(win.screencast / secs).toFixed(2),
       heartbeatAgeMs: Date.now() - lastHbAt,
       writtenFps: +(win.written / secs).toFixed(2),
