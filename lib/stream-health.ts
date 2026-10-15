@@ -141,7 +141,7 @@ export type CaptureSourceStats = {
   bitrateK: number
   size: string
   /** OBS program audio mixed into the capture (screen=program). peakDb: loudest program sample this window (dBFS), null = silence/none. */
-  programAudio?: { on: boolean; reading: boolean; mixing?: boolean; peakDb?: number | null; bufferedMs: number; underruns: number; delayMs: number; queuedMs?: number | null; playerLatencyMs?: number | null; corrections?: number; jumps?: number; jitterMs?: number | null; source?: "main" | "backup"; formats?: Partial<Record<"main" | "backup", { codec: string; sampleRate: number; channels: string } | null>> }
+  programAudio?: { on: boolean; reading: boolean; mixing?: boolean; peakDb?: number | null; bufferedMs: number; underruns: number; delayMs: number; queuedMs?: number | null; playerLatencyMs?: number | null; corrections?: number; jumps?: number; jitterMs?: number | null; source?: "main" | "backup"; via?: "page" | "reader" | null; arrivalExcessMs?: Partial<Record<"main" | "backup", number>>; offsetMs?: Partial<Record<"main" | "backup", number>>; formats?: Partial<Record<"main" | "backup", { codec: string; sampleRate: number; channels: string } | null>> }
   /** A/V sync compensation now applied (ms). */
   sync?: { screencastLagMs: number | null; trimMs: number; videoDelayMs: number; bedDelayMs: number; skippedMs: number; test: boolean }
 }

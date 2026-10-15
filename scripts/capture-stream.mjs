@@ -94,11 +94,30 @@ const sync = { lagMs: null, trimMs: 0, test: false }
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
 // Per input (Main / Backup): its own player latency, jitter meter and audio format, so a switch never
 // reuses the other input's state (a local Main and a remote Backup behave very differently).
-const inputs = { main: { latencyMs: null, jitter: createJitterMeter(), format: null }, backup: { latencyMs: null, jitter: createJitterMeter(), format: null } }
+const freshArrival = () => ({ cur: Infinity, prev: Infinity, rotAt: 0, excessMs: 0, n: 0 })
+const inputs = { main: { latencyMs: null, jitter: createJitterMeter(), format: null, arrival: freshArrival(), offsetMs: 0 }, backup: { latencyMs: null, jitter: createJitterMeter(), format: null, arrival: freshArrival(), offsetMs: 0 } }
+/**
+ * Media-time correction (auto-calibration per input). The player's latency is measured in media time
+ * (now − PDT of the frame on screen), but the audio queue counts from when audio *arrived*. A remote
+ * publisher's audio arrives late and in bursts (network hold), so FIFO-delaying it by the player latency
+ * made it late by the mean hold. Each audio frame's (arrival − media pts) is tracked; its 20s minimum is
+ * the on-time baseline and the smoothed excess above it is subtracted from the queue target.
+ */
+function noteArrival(source, ptsSec, now = Date.now()) {
+  const a = inputs[source].arrival
+  const off = now - ptsSec * 1000
+  if (now - a.rotAt > 10000) { a.prev = a.cur; a.cur = Infinity; a.rotAt = now } // baseline = min over the last 10-20s
+  a.cur = Math.min(a.cur, off)
+  const base = Math.min(a.cur, a.prev)
+  const excess = Math.max(0, off - base)
+  a.excessMs = a.n === 0 ? excess : a.excessMs * 0.98 + excess * 0.02 // ~1s at ~47 AAC frames/s
+  a.n += 1
+}
 let lastSpliceAt = 0
 function programTargetMs() {
-  const base = prog.latencyMs === null ? progFallbackMs : prog.latencyMs + screencastLag() - readerLagMs
-  return Math.max(100, Math.min(5000, base + sync.trimMs + videoDelayMs()))
+  const input = inputs[prog.source]
+  const base = prog.latencyMs === null ? progFallbackMs : prog.latencyMs + screencastLag() - readerLagMs - input.arrival.excessMs
+  return Math.max(100, Math.min(5000, base + sync.trimMs + input.offsetMs + videoDelayMs()))
 }
 function readUrlFor(source) {
   // Main = program-read.url, Backup = program-backup-read.url next to it (both 0600, written by lib/relay).
@@ -111,10 +130,18 @@ function spawnReader(source, sink) {
   if (!url) return null
   // Always 48k stereo; aresample async=1 = hard compensation only (pad silence / trim for real timestamp
   // gaps > 100ms), never soft stretching, so a remote publisher's jittery timestamps can't bend pitch.
-  const reader = spawn(ffmpegBin, ["-nostdin", "-hide_banner", "-nostats", "-loglevel", "info", "-fflags", "nobuffer", "-rw_timeout", "5000000", "-i", url, "-vn", "-af", `aresample=${RATE}:async=1:min_hard_comp=0.100:first_pts=0`, "-ac", "2", "-ar", String(RATE), "-f", "s16le", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"], env: childEnv })
+  const reader = spawn(ffmpegBin, ["-nostdin", "-hide_banner", "-nostats", "-loglevel", "info", "-fflags", "nobuffer", "-rw_timeout", "5000000", "-i", url, "-vn", "-af", `ashowinfo,aresample=${RATE}:async=1:min_hard_comp=0.100:first_pts=0`, "-ac", "2", "-ar", String(RATE), "-f", "s16le", "pipe:1"], { stdio: ["ignore", "pipe", "pipe"], env: childEnv })
   reader.sink = sink
   let errText = ""
+  inputs[source].arrival = freshArrival() // new session: new pts base
+  let partial = ""
   reader.stderr.on("data", (d) => {
+    // ashowinfo: one line per decoded audio frame with its media pts → arrival-vs-media tracking.
+    const text = partial + d.toString()
+    const lines = text.split("\n")
+    partial = lines.pop() ?? ""
+    const now = Date.now()
+    for (const line of lines) { const m = /pts_time:(-?[\d.]+)/.exec(line); if (m) noteArrival(source, Number(m[1]), now) }
     if (errText.length > 8000) return
     errText += d.toString()
     const m = /Stream #\d+:\d+[^:]*: Audio: ([^,\s]+)[^,]*, (\d+) Hz, ([^,]+)/.exec(errText)
@@ -232,7 +259,47 @@ function readProgramFrames(frames) {
  * (the player stalled or re-synced): > 300ms too much → drop once; > 300ms too little → hold
  * (silence, the picture is frozen then too) until the queue is back.
  */
+// ---------- program audio from the page player (preferred) ----------
+const pageAudio = { main: { chunks: [], bytes: 0, at: 0, primed: false, levelMs: null }, backup: { chunks: [], bytes: 0, at: 0, primed: false, levelMs: null } }
+const PAGE_AUDIO = process.env.CAPTURE_PAGE_AUDIO === "1" // opt-in experiment; the reader path measures in sync
+const pageAudioLive = (source) => PAGE_AUDIO && Date.now() - pageAudio[source].at < 1000
+let pageSpliceAt = 0
+// The tap sees samples before they would be heard, and a video frame reaches the screencast only after
+// compositing; both are small and cancel (flash+beep through the full chain: ~0). Tunable.
+const PAGE_AV_BASE_MS = Math.max(-200, Math.min(500, Number(process.env.CAPTURE_PAGE_AV_MS ?? 0) || 0))
+/**
+ * n frames from the page tap for the on-air input. The page delivers audio as it plays the picture;
+ * the picture reaches us screencast-lag later, so the audio waits that long (+ manual per-input
+ * offset + global trim). Same splice-only level control as the reader path; tiny jitter (CDP).
+ */
+function takePageAudio(n) {
+  const src = prog.source
+  const q = pageAudio[src]
+  const target = Math.max(35, Math.min(1500, PAGE_AV_BASE_MS + screencastLag() + sync.trimMs + inputs[src].offsetMs + videoDelayMs()))
+  prog.targetMs = target
+  const targetBytes = Math.round((target / 1000) * RATE) * 4
+  if (!q.primed) { if (q.bytes < targetBytes) return null; q.primed = true; q.levelMs = (q.bytes / 4 / RATE) * 1000 }
+  const queuedMs = (q.bytes / 4 / RATE) * 1000
+  const alpha = Math.min(1, n / (0.5 * RATE))
+  q.levelMs = q.levelMs * (1 - alpha) + queuedMs * alpha
+  prog.levelMs = q.levelMs
+  let err = q.levelMs - target
+  if (err > 300) { dropFrom(q, q.bytes - targetBytes); q.levelMs = target; prog.jumps += 1; err = 0 }
+  const fade = 240, maxD = Math.floor((n - fade) / 3), now = Date.now()
+  const d = maxD > 0 && now - pageSpliceAt >= 100 ? spliceFrames(err, 15, RATE, Math.min(240, maxD)) : 0
+  if (d) { pageSpliceAt = now; prog.corrections += 1; q.levelMs -= (d / RATE) * 1000 }
+  const consume = n + d
+  if (q.bytes < consume * 4) { q.primed = false; prog.underruns += 1; return null }
+  const want = consume * 4, buf = Buffer.allocUnsafe(want)
+  let at = 0
+  while (at < want) { const head = q.chunks[0]; const take = Math.min(head.length, want - at); head.copy(buf, at, 0, take); at += take; if (take === head.length) q.chunks.shift(); else q.chunks[0] = head.subarray(take) }
+  q.bytes -= want
+  return splice(buf, n, d, fade)
+}
+
 function takeProgram(n) {
+  if (pageAudioLive(prog.source)) { prog.via = "page"; return takePageAudio(n) }
+  prog.via = "reader"
   const target = (prog.targetMs = programTargetMs())
   const targetBytes = Math.round((target / 1000) * RATE) * 4
   if (!prog.primed) {
@@ -371,6 +438,15 @@ if (captureKeyFile) {
   })
 }
 const page = await context.newPage()
+// Program audio straight from the on-air /stream player (same element as the picture, so A/V are in
+// sync by construction for Main and Backup, local or remote). The page calls this with s16 stereo PCM.
+if (PAGE_AUDIO) await page.exposeBinding("__programPcm", (_src, source, b64) => {
+  const q = pageAudio[source === "backup" ? "backup" : "main"]
+  const buf = Buffer.from(String(b64), "base64")
+  q.chunks.push(buf); q.bytes += buf.length; q.at = Date.now()
+  const max = Math.round(1.0 * RATE) * 4 // never more than 1s queued
+  if (q.bytes > max) dropFrom(q, q.bytes - max)
+})
 page.on("crash", () => { log("page crashed"); void shutdown(6) })
 // DOM-ready + the page's own ready marker (not "networkidle": /stream polls forever, and slow
 // speaker images would otherwise hold the start for 20s).
@@ -499,6 +575,8 @@ setInterval(async () => {
   // Desk settings (live): A/V trim and the sync test.
   const live = feeder.sync()
   sync.trimMs = live.avOffsetMs
+  inputs.main.offsetMs = live.programOffsetMs?.main ?? 0
+  inputs.backup.offsetMs = live.programOffsetMs?.backup ?? 0
   if (live.syncTest !== sync.test) {
     sync.test = live.syncTest
     log(`[sync] A/V sync test ${sync.test ? "on: white flash + 1 kHz beep at every second" : "off"}`)
@@ -597,7 +675,7 @@ if (statsFile) {
       backpressurePct: total ? +((win.skipped / total) * 100).toFixed(1) : 0,
       maxLagMs: Math.round(win.maxLag),
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
-      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, formats: { main: inputs.main.format, backup: inputs.backup.format } },
+      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, via: prog.via ?? null, formats: { main: inputs.main.format, backup: inputs.backup.format }, arrivalExcessMs: { main: Math.round(inputs.main.arrival.excessMs), backup: Math.round(inputs.backup.arrival.excessMs) }, offsetMs: { main: inputs.main.offsetMs, backup: inputs.backup.offsetMs } },
       sync: { screencastLagMs: sync.lagMs === null ? null : Math.round(sync.lagMs), trimMs: sync.trimMs, videoDelayMs: Math.round(videoDelayMs()), bedDelayMs: Math.round(bedLine.delayMs()), skippedMs: Math.round(skippedMs), test: sync.test },
       statsLine: lastStatsLine,
     }

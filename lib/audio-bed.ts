@@ -15,12 +15,12 @@ import fs from "node:fs"
 import path from "node:path"
 
 export type AudioMode = "silent" | "tone" | "bed"
-export type AudioConfig = { mode: AudioMode; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; /** A/V offset trim, ms: + = audio later, - = audio earlier (live). */ avOffsetMs: number; /** A/V sync test: flash + beep every second (Browser capture). */ syncTest: boolean }
+export type AudioConfig = { mode: AudioMode; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; /** A/V offset trim, ms: + = audio later, - = audio earlier (live). */ avOffsetMs: number; /** A/V sync test: flash + beep every second (Browser capture). */ syncTest: boolean; /** program audio offset per input, ms (+ = later), on top of the automatic delay (capture) */ programOffsetMs?: { main: number; backup: number } }
 export type AudioChannel = "slate" | "capture"
 export type AudioSettings = { rev: number; updatedAt: number; channels: Record<AudioChannel, AudioConfig> }
 export type AudioFile = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string; createdAt: number }
 
-export const DEFAULT_AUDIO: AudioConfig = { mode: "silent", toneHz: 1000, toneDb: -20, files: [], order: "inOrder", volumeDb: 0, fadeInSec: 0, avOffsetMs: 0, syncTest: false }
+export const DEFAULT_AUDIO: AudioConfig = { mode: "silent", toneHz: 1000, toneDb: -20, files: [], order: "inOrder", volumeDb: 0, fadeInSec: 0, avOffsetMs: 0, syncTest: false, programOffsetMs: { main: 0, backup: 0 } }
 export const MAX_AUDIO_BYTES = 50_000_000
 export const AUDIO_EXTS = ["mp3", "m4a", "wav", "aac"] as const
 const ID = /^[a-f0-9]{24}$/
@@ -48,6 +48,7 @@ export function normalizeAudio(raw: unknown): AudioConfig {
     fadeInSec: Math.round(clamp(r.fadeInSec, 0, 30, 0) * 10) / 10,
     avOffsetMs: Math.round(clamp(r.avOffsetMs, -500, 500, 0)),
     syncTest: r.syncTest === true,
+    programOffsetMs: { main: Math.round(clamp((r.programOffsetMs as Record<string, unknown> | undefined)?.main, -500, 500, 0)), backup: Math.round(clamp((r.programOffsetMs as Record<string, unknown> | undefined)?.backup, -500, 500, 0)) },
   }
 }
 
@@ -225,7 +226,7 @@ export function prepareChannelAudio(channel: AudioChannel): { argsFile: string; 
 // ---------- live (hot-swapped) audio: scripts/audio-feeder.mjs ----------
 
 /** What the feeder plays. Files are absolute paths to the normalized stream copies. */
-export type LiveAudio = { hash: string; avOffsetMs: number; syncTest: boolean; mode: AudioMode; toneHz: number; toneDb: number; volumeDb: number; fadeInSec: number; files: string[]; shuffle: boolean; warning: string | null }
+export type LiveAudio = { hash: string; avOffsetMs: number; programOffsetMs?: { main: number; backup: number }; syncTest: boolean; mode: AudioMode; toneHz: number; toneDb: number; volumeDb: number; fadeInSec: number; files: string[]; shuffle: boolean; warning: string | null }
 /** What the feeder says is on air (written by it about once a second). */
 export type AppliedAudio = { hash: string | null; mode: AudioMode; at: number; warning: string | null; peakDb: number | null; underruns: number; pending: string | null; updatedAt: number }
 
@@ -233,7 +234,7 @@ export type AppliedAudio = { hash: string | null; mode: AudioMode; at: number; w
 export function liveAudioPlan(config: AudioConfig, files: (AudioFile | null)[], dir: string): LiveAudio {
   const present = files.filter((item): item is AudioFile => item !== null)
   const missing = files.length - present.length
-  const base = { hash: audioHash(config), avOffsetMs: config.avOffsetMs, syncTest: config.syncTest, toneHz: config.toneHz, toneDb: config.toneDb, volumeDb: config.volumeDb, fadeInSec: config.fadeInSec, shuffle: config.order === "shuffle" }
+  const base = { hash: audioHash(config), avOffsetMs: config.avOffsetMs, programOffsetMs: config.programOffsetMs ?? { main: 0, backup: 0 }, syncTest: config.syncTest, toneHz: config.toneHz, toneDb: config.toneDb, volumeDb: config.volumeDb, fadeInSec: config.fadeInSec, shuffle: config.order === "shuffle" }
   if (config.mode === "tone") return { ...base, mode: "tone", files: [], warning: null }
   if (config.mode === "bed") {
     if (present.length === 0) return { ...base, mode: "silent", files: [], warning: files.length ? "Audio bed file is missing; streaming silence." : "No audio bed file chosen; streaming silence." }

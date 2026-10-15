@@ -2239,7 +2239,7 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
       ) : null}
       {cap?.sync ? (
         <p data-testid={`rtmp-sync-${channel}`} className="font-mono text-[11px] text-black/60" title="Audio is delayed by the screencast lag so it matches the picture; program audio follows the /stream player's latency. Trim is the desk's A/V offset.">
-          A/V sync: screencast lag {cap.sync.screencastLagMs ?? "–"}ms → audio +{cap.sync.bedDelayMs}ms{cap.sync.videoDelayMs ? ` · video +${cap.sync.videoDelayMs}ms` : ""}{cap.sync.trimMs ? ` · trim ${cap.sync.trimMs > 0 ? "+" : ""}${cap.sync.trimMs}ms` : ""}{cap.programAudio?.mixing ? ` · program delay ${cap.programAudio.delayMs}ms (player ${cap.programAudio.playerLatencyMs ?? "?"}ms)` : ""}{cap.sync.skippedMs ? ` · dropped ${cap.sync.skippedMs}ms (encoder behind)` : ""}{cap.sync.test ? " · SYNC TEST ON" : ""}
+          A/V sync: screencast lag {cap.sync.screencastLagMs ?? "–"}ms → audio +{cap.sync.bedDelayMs}ms{cap.sync.videoDelayMs ? ` · video +${cap.sync.videoDelayMs}ms` : ""}{cap.sync.trimMs ? ` · trim ${cap.sync.trimMs > 0 ? "+" : ""}${cap.sync.trimMs}ms` : ""}{cap.programAudio?.mixing ? ` · program delay ${cap.programAudio.delayMs}ms (player ${cap.programAudio.playerLatencyMs ?? "?"}ms, ${cap.programAudio.source ?? "?"}: jitter −${cap.programAudio.arrivalExcessMs?.[cap.programAudio.source ?? "main"] ?? 0}ms, offset ${cap.programAudio.offsetMs?.[cap.programAudio.source ?? "main"] ?? 0}ms)` : ""}{cap.sync.skippedMs ? ` · dropped ${cap.sync.skippedMs}ms (encoder behind)` : ""}{cap.sync.test ? " · SYNC TEST ON" : ""}
         </p>
       ) : null}
       {cap?.programAudio ? (
@@ -2262,7 +2262,7 @@ function DiagnosisLine({ value, testid }: { value: { level: Level; text: string 
 }
 
 type AudioModeView = "silent" | "tone" | "bed"
-type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; syncTest?: boolean }
+type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; programOffsetMs?: { main: number; backup: number }; syncTest?: boolean }
 type AudioFileView = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string }
 type AudioSettingsView = { rev: number; channels: Record<RtmpChannelId, AudioConfigView> }
 const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aac,audio/mpeg,audio/mp4,audio/wav,audio/aac"
@@ -2354,6 +2354,10 @@ function AudioCard() {
             <div className="flex flex-col items-start gap-1 border-t border-black/10 pt-2">
               <label className="flex items-center gap-2" title={ch === "slate" ? "Slate: + delays the audio (its picture is ffmpeg's own, so it can't go earlier)." : "+ = audio later, − = audio earlier (the picture is held back instead). Applies live."}>
                 A/V offset <input type="number" data-testid={tid("av-offset")} min={ch === "slate" ? 0 : -500} max={500} step={10} value={cfg.avOffsetMs ?? 0} onChange={(e) => edit(ch, { avOffsetMs: Number(e.target.value) })} className="h-7 w-20 border px-1" /> ms
+              </label>
+              <label className="flex items-center gap-1" title="Extra program-audio delay per input (+ = later). Auto-calibration already follows each input's player latency and jitter; use this only if one input still sounds off.">
+                Main <input type="number" data-testid={tid("offset-main")} min={-500} max={500} step={10} value={cfg.programOffsetMs?.main ?? 0} onChange={(e) => edit(ch, { programOffsetMs: { main: Number(e.target.value), backup: cfg.programOffsetMs?.backup ?? 0 } })} className="h-7 w-16 border px-1" /> ms
+                Backup <input type="number" data-testid={tid("offset-backup")} min={-500} max={500} step={10} value={cfg.programOffsetMs?.backup ?? 0} onChange={(e) => edit(ch, { programOffsetMs: { main: cfg.programOffsetMs?.main ?? 0, backup: Number(e.target.value) } })} className="h-7 w-16 border px-1" /> ms
                 <span className="text-black/60">(+ audio later)</span>
               </label>
               {ch === "capture" ? (

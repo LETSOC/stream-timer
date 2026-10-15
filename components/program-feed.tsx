@@ -167,6 +167,43 @@ function Standby({ small = false }: { small?: boolean }) {
  * the first frame, then crossfades in. "Waiting for OBS" only after a grace or a real disconnect.
  * Sound on by default (OBS Browser Source captures it); `muted` for previews (?mute=1).
  */
+/**
+ * Browser capture only (it exposes window.__programPcm): tap this player's decoded audio and hand it
+ * to the capture as s16 stereo, so the program audio in the output comes from the very element whose
+ * picture is captured: in sync for Main and Backup, whatever their network latency/jitter.
+ * The element's sound goes into the graph only (nothing is played out).
+ */
+function useCaptureAudioTap(videoRef: RefObject<HTMLVideoElement | null>, source: "main" | "backup") {
+  useEffect(() => {
+    const send = (window as unknown as { __programPcm?: (source: string, b64: string) => void }).__programPcm
+    const video = videoRef.current
+    if (!send || !video) return
+    let ctx: AudioContext | null = null
+    try {
+      ctx = new AudioContext({ sampleRate: 48000 })
+      const node = ctx.createMediaElementSource(video)
+      const proc = ctx.createScriptProcessor(512, 2, 2)
+      proc.onaudioprocess = (e) => {
+        const l = e.inputBuffer.getChannelData(0)
+        const r = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : l
+        const out = new Int16Array(l.length * 2)
+        for (let i = 0; i < l.length; i++) {
+          out[i * 2] = Math.max(-32768, Math.min(32767, Math.round(l[i] * 32767)))
+          out[i * 2 + 1] = Math.max(-32768, Math.min(32767, Math.round(r[i] * 32767)))
+        }
+        const bytes = new Uint8Array(out.buffer)
+        let bin = ""
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+        send(source, btoa(bin))
+      }
+      node.connect(proc)
+      proc.connect(ctx.destination) // keeps the processor running; it writes no output (silence)
+      void ctx.resume()
+    } catch { /* no WebAudio: the capture falls back to reading the relay */ }
+    return () => { void ctx?.close() }
+  }, [videoRef, source])
+}
+
 export function ProgramFeed({ ready, active, muted = false, onDisplay, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false }: { /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
@@ -175,6 +212,7 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   const load = keepLoaded(ready, notReadySince, now)
   const showing = useRef<ProgramDisplay>("under")
   const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted())
+  useCaptureAudioTap(videoRef, source)
   const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
   useEffect(() => {

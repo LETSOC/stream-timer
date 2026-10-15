@@ -27,9 +27,13 @@ export function createJitterMeter(windowMs = 3000) {
   }
 }
 
-/** Dead band (ms) for the level controller: half the measured spread + margin, 20..250ms. */
+/**
+ * Dead band (ms) for the level controller. The level is already a ~2s average, so bursts are filtered
+ * there; a wide band (it was spread/2, ~190ms for a remote input) left the queue that much above its
+ * target = audio late by that much. Now 15..40ms: within the 40ms sync target.
+ */
 export function deadBandMs(spreadMs) {
-  return Math.max(20, Math.min(250, spreadMs / 2 + 15))
+  return Math.max(15, Math.min(40, 15 + spreadMs / 20))
 }
 
 /**

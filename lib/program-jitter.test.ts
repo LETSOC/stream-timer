@@ -44,10 +44,10 @@ test("splice crossfade has no hard discontinuity", () => {
   assert.ok(maxStep < 1500, `max step ${maxStep}`)
 })
 
-test("dead band grows with measured jitter; no correction inside it", () => {
-  assert.equal(deadBandMs(0), 20)
-  assert.equal(deadBandMs(200), 115)
-  assert.equal(deadBandMs(5000), 250)
+test("dead band grows a little with jitter (max 40ms); no correction inside it", () => {
+  assert.equal(deadBandMs(0), 15)
+  assert.equal(deadBandMs(200), 25)
+  assert.equal(deadBandMs(5000), 40) // never wider than the 40ms sync target
   assert.equal(spliceFrames(100, 115, 48000, 240), 0)
   assert.equal(spliceFrames(-19, 20, 48000, 240), 0)
   assert.equal(spliceFrames(200, 115, 48000, 240), 240)
