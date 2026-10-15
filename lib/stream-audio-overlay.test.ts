@@ -14,3 +14,12 @@ test("audio overlay: interactive browsers only; never OBS, capture, previews", (
   assert.equal(interactiveViewer({ ...desk, search: "?controls=0" }), false)
   assert.equal(interactiveViewer({ ...desk, webdriver: true, search: "?k=abc&controls=1" }), true)
 })
+
+test("overlay never fights the player's mute (no toggling under a card)", async () => {
+  const { viewerMutedState } = await import("@/components/stream-audio-overlay")
+  assert.equal(viewerMutedState(true, false, true), null) // card up: player keeps it silent
+  assert.equal(viewerMutedState(true, true, true), false) // program shown: viewer's unmute applies
+  assert.equal(viewerMutedState(true, true, false), null)
+  assert.equal(viewerMutedState(false, true, false), true) // viewer muted
+  assert.equal(viewerMutedState(false, false, true), null)
+})

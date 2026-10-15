@@ -144,18 +144,28 @@
   --bg-light: #0a0ac8; /* slightly lighter */
   --bg-dark: #0000a2; /* slightly darker */
 }
-/* Base #0000B6 with a slow, subtle "live" pulse between a lighter and a darker shade. */
+/* Base #0000B6 with a slow, subtle "live" pulse between a darker and a lighter shade.
+   Composite-only: the base is static and a lighter layer fades in/out with opacity on its own
+   GPU layer, so the pulse never repaints the full frame (main thread / capture friendly). */
 .stage-bg {
-  background-color: var(--bg-base);
+  background-color: var(--bg-dark);
+}
+.stage-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: var(--bg-light);
+  opacity: 0.5;
+  will-change: opacity;
   animation: stage-bg-pulse 9s ease-in-out infinite alternate;
 }
 @keyframes stage-bg-pulse {
-  0% { background-color: var(--bg-dark); }
-  50% { background-color: var(--bg-base); }
-  100% { background-color: var(--bg-light); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .stage-bg { animation: none; }
+  .stage-bg::before { animation: none; }
 }
 
 .countdown-stage .live-wash {

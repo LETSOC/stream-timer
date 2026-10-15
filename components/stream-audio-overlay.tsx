@@ -16,6 +16,12 @@ export function interactiveViewer(input: { search: string; ua: string; webdriver
   return true
 }
 
+/** What the overlay should set `muted` to (null = leave it to the player). */
+export function viewerMutedState(viewerWantsSound: boolean, feedWantsSound: boolean, muted: boolean): boolean | null {
+  if (!viewerWantsSound) return muted ? null : true
+  return feedWantsSound && muted ? false : null
+}
+
 /** The viewer's own Mute (overlay): the on-air player's watchdog must not unmute it again. */
 let viewerMuted = false
 export const isViewerMuted = () => viewerMuted
@@ -49,7 +55,14 @@ export function StreamAudioOverlay() {
       // Keep the on-air player at our volume / mute (it may be rebuilt or switched Main↔Backup).
       video.volume = volumeRef.current
       // After the viewer chose, their choice wins over the player's own autoplay muting.
-      if (userSet.current && video.muted === wantSound.current) { video.muted = !wantSound.current; void video.play().catch(() => undefined) }
+      // The player decides when the program may sound (on air and shown; silent under a card or the
+      // countdown). The viewer's choice only mutes, or unmutes when the player wants sound: never fight it
+      // (that fight toggled muted every 150ms = choppy audio whenever a card was over the program).
+      if (userSet.current) {
+        const feedWants = video.closest<HTMLElement>("[data-testid=program-feed]")?.dataset.wantSound === "1"
+        const next = viewerMutedState(wantSound.current, feedWants, video.muted)
+        if (next !== null) { video.muted = next; if (!next) void video.play().catch(() => undefined) }
+      }
       setMuted(video.muted)
       const s = sources.get(video)
       if (s) {
