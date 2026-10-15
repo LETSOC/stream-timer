@@ -39,6 +39,8 @@ export type ProgramSourcesView = {
   backup: SourceHealth & { pull: boolean }
   failover: FailoverSettings
   last: FailoverEvent | null
+  /** newest first, up to 20, persisted across restarts */
+  history?: FailoverEvent[]
 }
 
 export const EXTENDS = [-10, -5, 5, 10] as const

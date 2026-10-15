@@ -164,8 +164,9 @@ export function OperatorConsole() {
   const setToast = useCallback((text: string | null) => (text ? showToast("error", text) : dismissToast()), [showToast, dismissToast])
   useEffect(() => {
     let stop = false
-    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSources?: ProgramSourcesView | null } | null) => {
+    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } | null) => {
       if (!stop && body) setSources(body.programSources ?? null)
+      if (!stop && (body?.programSource === "main" || body?.programSource === "backup")) setProgramSource(body.programSource)
     }).catch(() => undefined)
     void poll()
     const id = window.setInterval(poll, 1000)
@@ -1942,7 +1943,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -1953,7 +1954,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
   const program = relay?.program
   const captureSource = relay?.paths.capture?.source
   const captureProgramAudio = captureSource && "capture" in captureSource ? captureSource.capture?.programAudio ?? null : null
-  const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null } | null>(null)
+  const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null; mdnsServer?: string | null } | null>(null)
   const [preview, setPreview] = useState(false)
   useEffect(() => {
     if (!obs) return
@@ -1963,8 +1964,8 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
   async function reveal() {
     const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-program" }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
-    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null } | null
-    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null })
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null; mdnsServer?: string | null } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null, mdnsServer: body.mdnsServer ?? null })
   }
   const state = !program?.armed ? "off" : program.ready ? "receiving" : "waiting"
   const video = program?.tracks.find((t) => /264|265|hevc|av1|vp9/i.test(t)) ?? null
@@ -2014,10 +2015,11 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         <input type="checkbox" data-testid="lan-ingest" className="mt-0.5 size-4 shrink-0" checked={relay?.backup?.lanIngest === true} disabled={busy} onChange={(e) => void act({ action: "lan-ingest", on: e.target.checked }, e.target.checked ? "Accepting program ingest from the LAN." : "Program ingest is local-only.")} />
         <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. Toggling briefly reconnects OBS. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
       </label>
+      {relay?.backup?.lanIngest ? <MdnsRow relay={relay} busy={busy} act={act} /> : null}
       {obs ? (
         <div data-testid="program-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
           <p className="text-black/70">OBS › Settings › Stream › Service: Custom. Hides in 30s.</p>
-          <CredRow label="Server" value={obs.server} copyLabel="OBS server" testid="program-obs-server" />{obs.lanServer ? <CredRow label="LAN" value={obs.lanServer} copyLabel="LAN server" testid="program-obs-server-lan" /> : null}
+          <CredRow label="Server" value={obs.server} copyLabel="OBS server" testid="program-obs-server" />{obs.mdnsServer ? <CredRow label="LAN" value={obs.mdnsServer} copyLabel="LAN server (name)" testid="program-obs-server-mdns" /> : null}{obs.lanServer ? <CredRow label={obs.mdnsServer ? "LAN IP" : "LAN"} value={obs.lanServer} copyLabel="LAN server (IP)" testid="program-obs-server-lan" /> : null}
           <CredRow label="Key" value={obs.streamKey} copyLabel="OBS stream key" testid="program-obs-key" />
         </div>
       ) : null}
@@ -2043,7 +2045,7 @@ function CredRow({ label, value, copyLabel, testid }: { label: string; value: st
 /** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
 function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
   const backup = relay?.backup
-  const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null } | null>(null)
+  const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null; mdnsServer?: string | null } | null>(null)
   const [pull, setPull] = useState("")
   const [preview, setPreview] = useState(false)
   useEffect(() => {
@@ -2054,8 +2056,8 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
   async function reveal() {
     const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup" }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
-    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null } | null
-    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null })
+    const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null; mdnsServer?: string | null } | null
+    if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null, mdnsServer: body.mdnsServer ?? null })
   }
   const st = sourceStatus(backup ? { ready: backup.ready, kbps: backup.kbps, dataAgeMs: backup.dataAgeMs } : undefined)
   return (
@@ -2066,6 +2068,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
         {backup?.pullFrom ? <span className="font-mono text-[12px] text-black/70">pulling from {backup.pullFrom}</span> : null}
       </div>
       <p className="font-mono text-[12px] text-black/70">A second computer publishes here with its own key, or MediaMTX pulls a URL (RTMP/RTSP/SRT/HLS). Pick Main/Backup and auto-failover in Transport.</p>
+      {backup?.ready ? <p data-testid="backup-audio-track" className={`font-mono text-[12px] ${backup.audioTrack?.sampleRate && backup.audioTrack.sampleRate !== 48000 ? "text-[#b42318]" : "text-black/70"}`}>Backup audio: {backup.audioTrack ? [backup.audioTrack.codec, backup.audioTrack.channels === 1 ? "mono" : backup.audioTrack.channels === 2 ? "stereo" : backup.audioTrack.channels ? `${backup.audioTrack.channels} ch` : null, backup.audioTrack.sampleRate ? `${backup.audioTrack.sampleRate / 1000} kHz` : null].filter(Boolean).join(" · ") : "no audio track"}{backup.audioTrack?.sampleRate && backup.audioTrack.sampleRate !== 48000 ? " ⚠ not 48 kHz: it is resampled; set OBS › Settings › Audio › Sample Rate 48 kHz" : ""}</p> : null}
       <div className="flex flex-wrap gap-2">
         <Pill size="sm" tone="outline" data-testid="backup-reveal" disabled={Boolean(backup?.pullFrom)} onClick={() => (obs ? setObs(null) : void reveal())}>{obs ? "Hide backup URL" : "Reveal backup URL"}</Pill>
         <ConfirmButton data-testid="backup-rotate" className={pillClass("outline", "sm")} disabled={busy || Boolean(backup?.pullFrom)} confirmLabel="New backup key? Backup OBS must be updated · confirm" onConfirm={() => { setObs(null); void act({ action: "rotate-backup" }, "New backup key. Reveal it and update the backup OBS; Main is unchanged.") }}>New key</ConfirmButton>
@@ -2074,7 +2077,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
       {obs ? (
         <div data-testid="backup-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
           <p className="text-black/70">Backup computer › OBS › Stream › Custom (same ingest server). Hides in 30s.</p>
-          <CredRow label="Server" value={obs.server} copyLabel="Backup server" testid="backup-obs-server" />{obs.lanServer ? <CredRow label="LAN" value={obs.lanServer} copyLabel="LAN server" testid="backup-obs-server-lan" /> : null}
+          <CredRow label="Server" value={obs.server} copyLabel="Backup server" testid="backup-obs-server" />{obs.mdnsServer ? <CredRow label="LAN" value={obs.mdnsServer} copyLabel="LAN server (name)" testid="backup-obs-server-mdns" /> : null}{obs.lanServer ? <CredRow label={obs.mdnsServer ? "LAN IP" : "LAN"} value={obs.lanServer} copyLabel="LAN server (IP)" testid="backup-obs-server-lan" /> : null}
           <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
         </div>
       ) : null}
@@ -2087,6 +2090,25 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
       {preview && backup?.ready ? (
         <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay-backup" src={programOperatorSrc("program-backup")} ready={backup.ready} /></div>
       ) : null}
+    </div>
+  )
+}
+
+/** LAN name (Bonjour): status, rename, conflict warning. */
+function MdnsRow({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const m = relay?.ingest?.mdns
+  const [name, setName] = useState("")
+  const bad = name.trim() !== "" && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(name.trim().replace(/\.local$/i, ""))
+  const text = !m ? "" : m.state === "active" ? `advertising ${m.host} → ${m.ip} (_rtmp._tcp)` : m.state === "probing" ? `checking ${m.name}.local…` : m.state === "conflict" ? `${m.name}.local is already used by ${m.conflictWith ?? "another device"}: not advertised. Pick another name.` : m.state === "error" ? `mDNS error: ${m.error ?? "?"} (use the IP)` : "off (arm the program input)"
+  return (
+    <div data-testid="mdns-row" className="space-y-1 font-mono text-[12px]">
+      <p data-testid="mdns-status" className={m?.state === "conflict" || m?.state === "error" ? "text-[#b42318]" : "text-black/60"}>LAN name: {text}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input data-testid="mdns-name" placeholder={m?.name ?? "hyphen-stream"} value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1" />
+        <span className="text-black/50">.local</span>
+        <Pill size="sm" data-testid="mdns-save" disabled={busy || !name.trim() || bad} onClick={() => { void act({ action: "mdns-name", name: name.trim() }, "LAN name saved."); setName("") }}>Rename</Pill>
+      </div>
+      {bad ? <p className="text-[#b42318]">Letters, digits and hyphens only.</p> : null}
     </div>
   )
 }
@@ -2209,6 +2231,7 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
     <div data-testid={`rtmp-health-${channel}`} data-level={health.level} className="space-y-0.5 rounded-lg bg-black/[0.03] px-2 py-1">
       <p className="font-mono text-[11px] text-black/60">Encoder {cap ? (cap.encoder === "h264_videotoolbox" ? "VideoToolbox" : "libx264") : "libx264"}</p>
       <HealthChip health={health} />
+      {"codeStale" in health && health.codeStale ? <p data-testid={`rtmp-code-stale-${channel}`} className="rounded bg-[#fdb022]/25 px-1.5 py-0.5 font-mono text-[11px] font-bold text-[#7a4b00]">Capture is running old code (updated since it started). Stop and start Browser capture to use it.</p> : null}
       {cap ? (
         <p className="font-mono text-[11px] text-black/60" title="Chrome only sends a frame when /stream repaints (≥1/s for the countdown); the writer repeats the last one to keep a constant frame rate. Backlog = frames skipped because the encoder fell behind.">
           Chrome {cap.screencastFps.toFixed(1)}/s → out {cap.writtenFps.toFixed(1)} fps · repeated {cap.repeatPct.toFixed(0)}% · backlog {cap.backpressurePct.toFixed(0)}% · lag {cap.maxLagMs}ms{typeof cap.heartbeatAgeMs === "number" ? (cap.heartbeatAgeMs < 6000 ? " · page alive" : ` · page stalled ${Math.round(cap.heartbeatAgeMs / 1000)}s`) : ""}
@@ -2216,12 +2239,13 @@ function SourceHealthLine({ channel, health }: { channel: RtmpChannelId; health:
       ) : null}
       {cap?.sync ? (
         <p data-testid={`rtmp-sync-${channel}`} className="font-mono text-[11px] text-black/60" title="Audio is delayed by the screencast lag so it matches the picture; program audio follows the /stream player's latency. Trim is the desk's A/V offset.">
-          A/V sync: screencast lag {cap.sync.screencastLagMs ?? "–"}ms → audio +{cap.sync.bedDelayMs}ms{cap.sync.videoDelayMs ? ` · video +${cap.sync.videoDelayMs}ms` : ""}{cap.sync.trimMs ? ` · trim ${cap.sync.trimMs > 0 ? "+" : ""}${cap.sync.trimMs}ms` : ""}{cap.programAudio?.mixing ? ` · program delay ${cap.programAudio.delayMs}ms (player ${cap.programAudio.playerLatencyMs ?? "?"}ms)` : ""}{cap.sync.skippedMs ? ` · dropped ${cap.sync.skippedMs}ms (encoder behind)` : ""}{cap.sync.test ? " · SYNC TEST ON" : ""}
+          A/V sync: screencast lag {cap.sync.screencastLagMs ?? "–"}ms → audio +{cap.sync.bedDelayMs}ms{cap.sync.videoDelayMs ? ` · video +${cap.sync.videoDelayMs}ms` : ""}{cap.sync.trimMs ? ` · trim ${cap.sync.trimMs > 0 ? "+" : ""}${cap.sync.trimMs}ms` : ""}{cap.programAudio?.mixing ? ` · program delay ${cap.programAudio.delayMs}ms (player ${cap.programAudio.playerLatencyMs ?? "?"}ms, ${cap.programAudio.source ?? "?"}: jitter −${cap.programAudio.arrivalExcessMs?.[cap.programAudio.source ?? "main"] ?? 0}ms, offset ${cap.programAudio.offsetMs?.[cap.programAudio.source ?? "main"] ?? 0}ms)` : ""}{cap.sync.skippedMs ? ` · dropped ${cap.sync.skippedMs}ms (encoder behind)` : ""}{cap.sync.test ? " · SYNC TEST ON" : ""}
         </p>
       ) : null}
       {cap?.programAudio ? (
         <p data-testid={`rtmp-program-audio-${channel}`} className="font-mono text-[11px] text-black/60">
-          Program audio: {cap.programAudio.mixing ? `mixing · peak ${typeof cap.programAudio.peakDb === "number" ? `${cap.programAudio.peakDb.toFixed(0)} dBFS` : "silent"}` : cap.programAudio.on ? "waiting for OBS audio" : "off (audio bed)"}
+          Program audio: {cap.programAudio.mixing ? `mixing ${cap.programAudio.source === "backup" ? "Backup" : "Main"} · peak ${typeof cap.programAudio.peakDb === "number" ? `${cap.programAudio.peakDb.toFixed(0)} dBFS` : "silent"}` : cap.programAudio.on ? "waiting for OBS audio" : "off (audio bed)"}{cap.programAudio.mixing && typeof cap.programAudio.jitterMs === "number" ? ` · jitter ${cap.programAudio.jitterMs}ms · splices ${cap.programAudio.corrections ?? 0}` : ""}
+          {(["main", "backup"] as const).map((src) => { const f = cap.programAudio?.formats?.[src]; return f ? <span key={src} data-testid={`capture-input-format-${src}`} className={f.sampleRate !== 48000 ? "text-[#b42318]" : ""}> · {src === "backup" ? "Backup" : "Main"} in: {f.codec} {f.sampleRate / 1000} kHz {f.channels}{f.sampleRate !== 48000 ? " ⚠ not 48 kHz (resampled; set OBS Audio › Sample Rate 48 kHz)" : ""}</span> : null })}
         </p>
       ) : null}
     </div>
@@ -2238,7 +2262,7 @@ function DiagnosisLine({ value, testid }: { value: { level: Level; text: string 
 }
 
 type AudioModeView = "silent" | "tone" | "bed"
-type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; syncTest?: boolean }
+type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; programOffsetMs?: { main: number; backup: number }; syncTest?: boolean }
 type AudioFileView = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string }
 type AudioSettingsView = { rev: number; channels: Record<RtmpChannelId, AudioConfigView> }
 const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aac,audio/mpeg,audio/mp4,audio/wav,audio/aac"
@@ -2330,6 +2354,10 @@ function AudioCard() {
             <div className="flex flex-col items-start gap-1 border-t border-black/10 pt-2">
               <label className="flex items-center gap-2" title={ch === "slate" ? "Slate: + delays the audio (its picture is ffmpeg's own, so it can't go earlier)." : "+ = audio later, − = audio earlier (the picture is held back instead). Applies live."}>
                 A/V offset <input type="number" data-testid={tid("av-offset")} min={ch === "slate" ? 0 : -500} max={500} step={10} value={cfg.avOffsetMs ?? 0} onChange={(e) => edit(ch, { avOffsetMs: Number(e.target.value) })} className="h-7 w-20 border px-1" /> ms
+              </label>
+              <label className="flex items-center gap-1" title="Extra program-audio delay per input (+ = later). Auto-calibration already follows each input's player latency and jitter; use this only if one input still sounds off.">
+                Main <input type="number" data-testid={tid("offset-main")} min={-500} max={500} step={10} value={cfg.programOffsetMs?.main ?? 0} onChange={(e) => edit(ch, { programOffsetMs: { main: Number(e.target.value), backup: cfg.programOffsetMs?.backup ?? 0 } })} className="h-7 w-16 border px-1" /> ms
+                Backup <input type="number" data-testid={tid("offset-backup")} min={-500} max={500} step={10} value={cfg.programOffsetMs?.backup ?? 0} onChange={(e) => edit(ch, { programOffsetMs: { main: cfg.programOffsetMs?.main ?? 0, backup: Number(e.target.value) } })} className="h-7 w-16 border px-1" /> ms
                 <span className="text-black/60">(+ audio later)</span>
               </label>
               {ch === "capture" ? (

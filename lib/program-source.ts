@@ -16,8 +16,10 @@ export type FailoverSettings = {
   returnSec: number
   /** false = stay on Backup until the operator switches back. */
   autoReturn: boolean
+  /** Main↔Backup switch buffer, ms: the incoming input plays this long (hidden) before it goes on air. */
+  switchBufferMs: number
 }
-export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true }
+export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000 }
 
 export function parseFailover(raw: unknown): FailoverSettings {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
@@ -27,6 +29,7 @@ export function parseFailover(raw: unknown): FailoverSettings {
     stallSec: num(r.stallSec, 1, 60, DEFAULT_FAILOVER.stallSec),
     returnSec: num(r.returnSec, 2, 600, DEFAULT_FAILOVER.returnSec),
     autoReturn: r.autoReturn !== false,
+    switchBufferMs: num(r.switchBufferMs, 0, 5000, DEFAULT_FAILOVER.switchBufferMs),
   }
 }
 
@@ -94,4 +97,18 @@ export function pullUrlError(url: string): string | null {
     return "http(s) pull must be an HLS playlist ending in .m3u8 (web pages can't be pulled). Otherwise use rtmp://, rtsp:// or srt://."
   }
   return `${scheme}:// isn't supported. Use rtmp://, rtsp://, srt:// or an HLS .m3u8 link.`
+}
+
+/** Can an operator switch TO this input? Publishing and data within the last 3s (else "no signal"). */
+export function hasSignal(h: SourceHealth | null | undefined): boolean {
+  return !!h?.ready && (h.dataAgeMs === null || h.dataAgeMs < 3000)
+}
+
+/**
+ * Manual switch guard: switching to an input with no signal is refused (switching away from a dead
+ * on-air input is always allowed). `view` null = relay not armed: nothing to judge, allowed.
+ */
+export function manualSwitchError(view: { main: SourceHealth; backup: SourceHealth } | null | undefined, current: ProgramSource, target: ProgramSource): string | null {
+  if (!view || current === target || hasSignal(view[target])) return null
+  return `${SOURCE_LABEL[target]} has no signal`
 }

@@ -2,7 +2,9 @@
 
 import { failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
 import type { FailoverSettings } from "@/lib/program-source"
+import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
+import { useResumeGeneration } from "@/lib/use-resume"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
@@ -225,6 +227,7 @@ export function StreamDeck() {
             <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} />
           </div>
         ) : null}
+        {state?.programSources ? <LanIngestInfo /> : null}
         {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
       </div>
 
@@ -293,6 +296,7 @@ const prefListeners = new Set<() => void>()
 function StreamFrame() {
   const box = useRef<HTMLSpanElement>(null)
   const [scale, setScale] = useState(0.3)
+  const resume = useResumeGeneration() // iOS: a backgrounded iframe's players don't come back; remount it
   useEffect(() => {
     const node = box.current
     if (!node) return
@@ -302,7 +306,7 @@ function StreamFrame() {
   }, [])
   return (
     <span ref={box} className="absolute inset-0 block overflow-hidden">
-      <iframe data-testid="deck-preview-frame" title="/stream preview" src="/stream?mute=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1280, height: 720, transform: `scale(${scale})` }} />
+      <iframe key={resume} data-testid="deck-preview-frame" data-gen={resume} title="/stream preview" src="/stream?mute=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1280, height: 720, transform: `scale(${scale})` }} />
     </span>
   )
 }

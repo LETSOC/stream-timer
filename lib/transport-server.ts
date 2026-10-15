@@ -1,5 +1,6 @@
 import { readServerState, RevConflict, writeServerEvent } from "@/lib/event-server"
 import { programReadyCached } from "@/lib/relay"
+import { manualSwitchError } from "@/lib/program-source"
 import { noteSourceSwitch, programSourcesView } from "@/lib/program-monitor"
 import { applyTransport, deckState, type DeckState, type TransportAction } from "@/lib/transport"
 
@@ -25,6 +26,11 @@ export function runServerTransport(action: TransportAction, expectedRev: number 
   const current = readServerState()
   if (expectedRev !== undefined && expectedRev !== current.rev) {
     return { ok: false, status: 409, error: "Changed on another device. Check the state and tap again.", state: deckState(current, now, ready(current), programSourcesView(now)) }
+  }
+  if (action.type === "programSource" && !opts.auto) {
+    const view = programSourcesView(now)
+    const error = manualSwitchError(view, current.stage.programSource, action.source)
+    if (error) return { ok: false, status: 409, error, state: deckState(current, now, ready(current), view) }
   }
   const result = applyTransport(current, action, now)
   if (!result.ok) return { ok: false, status: current.stage.deskLive ? 423 : 400, error: result.error, state: deckState(current, now, ready(current), programSourcesView(now)) }

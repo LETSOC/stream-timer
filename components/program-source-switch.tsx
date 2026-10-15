@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { PROGRAM_SOURCES, SOURCE_LABEL, type FailoverEvent, type FailoverSettings, type ProgramSource, type SourceHealth } from "@/lib/program-source"
+import { PROGRAM_SOURCES, SOURCE_LABEL, type FailoverEvent, type FailoverSettings, type ProgramSource, type SourceHealth, hasSignal } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
 
 /** "publishing · 3.2 Mb/s · 0.2s" / "stalled 4s" / "not publishing" for one input. */
@@ -47,6 +47,7 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
   const f = view?.failover
   const [stall, setStall] = useState<string | null>(null)
   const [ret, setRet] = useState<string | null>(null)
+  const [buf, setBuf] = useState<string | null>(null)
   const muted = dark ? "text-white/60" : "text-black/60"
   const tones = { ok: dark ? "text-[#6ce9a6]" : "text-[#067647]", warn: "text-[#f79009]", off: muted }
   return (
@@ -56,11 +57,12 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
           const h = view?.[source]
           const st = sourceStatus(h)
           const on = active === source
+          const dead = !!view && !on && !hasSignal(h)
           return (
-            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled} onClick={() => onSwitch(source)}
+            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || dead} data-no-signal={dead || undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} onClick={() => onSwitch(source)}
               className={`min-h-16 rounded-xl px-3 py-2 text-left disabled:opacity-50 ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"}`}>
               <span className="block text-[15px] font-black">{on ? "● " : ""}{SOURCE_LABEL[source]}{source === "backup" && view?.backup.pull ? " (pull)" : ""}</span>
-              <span data-testid={`program-source-${source}-status`} className={`block font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? st.text : "relay not armed"}</span>
+              <span data-testid={`program-source-${source}-status`} className={`block font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? (dead ? `no signal · ${st.text}` : st.text) : "relay not armed"}</span>
             </button>
           )
         })}
@@ -79,9 +81,22 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
             return to Main after
             <input type="number" min={2} max={600} data-testid="failover-return-sec" disabled={disabled || !f.autoReturn} value={ret ?? String(f.returnSec)} onChange={(e) => setRet(e.target.value)} onBlur={() => { if (ret !== null && Number(ret) > 0) onFailover({ returnSec: Number(ret) }); setRet(null) }} className={`w-14 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s healthy
           </label>
+          <label className="flex items-center gap-1">switch buffer
+            <input type="number" min={0} max={5} step={0.5} data-testid="failover-switch-buffer" disabled={disabled} value={buf ?? String(f.switchBufferMs / 1000)} onChange={(e) => setBuf(e.target.value)} onBlur={() => { if (buf !== null && Number(buf) >= 0) onFailover({ switchBufferMs: Math.round(Number(buf) * 1000) }); setBuf(null) }} className={`w-12 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s
+          </label>
         </div>
       ) : null}
       {view?.last ? <p data-testid="program-source-last" className={`font-mono text-[11px] ${muted}`}>Last: {failoverText(view.last)} · {new Date(view.last.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</p> : null}
+      {view?.history && view.history.length > 1 ? (
+        <details data-testid="program-source-history" className={`font-mono text-[11px] ${muted}`}>
+          <summary className="cursor-pointer">Switch history ({view.history.length})</summary>
+          <ol className="mt-1 space-y-0.5">
+            {view.history.map((e) => (
+              <li key={`${e.at}-${e.to}`} data-testid="program-source-history-item">{new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · {failoverText(e)}</li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
     </div>
   )
 }

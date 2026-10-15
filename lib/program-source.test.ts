@@ -40,11 +40,11 @@ test("autoReturn off: stays on backup; manual backup is not auto-returned", () =
 })
 test("parseFailover clamps and defaults", () => {
   assert.deepEqual(parseFailover(null), DEFAULT_FAILOVER)
-  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false })
+  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000 })
 })
 
 test("backup dies while on air and main is fine: back to main (auto on), not with auto off", () => {
-  const settings = { auto: true, stallSec: 3, returnSec: 10, autoReturn: false }
+  const settings = { auto: true, stallSec: 3, returnSec: 10, autoReturn: false, switchBufferMs: 1000 }
   const ok = { ready: true, kbps: 2000, dataAgeMs: 100 }
   const dead = { ready: false, kbps: null, dataAgeMs: null }
   let memory = FRESH_MEMORY
@@ -54,4 +54,17 @@ test("backup dies while on air and main is fine: back to main (auto on), not wit
   assert.equal(s.switchTo, "main")
   assert.equal(failoverStep({ active: "backup", main: ok, backup: dead, settings: { ...settings, auto: false }, memory, now: 3100 }).switchTo, null)
   assert.equal(failoverStep({ active: "backup", main: dead, backup: dead, settings, memory, now: 3100 }).switchTo, null)
+})
+
+test("manual switch refuses an input with no signal, allows leaving a dead one", async () => {
+  const { manualSwitchError, hasSignal } = await import("./program-source")
+  const ok = { ready: true, kbps: 3000, dataAgeMs: 200 }
+  const dead = { ready: false, kbps: null, dataAgeMs: null }
+  const stale = { ready: true, kbps: 0, dataAgeMs: 9000 }
+  assert.equal(hasSignal(ok), true); assert.equal(hasSignal(dead), false); assert.equal(hasSignal(stale), false)
+  assert.equal(manualSwitchError({ main: ok, backup: dead }, "main", "backup"), "Backup has no signal")
+  assert.equal(manualSwitchError({ main: ok, backup: stale }, "main", "backup"), "Backup has no signal")
+  assert.equal(manualSwitchError({ main: dead, backup: ok }, "main", "backup"), null)
+  assert.equal(manualSwitchError({ main: dead, backup: dead }, "backup", "backup"), null)
+  assert.equal(manualSwitchError(null, "main", "backup"), null)
 })

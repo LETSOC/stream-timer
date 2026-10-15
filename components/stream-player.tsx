@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type Hls from "hls.js";
+import { useResumeGeneration } from "@/lib/use-resume";
 
 /**
  * `inline`: for phones. No native controls, and a tap never opens the iOS fullscreen player
@@ -10,6 +11,7 @@ import type Hls from "hls.js";
  */
 export function StreamPlayer({ src, inline = false }: { src: string; inline?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const resume = useResumeGeneration(); // rebuild after the background (iOS suspends media)
 
   useEffect(() => {
     const video = videoRef.current;
@@ -47,7 +49,7 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
         return;
       }
       if (node.canPlayType("application/vnd.apple.mpegurl")) {
-        node.src = src;
+        node.src = resume ? `${src}${src.includes("?") ? "&" : "?"}r=${resume}` : src;
         node.play().catch(() => undefined);
       }
     };
@@ -72,7 +74,7 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
       video.removeAttribute("src");
       video.load();
     };
-  }, [src, inline]);
+  }, [src, inline, resume]);
 
   return (
     <video

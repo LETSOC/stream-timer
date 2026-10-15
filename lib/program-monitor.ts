@@ -8,7 +8,8 @@ import { readServerState } from "@/lib/event-server"
 import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type FailoverMemory } from "@/lib/program-source"
 import fs from "node:fs"
 import path from "node:path"
-import { programSourceHealth, readSettings, relayDir, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
+import { syncMdns } from "@/lib/mdns"
+import { programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
 
@@ -19,17 +20,24 @@ function monitor(): Monitor {
   if (!holder[KEY]) {
     // The last switch survives a server restart: devices still see it, and an auto-failover to Backup
     // still auto-returns afterwards.
-    const last = loadLast()
-    holder[KEY] = { timer: null, memory: { ...FRESH_MEMORY, failedOver: Boolean(last?.auto && last.to === "backup") }, last, log: last ? [last] : [], sig: "" }
+    const log = loadLog()
+    const last = log.at(-1) ?? null
+    holder[KEY] = { timer: null, memory: { ...FRESH_MEMORY, failedOver: Boolean(last?.auto && last.to === "backup") }, last, log, sig: "" }
   }
   return holder[KEY]
 }
-const lastFile = () => path.join(relayDir(), "program-last-switch.json")
-function loadLast(): FailoverEvent | null {
+export const HISTORY_MAX = 20
+const historyFile = () => path.join(relayDir(), "program-switch-history.json")
+const validEvent = (e: unknown): e is FailoverEvent => Boolean(e && typeof (e as FailoverEvent).at === "number" && ((e as FailoverEvent).to === "main" || (e as FailoverEvent).to === "backup"))
+function loadLog(): FailoverEvent[] {
   try {
-    const raw = JSON.parse(fs.readFileSync(lastFile(), "utf8")) as FailoverEvent
-    return raw && typeof raw.at === "number" && (raw.to === "main" || raw.to === "backup") ? raw : null
-  } catch { return null }
+    const raw = JSON.parse(fs.readFileSync(historyFile(), "utf8")) as unknown
+    if (Array.isArray(raw)) return raw.filter(validEvent).slice(-HISTORY_MAX)
+  } catch { /* none yet */ }
+  try { // older builds kept only the last switch
+    const one = JSON.parse(fs.readFileSync(path.join(relayDir(), "program-last-switch.json"), "utf8")) as unknown
+    return validEvent(one) ? [one] : []
+  } catch { return [] }
 }
 
 /** What the deck/desk show. null while the program input isn't armed. */
@@ -41,6 +49,7 @@ export function programSourcesView(now = Date.now()): ProgramSourcesView | null 
     backup: { ...programSourceHealth("backup", now), pull: settings.backupPullUrl !== "" },
     failover: settings.failover,
     last: monitor().last,
+    history: monitor().log.slice().reverse(),
   }
 }
 export function failoverLog(): FailoverEvent[] {
@@ -50,8 +59,8 @@ export function failoverLog(): FailoverEvent[] {
 export function noteSourceSwitch(event: FailoverEvent) {
   const m = monitor()
   m.last = event
-  m.log = [...m.log, event].slice(-50)
-  try { fs.writeFileSync(lastFile(), JSON.stringify(event)) } catch { /* best effort */ }
+  m.log = [...m.log, event].slice(-HISTORY_MAX)
+  try { fs.writeFileSync(historyFile(), JSON.stringify(m.log)) } catch { /* best effort */ }
   eventBus().emit("program-sources")
 }
 export function onProgramSources(listener: () => void): () => void {
@@ -64,6 +73,8 @@ export async function programMonitorTick(now = Date.now()) {
   const m = monitor()
   await refreshProgramSources()
   await verifyMediamtxConfig(now)
+  // Bonjour follows LAN ingest + arm + the current LAN IP (re-announced when the IP changes).
+  void syncMdns(wantedMdns(), readSettings().mdnsName).catch(() => undefined)
   const settings = readSettings()
   if (settings.programArmed) {
     const state = readServerState()
@@ -72,7 +83,8 @@ export async function programMonitorTick(now = Date.now()) {
     m.memory = step.memory
     if (step.switchTo && step.reason) {
       const result = runServerTransport({ type: "programSource", source: step.switchTo }, undefined, now, { auto: true })
-      if (result.ok) {
+      // Log only a switch that really happened (never the same "Backup stalled Ns" over and over).
+      if (result.ok && readServerState().stage.programSource === step.switchTo) {
         console.log(`[program] auto-failover ${SOURCE_LABEL[active]} → ${SOURCE_LABEL[step.switchTo]}: ${step.reason}`)
         noteSourceSwitch({ at: now, from: active, to: step.switchTo, reason: step.reason, auto: true })
       }

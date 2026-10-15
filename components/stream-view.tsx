@@ -1,5 +1,6 @@
 "use client"
 
+import { StreamAudioOverlay } from "@/components/stream-audio-overlay"
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
@@ -11,7 +12,7 @@ import { useNow } from "@/lib/use-now"
 import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { ProgramFeed } from "@/components/program-feed"
-import type { ProgramDisplay } from "@/lib/program-display"
+import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { endInstant } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 
@@ -96,6 +97,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [pausedAt, setPausedAt] = useState<number | null>(initial?.pausedAt ?? null)
   const [stage, setStage] = useState<Stage>(() => parseStage(initial?.stage ?? {}))
   const [programReady, setProgramReady] = useState(false)
+  const [switchBufferMs, setSwitchBufferMs] = useState(SWITCH_BUFFER_MS)
   const [sourceReady, setSourceReady] = useState<{ main: boolean; backup: boolean }>({ main: false, backup: false })
 
   useEffect(() => {
@@ -110,7 +112,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { switchBufferMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (reloadIfRebuilt(body.build)) return
@@ -118,6 +120,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
           setProgramReady(body.programReady === true)
+          if (typeof body.switchBufferMs === "number") setSwitchBufferMs(body.switchBufferMs)
           setSourceReady((cur) => (cur.main === (body.mainReady === true) && cur.backup === (body.backupReady === true) ? cur : { main: body.mainReady === true, backup: body.backupReady === true }))
           if (body.stage && typeof body.stage === "object") {
             setStage(parseStage(body.stage))
@@ -170,13 +173,19 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const wanted = stage.programSource
   const [air, setAir] = useState<{ source: "main" | "backup"; pendingSince: number | null }>({ source: wanted, pendingSince: null })
   const [displays, setDisplays] = useState<Record<"main" | "backup", ProgramDisplay>>({ main: "under", backup: "under" })
+  // When each input's picture last started playing continuously (null = not playing): the switch buffer.
+  const [videoSince, setVideoSince] = useState<Record<"main" | "backup", number | null>>({ main: null, backup: null })
   const nowMs = now?.getTime() ?? 0
   if (air.source !== wanted && air.pendingSince === null) setAir({ source: air.source, pendingSince: nowMs })
   else if (air.source === wanted && air.pendingSince !== null) setAir({ source: wanted, pendingSince: null })
-  else if (air.source !== wanted && (displays[wanted] === "video" || screen !== "program" || (air.pendingSince !== null && nowMs - air.pendingSince > 4000))) setAir({ source: wanted, pendingSince: null })
+  else if (air.source !== wanted && air.pendingSince !== null && handoverDone({ screenIsProgram: screen === "program", pendingSince: air.pendingSince, now: nowMs, incomingVideoSince: videoSince[wanted], airDisplay: displays[air.source], bufferMs: switchBufferMs })) setAir({ source: wanted, pendingSince: null })
   const handing = air.source !== wanted
-  const onMain = useCallback((d: ProgramDisplay) => setDisplays((cur) => (cur.main === d ? cur : { ...cur, main: d })), [])
-  const onBackup = useCallback((d: ProgramDisplay) => setDisplays((cur) => (cur.backup === d ? cur : { ...cur, backup: d })), [])
+  const onDisplayOf = useCallback((source: "main" | "backup", d: ProgramDisplay) => {
+    setDisplays((cur) => (cur[source] === d ? cur : { ...cur, [source]: d }))
+    setVideoSince((cur) => { const v = d === "video" ? (cur[source] ?? Date.now()) : null; return cur[source] === v ? cur : { ...cur, [source]: v } })
+  }, [])
+  const onMain = useCallback((d: ProgramDisplay) => onDisplayOf("main", d), [onDisplayOf])
+  const onBackup = useCallback((d: ProgramDisplay) => onDisplayOf("backup", d), [onDisplayOf])
   // Switching to program keeps the previous screen up until the feed has a frame (then crossfades).
   const programDisplay: ProgramDisplay = handing && displays[air.source] === "under" ? displays[wanted] : displays[air.source]
   const [seen, setSeen] = useState<{ screen: typeof screen; lastOther: Exclude<typeof screen, "program"> }>({ screen, lastOther: screen === "program" ? "countdown" : screen })
@@ -203,8 +212,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} />
       })}
+      <StreamAudioOverlay />
       {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard
           kind={shownScreen}
