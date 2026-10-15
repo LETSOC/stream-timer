@@ -55,3 +55,16 @@ test("backup dies while on air and main is fine: back to main (auto on), not wit
   assert.equal(failoverStep({ active: "backup", main: ok, backup: dead, settings: { ...settings, auto: false }, memory, now: 3100 }).switchTo, null)
   assert.equal(failoverStep({ active: "backup", main: dead, backup: dead, settings, memory, now: 3100 }).switchTo, null)
 })
+
+test("manual switch refuses an input with no signal, allows leaving a dead one", async () => {
+  const { manualSwitchError, hasSignal } = await import("./program-source")
+  const ok = { ready: true, kbps: 3000, dataAgeMs: 200 }
+  const dead = { ready: false, kbps: null, dataAgeMs: null }
+  const stale = { ready: true, kbps: 0, dataAgeMs: 9000 }
+  assert.equal(hasSignal(ok), true); assert.equal(hasSignal(dead), false); assert.equal(hasSignal(stale), false)
+  assert.equal(manualSwitchError({ main: ok, backup: dead }, "main", "backup"), "Backup has no signal")
+  assert.equal(manualSwitchError({ main: ok, backup: stale }, "main", "backup"), "Backup has no signal")
+  assert.equal(manualSwitchError({ main: dead, backup: ok }, "main", "backup"), null)
+  assert.equal(manualSwitchError({ main: dead, backup: dead }, "backup", "backup"), null)
+  assert.equal(manualSwitchError(null, "main", "backup"), null)
+})

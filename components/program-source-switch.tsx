@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { PROGRAM_SOURCES, SOURCE_LABEL, type FailoverEvent, type FailoverSettings, type ProgramSource, type SourceHealth } from "@/lib/program-source"
+import { PROGRAM_SOURCES, SOURCE_LABEL, type FailoverEvent, type FailoverSettings, type ProgramSource, type SourceHealth, hasSignal } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
 
 /** "publishing · 3.2 Mb/s · 0.2s" / "stalled 4s" / "not publishing" for one input. */
@@ -57,11 +57,12 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
           const h = view?.[source]
           const st = sourceStatus(h)
           const on = active === source
+          const dead = !!view && !on && !hasSignal(h)
           return (
-            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled} onClick={() => onSwitch(source)}
+            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || dead} data-no-signal={dead || undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} onClick={() => onSwitch(source)}
               className={`min-h-16 rounded-xl px-3 py-2 text-left disabled:opacity-50 ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"}`}>
               <span className="block text-[15px] font-black">{on ? "● " : ""}{SOURCE_LABEL[source]}{source === "backup" && view?.backup.pull ? " (pull)" : ""}</span>
-              <span data-testid={`program-source-${source}-status`} className={`block font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? st.text : "relay not armed"}</span>
+              <span data-testid={`program-source-${source}-status`} className={`block font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? (dead ? `no signal · ${st.text}` : st.text) : "relay not armed"}</span>
             </button>
           )
         })}

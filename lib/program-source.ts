@@ -98,3 +98,17 @@ export function pullUrlError(url: string): string | null {
   }
   return `${scheme}:// isn't supported. Use rtmp://, rtsp://, srt:// or an HLS .m3u8 link.`
 }
+
+/** Can an operator switch TO this input? Publishing and data within the last 3s (else "no signal"). */
+export function hasSignal(h: SourceHealth | null | undefined): boolean {
+  return !!h?.ready && (h.dataAgeMs === null || h.dataAgeMs < 3000)
+}
+
+/**
+ * Manual switch guard: switching to an input with no signal is refused (switching away from a dead
+ * on-air input is always allowed). `view` null = relay not armed: nothing to judge, allowed.
+ */
+export function manualSwitchError(view: { main: SourceHealth; backup: SourceHealth } | null | undefined, current: ProgramSource, target: ProgramSource): string | null {
+  if (!view || current === target || hasSignal(view[target])) return null
+  return `${SOURCE_LABEL[target]} has no signal`
+}
