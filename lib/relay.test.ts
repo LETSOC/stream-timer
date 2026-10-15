@@ -3,14 +3,14 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
-import { buildMediamtxConfig, credentials, validPullUrl, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
+import { buildMediamtxConfig, credentials, validPullUrl, pullUrlError, pickLanIp, parseIngestLog, liveConfigMatches, rotateProgramCredentials, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
 import { parseOwnSupervisorList } from "./encoder.ts"
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true } })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true }, lanIngest: false })
 })
 
 test("credentials are random, stable, and stored 0600", () => {
@@ -29,7 +29,7 @@ test("config binds every listener to the given host and restricts users to local
   assert.match(yml, /moq: no/)
   assert.match(yml, /authMethod: internal/)
   assert.equal((yml.match(/ips: \['127\.0\.0\.1\/32', '::1\/128'\]/g) ?? []).length, 2)
-  assert.match(yml, /  slate: \{\}\n  capture: \{\}\n  program: \{\}/)
+  assert.match(yml, /  slate: \{\}\n  capture: \{\}\n  program: \{ overridePublisher: yes \}/)
   // Internal publisher limited to slate/capture; no OBS login while disarmed.
   assert.match(yml, /permissions: \[\{ action: publish, path: slate \}, \{ action: publish, path: capture \}\]/)
   assert.doesNotMatch(yml, /path: program/)
@@ -90,7 +90,7 @@ test("program backup: own publish login, or a pull source; pull URLs validated",
   const ports = { rtmp: 19350, hls: 18888, api: 19997 }
   const pub = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true })
   assert.match(pub, /user: "bak"[\s\S]*permissions: \[\{ action: publish, path: program-backup \}\]/)
-  assert.match(pub, /\n  program-backup: \{\}/)
+  assert.match(pub, /\n  program-backup: \{ overridePublisher: yes \}/)
   const pulled = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, backupPullUrl: "rtmp://example.com/live/key" })
   assert.doesNotMatch(pulled, /user: "bak"/)
   assert.match(pulled, /program-backup: \{ source: "rtmp:\/\/example.com\/live\/key", sourceOnDemand: no \}/)
@@ -100,4 +100,69 @@ test("program backup: own publish login, or a pull source; pull URLs validated",
   assert.ok(!validPullUrl("file:///etc/passwd"))
   assert.ok(!validPullUrl("rtmp://x/y\n  evil: 1"))
   assert.ok(!validPullUrl("rtmp://x/{a}"))
+  assert.ok(validPullUrl("srt://10.0.0.5:9000?streamid=read:backup"))
+  assert.ok(validPullUrl("https://cdn.example.com/live/master.m3u8?token=a&b=c"))
+  assert.match(pullUrlError("https://www.youtube.com/watch?v=abc") ?? "", /web page/)
+  assert.match(pullUrlError("https://youtu.be/abc") ?? "", /web page/)
+  assert.match(pullUrlError("https://example.com/live") ?? "", /\.m3u8/)
+  assert.match(pullUrlError("youtube.com/watch?v=abc") ?? "", /Not a URL|isn't supported/)
+})
+
+test("LAN ingest: RTMP on the ingest host, only OBS logins from anywhere (publish-only), reads/API/internal stay loopback", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", programUser: "obs", programPass: "op", backupUser: "bak", backupPass: "bp" }
+  const ports = { rtmp: 19350, hls: 18888, api: 19997 }
+  const lan = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, ingestHost: "0.0.0.0" })
+  assert.match(lan, /rtmpAddress: 0\.0\.0\.0:19350/)
+  assert.match(lan, /hlsAddress: 127\.0\.0\.1:18888/)
+  assert.match(lan, /apiAddress: 127\.0\.0\.1:19997/)
+  assert.match(lan, /user: "obs"\n.*\n    ips: \['0\.0\.0\.0\/0', '::\/0'\]\n    permissions: \[\{ action: publish, path: program \}\]/)
+  assert.match(lan, /user: "bak"\n.*\n    ips: \['0\.0\.0\.0\/0', '::\/0'\]\n    permissions: \[\{ action: publish, path: program-backup \}\]/)
+  assert.match(lan, /user: "r"\n.*\n    ips: \['127\.0\.0\.1\/32', '::1\/128'\]/)
+  assert.match(lan, /user: "p"\n.*\n    ips: \['127\.0\.0\.1\/32', '::1\/128'\]/)
+  // Not armed: ingest stays local even with the setting on
+  assert.match(buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: false, ingestHost: "0.0.0.0" }), /rtmpAddress: 127\.0\.0\.1:19350/)
+  assert.doesNotMatch(buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true }), /0\.0\.0\.0/)
+  assert.equal(pickLanIp({ lo0: [{ family: "IPv4", address: "127.0.0.1", internal: true }], utun3: [{ family: "IPv4", address: "10.8.0.2", internal: false }], en0: [{ family: "IPv6", address: "fe80::1", internal: false }, { family: "IPv4", address: "192.168.1.23", internal: false }] }), "192.168.1.23")
+  assert.equal(pickLanIp({ lo: [{ family: 4, address: "127.0.0.1", internal: true }] }), null)
+})
+
+test("New key rotates one input only; program paths let a reconnecting OBS take over", async () => {
+  const before = credentials()
+  await rotateProgramCredentials("main")
+  const a = credentials()
+  assert.notEqual(a.programPass, before.programPass)
+  assert.equal(a.backupPass, before.backupPass)
+  await rotateProgramCredentials("backup")
+  const b = credentials()
+  assert.equal(b.programPass, a.programPass)
+  assert.notEqual(b.backupPass, a.backupPass)
+  const yml = buildMediamtxConfig({ host: "127.0.0.1", ports: { rtmp: 19350, hls: 18888, api: 19997 }, creds: b, programArmed: true })
+  assert.match(yml, /\n  program: \{ overridePublisher: yes \}/)
+  assert.match(yml, /\n  program-backup: \{ overridePublisher: yes \}/)
+})
+
+test("parseIngestLog: listener address and last refused publish (redacted)", () => {
+  const log = [
+    "2026/10/15 00:14:20 INF [RTMP] listener opened on 127.0.0.1:19350",
+    "2026/10/15 00:14:40 INF [RTMP] started with listener on 0.0.0.0:19350 (TCP/RTMP)",
+    "2026/10/15 00:14:58 WAR [RTMP] [conn 192.168.1.40:57022] failed to authenticate: authentication failed",
+    "2026/10/15 00:15:00 INF [RTMP] [conn 192.168.1.40:57022] closed: failed to authenticate: authentication failed",
+    "2026/10/15 00:15:30 INF [RTMP] [conn 192.168.1.40:57030] closed: terminated",
+    "2026/10/15 00:16:10 INF [RTMP] [conn 127.0.0.1:61022] closed: read tcp 127.0.0.1:19350->127.0.0.1:61022: read: connection reset by peer",
+    "2026/10/15 00:16:12 INF [RTMP] [conn 127.0.0.1:61030] closed: EOF",
+  ].join("\n")
+  const r = parseIngestLog(log)
+  assert.equal(r.listen, "0.0.0.0:19350")
+  assert.equal(r.lastReject?.at, "2026/10/15 00:15:00")
+  assert.match(r.lastReject?.text ?? "", /192\.168\.1\.40.*authentication failed/)
+  assert.deepEqual(parseIngestLog(""), { listen: null, lastReject: null })
+})
+
+test("liveConfigMatches: catches a missed MediaMTX reload (old bind or old key)", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", programUser: "obs", programPass: "op", backupUser: "bak", backupPass: "bp" }
+  const yml = buildMediamtxConfig({ host: "127.0.0.1", ports: { rtmp: 19350, hls: 18888, api: 19997 }, creds, programArmed: true, ingestHost: "0.0.0.0" })
+  const users = ["p", "obs", "bak", "r"].map((user) => ({ user }))
+  assert.ok(liveConfigMatches(yml, { rtmpAddress: "0.0.0.0:19350", authInternalUsers: users }))
+  assert.ok(!liveConfigMatches(yml, { rtmpAddress: "127.0.0.1:19350", authInternalUsers: users }))
+  assert.ok(!liveConfigMatches(yml, { rtmpAddress: "0.0.0.0:19350", authInternalUsers: ["p", "obs_old", "bak", "r"].map((user) => ({ user })) }))
 })

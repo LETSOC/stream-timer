@@ -85,7 +85,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { source: "main", wanted: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false }
+const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false, ramp: 1 }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -93,43 +93,100 @@ function programTargetMs() {
   const base = prog.latencyMs === null ? progFallbackMs : prog.latencyMs + screencastLag() - readerLagMs
   return Math.max(100, Math.min(5000, base + sync.trimMs + videoDelayMs()))
 }
-function startProgramReader() {
-  if (prog.reader || !programFile || Date.now() < prog.restartAt) return
-  let url = ""
+function readUrlFor(source) {
   // Main = program-read.url, Backup = program-backup-read.url next to it (both 0600, written by lib/relay).
-  const file = prog.source === "backup" ? path.join(path.dirname(programFile), "program-backup-read.url") : programFile
-  try { url = fs.readFileSync(file, "utf8").trim() } catch { return }
-  if (!url) return
+  const file = source === "backup" ? path.join(path.dirname(programFile), "program-backup-read.url") : programFile
+  try { return fs.readFileSync(file, "utf8").trim() } catch { return "" }
+}
+/** One ffmpeg reading an input's audio as PCM into `reader.sink` (prog when on air, spare when warm). */
+function spawnReader(source, sink) {
+  const url = readUrlFor(source)
+  if (!url) return null
   const reader = spawn(ffmpegBin, ["-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-rw_timeout", "5000000", "-i", url, "-vn", "-ac", "2", "-ar", String(RATE), "-f", "s16le", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"], env: childEnv })
-  prog.reader = reader
+  reader.sink = sink
   reader.stdout.on("data", (chunk) => {
-    prog.chunks.push(chunk)
-    prog.bytes += chunk.length
+    const into = reader.sink
+    if (!into) return // stopped/replaced: late data must not leak into the on-air queue
+    into.chunks.push(chunk)
+    into.bytes += chunk.length
     // Hard ceiling: never more than target + 1s queued.
     const max = (Math.round(((prog.targetMs + 1000) / 1000) * RATE)) * 4
-    if (prog.bytes > max) dropProgram(prog.bytes - max)
+    if (into.bytes > max) dropFrom(into, into.bytes - max)
   })
   reader.on("exit", () => {
-    if (prog.reader === reader) prog.reader = null
-    prog.chunks = []; prog.bytes = 0; prog.primed = false; prog.levelMs = null
-    prog.restartAt = Date.now() + 2000
+    if (prog.reader === reader) {
+      prog.reader = null
+      prog.chunks = []; prog.bytes = 0; prog.primed = false; prog.levelMs = null
+      prog.restartAt = Date.now() + 2000
+    }
+    if (spare.reader === reader) Object.assign(spare, { reader: null, chunks: [], bytes: 0, restartAt: Date.now() + 5000 })
   })
+  return reader
+}
+function startProgramReader() {
+  if (prog.reader || !programFile || Date.now() < prog.restartAt) return
+  const reader = spawnReader(prog.source, prog)
+  if (!reader) return
+  prog.reader = reader
   log(`[audio] program audio: reading the ${prog.source === "backup" ? "Backup" : "Main"} feed`)
 }
 function stopProgramReader() {
   if (!prog.reader) return
-  prog.reader.kill("SIGTERM")
+  const r = prog.reader
   prog.reader = null
+  r.sink = null
+  r.kill("SIGTERM")
   prog.chunks = []; prog.bytes = 0; prog.primed = false; prog.levelMs = null
   log("[audio] program audio: off")
 }
-function dropProgram(bytes) {
-  let left = bytes - (bytes % 4)
-  while (left > 0 && prog.chunks.length) {
-    const head = prog.chunks[0]
-    if (head.length <= left) { prog.chunks.shift(); prog.bytes -= head.length; left -= head.length }
-    else { prog.chunks[0] = head.subarray(left); prog.bytes -= left; left = 0 }
+/**
+ * The other input, read warm while the program is on air (already queued at the delay), so a
+ * Main↔Backup switch hands over its audio at once instead of a ~3s refill gap. Retries every 5s
+ * when that input isn't publishing.
+ */
+const spare = { source: null, reader: null, chunks: [], bytes: 0, restartAt: 0 }
+function startSpare() {
+  const other = prog.source === "backup" ? "main" : "backup"
+  if (spare.reader && spare.source === other) return
+  stopSpare()
+  if (!programFile || Date.now() < spare.restartAt) return
+  spare.source = other
+  spare.reader = spawnReader(other, spare)
+}
+function stopSpare() {
+  if (spare.reader) { const r = spare.reader; spare.reader = null; r.sink = null; r.kill("SIGTERM") }
+  Object.assign(spare, { chunks: [], bytes: 0 })
+}
+/** Switch the on-air program audio to `source`: promote the warm reader if it has audio queued. */
+function switchProgramSource(source) {
+  const old = prog.reader
+  prog.source = source
+  prog.latencyMs = null
+  prog.ramp = 0 // ~30ms fade-in on the new input: no click at the splice
+  if (spare.reader && spare.source === source && spare.bytes > 0) {
+    const r = spare.reader
+    spare.reader = null
+    r.sink = prog
+    prog.reader = r
+    prog.chunks = spare.chunks; prog.bytes = spare.bytes; prog.primed = false; prog.levelMs = null; prog.holding = false
+    Object.assign(spare, { chunks: [], bytes: 0, restartAt: 0 })
+    if (old) { old.sink = null; old.kill("SIGTERM") }
+    log(`[audio] program source → ${source === "backup" ? "Backup" : "Main"} (warm reader, no refill)`)
+  } else {
+    if (old) { stopProgramReader(); prog.restartAt = 0 }
+    log(`[audio] program source → ${source === "backup" ? "Backup" : "Main"}`)
   }
+}
+function dropFrom(q, bytes) {
+  let left = bytes - (bytes % 4)
+  while (left > 0 && q.chunks.length) {
+    const head = q.chunks[0]
+    if (head.length <= left) { q.chunks.shift(); q.bytes -= head.length; left -= head.length }
+    else { q.chunks[0] = head.subarray(left); q.bytes -= left; left = 0 }
+  }
+}
+function dropProgram(bytes) {
+  dropFrom(prog, bytes)
 }
 function readProgramFrames(frames) {
   const want = frames * 4
@@ -202,17 +259,22 @@ function pcmBlock(n, wallMs) {
   bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
   const bed = bedLine.process(feeder ? feeder.readFloat(n, wallMs) : new Float32Array(n * 2))
   const out = Buffer.alloc(n * 4)
-  // Fade the stream audio out only once program audio is actually flowing (no hole while the reader starts).
-  const target = programPcm ? 0 : 1
-  if (programPcm) prog.mixedAt = Date.now()
+  // While the program (Main or Backup) is on air the bed/tone is suppressed: program audio only.
+  // On entering the program the bed fades out once program audio first flows (no hole while the reader
+  // starts, 3s cap); after that it stays out through Main↔Backup switches, reader restarts, priming and
+  // underruns, and only comes back when /stream leaves the program for a card/countdown.
+  if (programPcm) { prog.mixedAt = Date.now(); prog.flowed = true }
+  const suppress = prog.wanted && (prog.flowed || Date.now() - prog.wantedSince > 3000)
+  const target = suppress ? 0 : 1
   for (let i = 0; i < n; i++) {
     if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
     else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
     let l = bed[i * 2] * prog.gain * 32767
     let r = bed[i * 2 + 1] * prog.gain * 32767
     if (programPcm) {
-      const pl = programPcm.readInt16LE(i * 4)
-      const pr = programPcm.readInt16LE(i * 4 + 2)
+      if (prog.ramp < 1) prog.ramp = Math.min(1, prog.ramp + 1 / 1440)
+      const pl = Math.round(programPcm.readInt16LE(i * 4) * prog.ramp)
+      const pr = Math.round(programPcm.readInt16LE(i * 4 + 2) * prog.ramp)
       l += pl
       r += pr
       const m = Math.max(Math.abs(pl), Math.abs(pr))
@@ -246,7 +308,7 @@ async function shutdown(code) {
   stopping = true
   if (ticker) clearInterval(ticker)
   if (audioTicker) clearInterval(audioTicker)
-  try { prog.reader?.kill("SIGTERM") } catch { /* gone */ }
+  try { prog.reader?.kill("SIGTERM"); spare.reader?.kill("SIGTERM") } catch { /* gone */ }
   try { feeder.stop() } catch { /* gone */ }
   try { ffmpeg?.stdin.end() } catch { /* closed */ }
   try { await browser?.close() } catch { /* gone */ }
@@ -432,20 +494,16 @@ setInterval(async () => {
   const screen = info.screen
   // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
   // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
-  if (info.source !== prog.source) {
-    log(`[audio] program source → ${info.source === "backup" ? "Backup" : "Main"}`)
-    prog.source = info.source
-    prog.latencyMs = null
-    if (prog.reader) { stopProgramReader(); prog.restartAt = 0 }
-  }
+  if (info.source !== prog.source) switchProgramSource(info.source)
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
   if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.7 + info.lat * 0.3
-  const wanted = screen === "program"
-  if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) log("[audio] /stream shows the program: audio follows OBS") }
+  // A failed/empty page read (reload, busy page) is not "left the program": keep the last state.
+  const wanted = screen === "" ? prog.wanted : screen === "program"
+  if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) { prog.wantedSince = Date.now(); prog.flowed = false; log("[audio] /stream shows the program: audio follows OBS") } }
   else if (prog.wanted) log("[audio] /stream left the program: audio bed back")
   prog.wanted = wanted
-  if (wanted) startProgramReader()
-  else if (prog.reader && Date.now() - prog.lastWantedAt > 10000) stopProgramReader() // keep warm 10s for quick back-and-forth
+  if (wanted) { startProgramReader(); startSpare() }
+  else if (prog.reader && Date.now() - prog.lastWantedAt > 10000) { stopProgramReader(); stopSpare() } // keep warm 10s for quick back-and-forth
 }, 250)
 ticker = setInterval(() => {
   if (!latest || !ffmpeg?.stdin.writable) return

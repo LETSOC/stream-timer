@@ -67,6 +67,47 @@ API (operator, same-origin POST `/api/relay`): `reveal-backup`, `backup-pull {ur
 again), `failover {failover: {auto, stallSec, returnSec, autoReturn}}`. The switch itself is the
 transport action `{ type: "programSource", source: "main" | "backup" }` (deck WS / `/api/deck/action`).
 
+### Second laptop on the LAN ("Accept program ingest from LAN")
+
+By default the RTMP ingest listens on `127.0.0.1` only, so OBS on another computer can't connect.
+Relay card › /program › tick **Accept program ingest from LAN** (saved, default off):
+
+- MediaMTX's RTMP listener moves to `0.0.0.0:19350` (or `INGEST_HOST`, e.g. one interface's IP).
+  LL-HLS (preview) and the API stay on `127.0.0.1`.
+- Only the two OBS logins (`/program`, `/program-backup`) may connect from other addresses, and only
+  to **publish** their own path. Reading, the API and the internal Slate/Capture publishers stay
+  loopback-only, so nobody on the LAN can watch or take over a path. The keys are still required
+  (rotate with **New key** if one leaks). The setting only applies while the program feed is armed.
+- Turning it on or off restarts MediaMTX's RTMP listener: connected publishers drop for a moment (OBS reconnects by itself if "Automatically reconnect" is on, the default).
+- The reveal panels then also show **LAN** `rtmp://<this Mac's LAN IP>:19350/` (private IPv4, en0
+  first) with Copy. Use it as the second laptop's OBS Server.
+- macOS: the first time, the firewall may ask whether **mediamtx** may accept incoming connections:
+  click **Allow** (System Settings › Network › Firewall › Options if you missed it). Both laptops must
+  be on the same network, and "client isolation" on guest Wi-Fi blocks this.
+
+Second laptop OBS › Settings › Stream: Service **Custom…**, Server `rtmp://<LAN IP>:19350/`,
+Stream Key `program-backup?user=bak_…&pass=…` (or the `/program` key to be Main). Settings › Output:
+x264/hardware, CBR 3000–6000 kb/s, keyframe interval 1 s (LL-HLS wants short GOPs), AAC 48 kHz.
+
+### When the LAN laptop can't (re)connect
+
+- **Connection refused** = nothing listens on 19350: the relay server is stopped (Disarm, or a server
+  crash). Desk "Stop all" no longer stops MediaMTX while the program input is armed.
+- **Authentication failed** = wrong/old key. Each input has its own **New key**: Main's rotates Main
+  only, Backup's rotates Backup only.
+- A reconnecting OBS takes over its path at once (`overridePublisher: yes`), even if the dead session
+  hasn't timed out.
+- The LAN IP can change (DHCP, other Wi-Fi): compare OBS's Server with the LAN row in the panel.
+- Relay card › /program shows **Ingest: listening on …** and the **last refused** publish from
+  `data/relay/mediamtx.log` (the log restarts with MediaMTX).
+
+### Bed / tone during the program
+
+While the program (Main or Backup) is on air, Browser capture carries program audio only: the bed or
+tone fades out once program audio first flows (3 s cap) and stays out through Main↔Backup switches,
+reader restarts and underruns. It comes back only when /stream leaves the program for a card or the
+countdown.
+
 ## Files (data/relay/, files 0600, folder 0700, all gitignored)
 
 | file | what |
