@@ -2349,8 +2349,8 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
       <div data-testid="stream-audio-routing" className="space-y-1 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
         <p className="font-bold">/stream page audio</p>
         <p className="text-black/60">What plays in /stream itself (viewers in a browser and the OBS Browser Source). Saved and synced at once.</p>
-        <label className="flex min-h-7 items-center gap-2"><input type="checkbox" data-testid="stream-audio-program" checked={routing.program} onChange={(e) => onRouting({ program: e.target.checked })} />Raw program audio (Main/Backup while on air)</label>
-        <label className="flex min-h-7 items-center gap-2"><input type="checkbox" data-testid="stream-audio-bed" checked={routing.bed} onChange={(e) => onRouting({ bed: e.target.checked })} />Stream audio (bed/tone) — capture channel settings; muted while the program is on air</label>
+        <label className="flex items-start gap-2"><input type="checkbox" data-testid="stream-audio-program" className="mt-0.5 size-4 shrink-0 accent-black" checked={routing.program} onChange={(e) => onRouting({ program: e.target.checked })} />Raw program audio (Main/Backup while on air)</label>
+        <label className="flex items-start gap-2"><input type="checkbox" data-testid="stream-audio-bed" className="mt-0.5 size-4 shrink-0 accent-black" checked={routing.bed} onChange={(e) => onRouting({ bed: e.target.checked })} />Stream audio (bed/tone) — capture channel settings; quiet while raw program audio is playing</label>
       </div>
       {view ? (["slate", "capture"] as const).map((ch) => {
         const cfg = view[ch]

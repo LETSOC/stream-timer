@@ -23,3 +23,17 @@ test("overlay never fights the player's mute (no toggling under a card)", async 
   assert.equal(viewerMutedState(false, true, false), true) // viewer muted
   assert.equal(viewerMutedState(false, false, true), null)
 })
+
+test("unchecked raw program audio does not lock a viewer's unmute", async () => {
+  const { programWantsSound, bedGainMuted } = await import("@/components/stream-audio-overlay")
+  const off = { active: true, hardMuted: false, programAudio: false, viewerChose: false, viewerMuted: false }
+  assert.equal(programWantsSound(off), false) // checkbox unchecked: start silent
+  assert.equal(programWantsSound({ ...off, viewerChose: true, viewerMuted: false }), true) // Unmute sticks
+  assert.equal(programWantsSound({ ...off, viewerChose: true, viewerMuted: true }), false)
+  assert.equal(programWantsSound({ ...off, programAudio: true }), true) // checked: sound without a click
+  assert.equal(programWantsSound({ active: true, hardMuted: true, programAudio: true, viewerChose: true, viewerMuted: false }), false) // ?mute=1 still wins
+  assert.equal(programWantsSound({ active: false, hardMuted: false, programAudio: false, viewerChose: true, viewerMuted: false }), false) // countdown / card
+  assert.equal(bedGainMuted({ urlMute: false, screenIsProgram: true, programAudio: false, viewerChose: false, viewerMuted: false }), false) // bed plays while program audio is off
+  assert.equal(bedGainMuted({ urlMute: false, screenIsProgram: true, programAudio: true, viewerChose: false, viewerMuted: false }), true)
+  assert.equal(bedGainMuted({ urlMute: false, screenIsProgram: true, programAudio: false, viewerChose: true, viewerMuted: true }), true)
+})

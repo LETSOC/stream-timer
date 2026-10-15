@@ -1,9 +1,10 @@
 "use client"
 /**
  * /stream in-page bed (Stream audio routing "bed/tone"): the capture channel's tone or playlist,
- * same order and volume, muted while the program is on air (the existing bed rule).
+ * same order and volume. Quiet while raw program audio is actually playing, or while the viewer has muted.
  */
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
+import { bedGainMuted, subscribeViewerMute, viewerHasChosen, isViewerMuted } from "@/components/stream-audio-overlay"
 
 export type StreamBedPlan = { mode: string; files: string[]; shuffle: boolean; volumeDb: number; toneHz: number; toneDb: number; fadeInSec: number } | null
 
@@ -16,8 +17,11 @@ export function nextIndex(i: number, n: number, shuffle: boolean, rnd = Math.ran
   return j >= i ? j + 1 : j
 }
 
-export function StreamBed({ plan, muted, viewKey }: { plan: StreamBedPlan; muted: boolean; viewKey: string }) {
+export function StreamBed({ plan, urlMute = false, screenIsProgram = false, programAudio = true, muted = false, viewKey }: { plan: StreamBedPlan; urlMute?: boolean; screenIsProgram?: boolean; programAudio?: boolean; /** @deprecated prefer urlMute + screenIsProgram + programAudio */ muted?: boolean; viewKey: string }) {
   const audio = useRef<HTMLAudioElement | null>(null)
+  const [, setPin] = useState(0)
+  useEffect(() => subscribeViewerMute(() => setPin((n) => n + 1)), [])
+  const quiet = muted || bedGainMuted({ urlMute, screenIsProgram, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
   const index = useRef(0)
   const tone = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null)
   const files = plan?.mode === "bed" ? plan.files : []
@@ -57,11 +61,11 @@ export function StreamBed({ plan, muted, viewKey }: { plan: StreamBedPlan; muted
   // Volume + mute (duck to silence while the program is on air), with a short ramp.
   const vol = plan ? dbToGain(plan.mode === "tone" ? plan.toneDb + plan.volumeDb : plan.volumeDb) : 0
   useEffect(() => {
-    const target = muted ? 0 : vol
+    const target = quiet ? 0 : vol
     if (audio.current) audio.current.volume = target
     const t = tone.current
     if (t) t.gain.gain.setTargetAtTime(target, t.ctx.currentTime, 0.1)
-  }, [muted, vol, plan?.mode])
+  }, [quiet, vol, plan?.mode])
 
   if (!plan || plan.mode === "silent") return null
   return <audio ref={audio} data-testid="stream-bed" hidden preload="auto" />

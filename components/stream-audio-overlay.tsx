@@ -22,9 +22,48 @@ export function viewerMutedState(viewerWantsSound: boolean, feedWantsSound: bool
   return feedWantsSound && muted ? false : null
 }
 
-/** The viewer's own Mute (overlay): the on-air player's watchdog must not unmute it again. */
+/**
+ * Whether the on-air program element may sound.
+ * The desk checkbox is the default (OBS follows it). A viewer's Mute/Unmute then wins,
+ * including when the checkbox is unchecked — otherwise Unmute is forced back off every tick.
+ */
+export function programWantsSound(input: { active: boolean; hardMuted: boolean; programAudio: boolean; viewerChose: boolean; viewerMuted: boolean }): boolean {
+  if (!input.active || input.hardMuted) return false
+  if (input.viewerChose) return !input.viewerMuted
+  return input.programAudio
+}
+
+/** Bed/tone is quiet for a URL mute, a viewer Mute, or while program audio is actually playing. */
+export function bedGainMuted(input: { urlMute: boolean; screenIsProgram: boolean; programAudio: boolean; viewerChose: boolean; viewerMuted: boolean }): boolean {
+  if (input.urlMute || (input.viewerChose && input.viewerMuted)) return true
+  return programWantsSound({ active: input.screenIsProgram, hardMuted: false, programAudio: input.programAudio, viewerChose: input.viewerChose, viewerMuted: input.viewerMuted })
+}
+
+/** The viewer's own Mute (overlay): the on-air player's watchdog must not undo it. */
 let viewerMuted = false
+let viewerChose = false
+const viewerListeners = new Set<() => void>()
+function notifyViewer() {
+  for (const listener of viewerListeners) listener()
+}
 export const isViewerMuted = () => viewerMuted
+export const viewerHasChosen = () => viewerChose
+export function setViewerMute(muted: boolean) {
+  viewerChose = true
+  viewerMuted = muted
+  notifyViewer()
+}
+/** Desk checkbox changed: drop the local pin so the checkbox applies, then Unmute can stick again. */
+export function resetViewerChoice() {
+  if (!viewerChose && !viewerMuted) return
+  viewerChose = false
+  viewerMuted = false
+  notifyViewer()
+}
+export function subscribeViewerMute(listener: () => void) {
+  viewerListeners.add(listener)
+  return () => { viewerListeners.delete(listener) }
+}
 const PREF = "stream-audio-overlay"
 const sources = new WeakMap<HTMLVideoElement, { ctx: AudioContext; analyser: AnalyserNode }>()
 
@@ -51,7 +90,12 @@ export function StreamAudioOverlay() {
     const id = window.setInterval(() => {
       if (Date.now() > hideAt.current) setShown(false)
       const video = document.querySelector<HTMLVideoElement>("[data-testid=program-feed] video")
-      if (!video) { setDb(null); setMuted(true); return }
+      if (!video) {
+        setDb(null)
+        // No program element (countdown, audio routed off): don't snap a chosen Unmute back to muted.
+        if (!userSet.current) setMuted(true)
+        return
+      }
       // Keep the on-air player at our volume / mute (it may be rebuilt or switched Main↔Backup).
       video.volume = volumeRef.current
       // After the viewer chose, their choice wins over the player's own autoplay muting.
@@ -59,11 +103,13 @@ export function StreamAudioOverlay() {
       // countdown). The viewer's choice only mutes, or unmutes when the player wants sound: never fight it
       // (that fight toggled muted every 150ms = choppy audio whenever a card was over the program).
       if (userSet.current) {
-        const feedWants = video.closest<HTMLElement>("[data-testid=program-feed]")?.dataset.wantSound === "1"
-        const next = viewerMutedState(wantSound.current, feedWants, video.muted)
+        // hard-mute (preview URL, standby input, picture not on screen) stays silent.
+        // An unchecked "raw program audio" box is not a hard mute: Unmute has to stick.
+        const hard = video.closest<HTMLElement>("[data-testid=program-feed]")?.dataset.hardMute === "1"
+        const next = viewerMutedState(wantSound.current, !hard, video.muted)
         if (next !== null) { video.muted = next; if (!next) void video.play().catch(() => undefined) }
-      }
-      setMuted(video.muted)
+        setMuted(!wantSound.current)
+      } else setMuted(video.muted)
       const s = sources.get(video)
       if (s) {
         const buf = new Float32Array(s.analyser.fftSize)
@@ -90,26 +136,30 @@ export function StreamAudioOverlay() {
   const toggle = () => {
     // Runs inside the click: browsers allow unmuting (and AudioContext) only from a user gesture.
     const video = document.querySelector<HTMLVideoElement>("[data-testid=program-feed] video")
-    wantSound.current = muted
+    const wants = muted
+    wantSound.current = wants
     userSet.current = true
-    viewerMuted = !muted
+    setViewerMute(!wants)
+    setMuted(!wants)
     if (!video) return
-    if (muted) {
-      video.muted = false
-      void video.play().catch(() => undefined)
-      if (!sources.has(video)) {
-        try {
-          const ctx = new AudioContext()
-          const analyser = ctx.createAnalyser()
-          analyser.fftSize = 1024
-          ctx.createMediaElementSource(video).connect(analyser)
-          analyser.connect(ctx.destination)
-          sources.set(video, { ctx, analyser })
-        } catch (e) { console.warn("[audio overlay] meter unavailable:", e) }
-      }
-      void sources.get(video)?.ctx.resume()
-    } else video.muted = true
-    setMuted(video.muted)
+    const hard = video.closest<HTMLElement>("[data-testid=program-feed]")?.dataset.hardMute === "1"
+    if (!wants || hard) {
+      video.muted = true
+      return
+    }
+    video.muted = false
+    void video.play().catch(() => undefined)
+    if (!sources.has(video)) {
+      try {
+        const ctx = new AudioContext()
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 1024
+        ctx.createMediaElementSource(video).connect(analyser)
+        analyser.connect(ctx.destination)
+        sources.set(video, { ctx, analyser })
+      } catch (e) { console.warn("[audio overlay] meter unavailable:", e) }
+    }
+    void sources.get(video)?.ctx.resume()
   }
   const pct = db === null || muted ? 0 : Math.max(0, Math.min(100, ((db + 60) / 60) * 100))
   return (
