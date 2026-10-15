@@ -6,6 +6,9 @@ import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
 
 export type StageOptions = {
+  /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
+  streamProgramAudio: boolean
+  streamBedAudio: boolean
   checker: number
   showMeta: boolean
   showLink: boolean
@@ -62,6 +65,8 @@ export const DEFAULT_STAGE: StageOptions = {
   showMeta: true,
   showLink: true,
   transparent: false,
+  streamProgramAudio: true,
+  streamBedAudio: false,
   lineSpacing: 1.14,
   blockGap: 1.2,
   clockScale: 1,
@@ -150,6 +155,8 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     showMeta: pick("showMeta", (v) => v !== false),
     showLink: pick("showLink", (v) => v !== false),
     transparent: pick("transparent", (v) => v === true),
+    streamProgramAudio: pick("streamProgramAudio", (v) => v !== false),
+    streamBedAudio: pick("streamBedAudio", (v) => v === true),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),
     blockGap: pick("blockGap", (v, f) => clamp(v, 0, 8, f)),
     clockScale: pick("clockScale", (v, f) => clampSize(v, CLOCK_SCALE_RANGE, f)),

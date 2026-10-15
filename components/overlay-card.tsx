@@ -32,8 +32,7 @@ export function OverlayCard({ kind, title, message, image, fit = "cover", since,
   return (
     <div
       data-testid={`overlay-${kind}`}
-      className={`countdown-stage relative isolate aspect-video w-full overflow-hidden bg-[#070a16] bg-cover bg-center text-center text-white ${className ?? ""}`}
-      style={{ backgroundImage: cover ? undefined : "url('/brand/hero-bg.png')" }}
+      className={`countdown-stage stage-bg relative isolate aspect-video w-full overflow-hidden text-center text-white ${className ?? ""}`}
     >
       {cover ? (
         <div data-testid="overlay-image-box" className="absolute inset-0 overflow-hidden">
@@ -48,7 +47,7 @@ export function OverlayCard({ kind, title, message, image, fit = "cover", since,
           <img src={image} alt="" draggable={false} className="block h-full w-full max-w-none object-contain" />
         </div>
       ) : null}
-      <div className={`absolute inset-x-[8%] flex flex-col items-center overflow-hidden ${contain ? "top-[52%] bottom-[5%] justify-start" : "inset-y-[6%] justify-center"}`}>
+      <div className={`absolute flex flex-col items-center overflow-hidden ${contain ? "top-[52%] justify-start" : "justify-center"}`} style={{ left: "var(--inset)", right: "var(--inset)", bottom: "var(--safe)", ...(contain ? {} : { top: "var(--inset)" }) }}>
         <div className="mb-[2cqi] shrink-0 rounded-full border border-white/30 px-[1.4cqi] py-[0.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.18em] uppercase">
           {kind === "break" ? "Short break" : kind === "welcome" ? "We’re back" : "Stand by"}
         </div>

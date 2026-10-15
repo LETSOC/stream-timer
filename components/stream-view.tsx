@@ -11,6 +11,8 @@ import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
 import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
+import { StageGuides } from "@/components/stage-guides"
+import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
 import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { endInstant } from "@/lib/transport"
@@ -96,6 +98,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [testUntil, setTestUntil] = useState<number | null>(initial?.testUntil ?? null)
   const [pausedAt, setPausedAt] = useState<number | null>(initial?.pausedAt ?? null)
   const [stage, setStage] = useState<Stage>(() => parseStage(initial?.stage ?? {}))
+  const [bed, setBed] = useState<StreamBedPlan>(null)
   const [programReady, setProgramReady] = useState(false)
   const [switchBufferMs, setSwitchBufferMs] = useState(SWITCH_BUFFER_MS)
   const [sourceReady, setSourceReady] = useState<{ main: boolean; backup: boolean }>({ main: false, backup: false })
@@ -112,7 +115,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { switchBufferMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { bed?: unknown; switchBufferMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (reloadIfRebuilt(body.build)) return
@@ -122,6 +125,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           setProgramReady(body.programReady === true)
           if (typeof body.switchBufferMs === "number") setSwitchBufferMs(body.switchBufferMs)
           setSourceReady((cur) => (cur.main === (body.mainReady === true) && cur.backup === (body.backupReady === true) ? cur : { main: body.mainReady === true, backup: body.backupReady === true }))
+          const nextBed = (body.bed && typeof body.bed === "object" ? body.bed : null) as StreamBedPlan
+          setBed((cur) => (JSON.stringify(cur) === JSON.stringify(nextBed) ? cur : nextBed))
           if (body.stage && typeof body.stage === "object") {
             setStage(parseStage(body.stage))
           }
@@ -206,15 +211,17 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   }
 
   return (
-    <main className={`flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
+    <main className={`relative flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
       {/* Prewarmed whenever OBS is sending, so "Show program" is instant. */}
       {(["main", "backup"] as const).map((source) => {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir || !stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} />
       })}
       <StreamAudioOverlay />
+      {stage.streamBedAudio ? <StreamBed plan={bed} muted={params.get("mute") === "1" || shownScreen === "program"} viewKey={viewKey} /> : null}
+      {params.get("guides") === "1" ? <StageGuides className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null}
       {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard
           kind={shownScreen}

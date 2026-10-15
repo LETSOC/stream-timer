@@ -34,6 +34,8 @@ export type TransportAction =
   | { type: "setEnd"; endTime: string; endAt: string }
   /** Program feed input: Main (OBS) or Backup. Doesn't change the screen. */
   | { type: "programSource"; source: "main" | "backup" }
+  /** /stream in-page audio routing: raw program audio and/or the bed (applied at once, synced). */
+  | { type: "streamAudio"; program?: boolean; bed?: boolean }
 
 export type ProgramSourcesView = {
   main: SourceHealth & Partial<InputReadout>
@@ -143,6 +145,12 @@ export function parseAction(value: unknown): TransportAction | null {
         : null
     case "programSource":
       return v.source === "main" || v.source === "backup" ? { type: "programSource", source: v.source } : null
+    case "streamAudio": {
+      const out: { type: "streamAudio"; program?: boolean; bed?: boolean } = { type: "streamAudio" }
+      if (typeof v.program === "boolean") out.program = v.program
+      if (typeof v.bed === "boolean") out.bed = v.bed
+      return out.program === undefined && out.bed === undefined ? null : out
+    }
     default:
       return null
   }
@@ -200,6 +208,8 @@ export function applyTransport(state: TransportState, action: TransportAction, n
     }
     case "programSource":
       return next({}, { programSource: action.source })
+    case "streamAudio":
+      return next({}, { ...(action.program === undefined ? {} : { streamProgramAudio: action.program }), ...(action.bed === undefined ? {} : { streamBedAudio: action.bed }) })
     case "setEnd":
       return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt })
   }
@@ -221,6 +231,7 @@ export type DeckState = {
   overlay: StageOptions["overlay"]
   program: boolean
   programSource: "main" | "backup"
+  streamAudio?: { program: boolean; bed: boolean }
   /** Live health of both inputs (null = relay not armed). */
   programSources: ProgramSourcesView | null
   /** Last known: is OBS publishing to the relay's /program path? null = not known (relay not armed). */
@@ -253,6 +264,7 @@ export function deckState(
     overlay: state.stage.overlay,
     program: state.stage.program,
     programSource: state.stage.programSource,
+    streamAudio: { program: state.stage.streamProgramAudio !== false, bed: state.stage.streamBedAudio === true },
     programSources: sources,
     programReady,
     overlayAt: state.stage.overlayAt,

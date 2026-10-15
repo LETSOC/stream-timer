@@ -135,6 +135,27 @@
   --bold-font: Arial, Helvetica, sans-serif;
   --font-size-h1: 3.35cqi;
   --font-size-h4: 1.875cqi;
+  /* Layout grid, designed at 1920x1080 in px and scaled with the stage width (1px@1080p = --px). */
+  --px: calc(100cqi / 1920);
+  --safe: calc(32 * var(--px)); /* 32px safe margin all around */
+  --inset: calc(96 * var(--px)); /* left column + top start at 96px */
+  --qr: calc(178 * var(--px)); /* animated QR: exactly 178x178 */
+  --bg-base: #0000b6;
+  --bg-light: #0a0ac8; /* slightly lighter */
+  --bg-dark: #0000a2; /* slightly darker */
+}
+/* Base #0000B6 with a slow, subtle "live" pulse between a lighter and a darker shade. */
+.stage-bg {
+  background-color: var(--bg-base);
+  animation: stage-bg-pulse 9s ease-in-out infinite alternate;
+}
+@keyframes stage-bg-pulse {
+  0% { background-color: var(--bg-dark); }
+  50% { background-color: var(--bg-base); }
+  100% { background-color: var(--bg-light); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-bg { animation: none; }
 }
 
 .countdown-stage .live-wash {
