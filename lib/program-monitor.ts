@@ -6,7 +6,9 @@
 import { eventBus } from "@/lib/event-bus"
 import { readServerState } from "@/lib/event-server"
 import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type FailoverMemory } from "@/lib/program-source"
-import { programSourceHealth, readSettings, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
+import fs from "node:fs"
+import path from "node:path"
+import { programSourceHealth, readSettings, relayDir, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
 
@@ -14,7 +16,20 @@ const KEY = Symbol.for("stream-timer.program-monitor")
 type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string }
 function monitor(): Monitor {
   const holder = globalThis as { [KEY]?: Monitor }
-  return (holder[KEY] ??= { timer: null, memory: FRESH_MEMORY, last: null, log: [], sig: "" })
+  if (!holder[KEY]) {
+    // The last switch survives a server restart: devices still see it, and an auto-failover to Backup
+    // still auto-returns afterwards.
+    const last = loadLast()
+    holder[KEY] = { timer: null, memory: { ...FRESH_MEMORY, failedOver: Boolean(last?.auto && last.to === "backup") }, last, log: last ? [last] : [], sig: "" }
+  }
+  return holder[KEY]
+}
+const lastFile = () => path.join(relayDir(), "program-last-switch.json")
+function loadLast(): FailoverEvent | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(lastFile(), "utf8")) as FailoverEvent
+    return raw && typeof raw.at === "number" && (raw.to === "main" || raw.to === "backup") ? raw : null
+  } catch { return null }
 }
 
 /** What the deck/desk show. null while the program input isn't armed. */
@@ -36,6 +51,7 @@ export function noteSourceSwitch(event: FailoverEvent) {
   const m = monitor()
   m.last = event
   m.log = [...m.log, event].slice(-50)
+  try { fs.writeFileSync(lastFile(), JSON.stringify(event)) } catch { /* best effort */ }
   eventBus().emit("program-sources")
 }
 export function onProgramSources(listener: () => void): () => void {

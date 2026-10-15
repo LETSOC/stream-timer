@@ -646,6 +646,9 @@ export function parseStrayPublishers(psOutput: string, ownPgid: number | null | 
     if (own.has(pgid)) continue
     const isFfmpeg = /^(\S*\/)?ffmpeg(\s|$)/.test(command)
     if (!isFfmpeg || !/\s-f\s+flv\s/.test(command) || !/rtmps?:\/\//.test(command)) continue
+    // Someone's ffmpeg feeding the program input (/program, /program-backup) is a program source like
+    // OBS, not one of our stray stream publishers: Stop all must not cut the program feed.
+    if (/rtmps?:\/\/[^\s/]+\/program(-backup)?(\?|\s|$)/.test(command)) continue
     strays.push({ pid, command: redact(command).slice(0, 160) })
   }
   return strays

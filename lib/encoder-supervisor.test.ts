@@ -42,3 +42,12 @@ test("ignores the HLS preview, file renders, previews and unrelated processes", 
 test("skips its own pid", () => {
   assert.deepEqual(parseStrayPublishers(ps, 500, 900), [])
 })
+
+test("Stop all leaves ffmpeg feeding the program inputs alone", () => {
+  const ps = [
+    "  700   700 ffmpeg -re -i x -f flv rtmp://192.168.1.5:19350/program?user=obs_a&pass=b",
+    "  701   701 ffmpeg -re -i x -f flv rtmp://127.0.0.1:19350/program-backup?user=bak_a&pass=b",
+    "  702   702 ffmpeg -re -i x -f flv rtmp://live.example.com/app/key",
+  ].join("\n")
+  assert.deepEqual(parseStrayPublishers(ps, null, 1).map((s) => s.pid), [702])
+})

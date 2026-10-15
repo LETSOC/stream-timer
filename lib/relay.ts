@@ -9,7 +9,7 @@
  * MediaMTX listens on 127.0.0.1 only; the desk preview goes through /api/relay/hls (operator auth).
  */
 import os from "node:os"
-import { parseFailover, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
+import { parseFailover, pullUrlError, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
 import crypto from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
@@ -92,8 +92,9 @@ export type RelaySettings = {
   lanIngest: boolean
 }
 /** Pure: what may go in `source:` for the backup pull (no file:, no shell, no YAML breakage). */
+export { pullUrlError }
 export function validPullUrl(url: string): boolean {
-  return url.length <= 2000 && /^(rtmps?|rtsps?|srt|https?):\/\/[^\s'"#{}\[\],&*!|>%@`]+(@[^\s'"#{}\[\],&*!|>%`]+)?$/.test(url) || url === ""
+  return pullUrlError(url) === null
 }
 export function readSettings(): RelaySettings {
   const raw = readJson<Partial<RelaySettings>>(file("settings.json"))
@@ -449,7 +450,8 @@ export function programReadFile(): string {
 export function setBackupPull(url: string): Promise<RelayResult> {
   return withLock(async () => {
     const clean = url.trim()
-    if (!validPullUrl(clean)) return { ok: false, status: 400, error: "Pull URL must be rtmp://, rtsp://, srt:// or http(s):// (HLS)." }
+    const why = pullUrlError(clean)
+    if (why) return { ok: false, status: 400, error: why }
     writeSettings({ ...readSettings(), backupPullUrl: clean })
     if (relayRunning()) writeConfigIfChanged()
     return { ok: true, note: clean ? "Backup pulls from the URL." : "Backup takes a publisher again." }
@@ -478,6 +480,9 @@ const configCheck = ((globalThis as { __mtxConfigCheck?: { at: number; misses: n
 async function liveGlobalConfig(): Promise<{ rtmpAddress?: string; authInternalUsers?: { user: string }[] } | null> {
   try {
     const response = await fetch(`http://127.0.0.1:${relayPorts().api}/v3/config/global/get`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+    // 401: MediaMTX still runs a config with an older read login (credentials.json was recreated):
+    // every internal reader (preview, capture, health) would fail auth on loopback. Treat as mismatch.
+    if (response.status === 401) return { rtmpAddress: "?", authInternalUsers: [] }
     return response.ok ? ((await response.json()) as { rtmpAddress?: string; authInternalUsers?: { user: string }[] }) : null
   } catch {
     return null
@@ -774,9 +779,9 @@ export type IngestDiag = { resyncs: number; listen: string | null; lan: boolean;
  * Pure: from MediaMTX's log, where the RTMP ingest last started listening and the last refused /
  * failed publish (auth failure, path taken, timeout), redacted of query strings.
  */
-export function parseIngestLog(log: string): { listen: string | null; lastReject: { at: string; text: string } | null } {
+export function parseIngestLog(log: string): { listen: string | null; lastReject: { at: string; from?: string; text: string } | null } {
   let listen: string | null = null
-  let lastReject: { at: string; text: string } | null = null
+  let lastReject: { at: string; from?: string; text: string } | null = null
   for (const line of log.split("\n")) {
     const l = /\[RTMP\] (?:started|listener opened) .*?on ([^\s(]+)/.exec(line)
     if (l) listen = l[1]
@@ -785,7 +790,8 @@ export function parseIngestLog(log: string): { listen: string | null; lastReject
     const conn = /\[RTMP\] \[conn ([^\]]+)\]/.exec(line)
     if (conn && /(failed to authenticate|authentication failed|already being published|is not configured|not allowed|permission denied)/i.test(line) && !/closed: terminated/.test(line)) {
       const at = /^(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2})/.exec(line)?.[1] ?? ""
-      lastReject = { at, text: line.replace(/^\S+ \S+ (INF|WAR|ERR) /, "").replace(/\?[^\s'"]*/g, "?…").slice(0, 200) }
+      const loop = /^(127\.|\[?::1\]?:)/.test(conn[1])
+      lastReject = { at, from: loop ? "this computer" : conn[1].replace(/:\d+$/, ""), text: line.replace(/^\S+ \S+ (INF|WAR|ERR) /, "").replace(/\?[^\s'"]*/g, "?…").slice(0, 200) }
     }
   }
   return { listen, lastReject }
@@ -862,7 +868,7 @@ export async function relayStatus(): Promise<RelayStatus> {
   const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
   // Live bind from MediaMTX itself (the startup log line scrolls out of the tail on a busy relay).
   const live = api ? await liveGlobalConfig() : null
-  const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: live?.rtmpAddress ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
+  const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: (live?.rtmpAddress !== "?" ? live?.rtmpAddress : undefined) ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
   return {
     ingest,
     backup,

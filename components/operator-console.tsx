@@ -1,5 +1,6 @@
 "use client"
 
+import { pullUrlError } from "@/lib/program-source"
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
@@ -1941,7 +1942,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; lastReject: { at: string; text: string } | null; logFile: string }; backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -2005,7 +2006,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
       {relay?.ingest ? (
         <p data-testid="ingest-diag" className="font-mono text-[11px] break-all text-black/60">
           Ingest: {relay.ingest.listen ? `listening on ${relay.ingest.listen}` : "not listening (relay server stopped)"}{relay.ingest.lan && relay.ingest.listen?.startsWith("127.") ? " · LAN ingest is on but still bound to loopback (fixing…)" : ""}{relay.ingest.resyncs ? ` · config re-applied ${relay.ingest.resyncs}×` : ""}
-          {relay.ingest.lastReject ? <><br /><span data-testid="ingest-last-reject" className="text-[#b42318]">Last refused: {relay.ingest.lastReject.at} · {relay.ingest.lastReject.text}</span></> : null}
+          {relay.ingest.lastReject ? <><br /><span data-testid="ingest-last-reject" className="text-[#b42318]">Last refused: {relay.ingest.lastReject.at} · {relay.ingest.lastReject.text}{relay.ingest.lastReject.from === "this computer" && /auth/i.test(relay.ingest.lastReject.text) ? " — from this computer: an OBS (or ffmpeg) here publishing with an old stream key, e.g. after New key. Paste the current key. (Preview, capture and health checks use their own login that New key never changes.)" : ""}</span></> : null}
           <br />Log: {relay.ingest.logFile}
         </p>
       ) : null}
@@ -2079,9 +2080,10 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
-        <Pill size="sm" data-testid="backup-pull-save" disabled={busy || !pull.trim()} onClick={() => { void act({ action: "backup-pull", url: pull.trim() }, "Backup pulls from the URL."); setPull("") }}>Pull</Pill>
+        <Pill size="sm" data-testid="backup-pull-save" disabled={busy || !pull.trim() || pullUrlError(pull.trim()) !== null} onClick={() => { void act({ action: "backup-pull", url: pull.trim() }, "Backup pulls from the URL."); setPull("") }}>Pull</Pill>
         {backup?.pullFrom ? <Pill size="sm" tone="outline" data-testid="backup-pull-clear" disabled={busy} onClick={() => void act({ action: "backup-pull", url: "" }, "Backup takes a publisher again.")}>Stop pulling</Pill> : null}
       </div>
+      {pull.trim() && pullUrlError(pull.trim()) ? <p data-testid="backup-pull-error" className="text-[13px] text-[#b42318]">{pullUrlError(pull.trim())}</p> : null}
       {preview && backup?.ready ? (
         <div className="relative aspect-video overflow-hidden rounded-lg bg-black"><ProgramPlayer scope="relay-backup" src={programOperatorSrc("program-backup")} ready={backup.ready} /></div>
       ) : null}

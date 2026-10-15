@@ -40,7 +40,7 @@ export function healthy(h: SourceHealth, stallMs: number): boolean {
 }
 
 /** What the monitor remembers between ticks. */
-export type FailoverMemory = { mainBadSince: number | null; mainGoodSince: number | null; /** we switched to backup by ourselves (auto-return only undoes our own switch) */ failedOver: boolean }
+export type FailoverMemory = { mainBadSince: number | null; mainGoodSince: number | null; backupBadSince?: number | null; /** we switched to backup by ourselves (auto-return only undoes our own switch) */ failedOver: boolean }
 export const FRESH_MEMORY: FailoverMemory = { mainBadSince: null, mainGoodSince: null, failedOver: false }
 
 export type FailoverStep = { memory: FailoverMemory; switchTo: ProgramSource | null; reason: string | null }
@@ -59,10 +59,15 @@ export function failoverStep(input: { active: ProgramSource; main: SourceHealth;
     mainBadSince: mainOk ? null : (input.memory.mainBadSince ?? now),
     mainGoodSince: mainOk ? (input.memory.mainGoodSince ?? now) : null,
     failedOver: active === "backup" ? input.memory.failedOver : false,
+    backupBadSince: backupOk ? null : (input.memory.backupBadSince ?? now),
   }
   if (!settings.auto) return { memory: { ...memory, failedOver: false }, switchTo: null, reason: null }
   if (active === "main" && memory.mainBadSince !== null && now - memory.mainBadSince >= settings.stallSec * 1000 && backupOk) {
     return { memory: { ...memory, failedOver: true }, switchTo: "backup", reason: `Main stalled ${Math.round((now - memory.mainBadSince) / 1000)}s` }
+  }
+  // On Backup (by hand or by us) and Backup dies while Main is fine: don't sit on a dead input.
+  if (active === "backup" && memory.backupBadSince != null && now - memory.backupBadSince >= settings.stallSec * 1000 && mainOk) {
+    return { memory: { ...memory, failedOver: false }, switchTo: "main", reason: `Backup stalled ${Math.round((now - memory.backupBadSince) / 1000)}s` }
   }
   if (active === "backup" && memory.failedOver && settings.autoReturn && memory.mainGoodSince !== null && now - memory.mainGoodSince >= settings.returnSec * 1000) {
     return { memory: { ...memory, failedOver: false }, switchTo: "main", reason: `Main healthy ${settings.returnSec}s` }
@@ -71,3 +76,22 @@ export function failoverStep(input: { active: ProgramSource; main: SourceHealth;
 }
 
 export type FailoverEvent = { at: number; from: ProgramSource; to: ProgramSource; reason: string; auto: boolean }
+
+const WEB_PAGE_HOSTS = /(^|\.)(youtube\.com|youtu\.be|twitch\.tv|facebook\.com|fb\.watch|vimeo\.com|ustream\.tv|video\.ibm\.com|kick\.com|instagram\.com|tiktok\.com|x\.com|twitter\.com|dailymotion\.com)$/i
+/** Why a backup pull URL can't be used (null = fine; "" = off). MediaMTX pulls streams, not web pages. */
+export function pullUrlError(url: string): string | null {
+  if (url === "") return null
+  if (url.length > 2000) return "Pull URL is too long."
+  if (/[\s'"`\\<>{}|^]/.test(url) || /[\u0000-\u001f]/.test(url)) return "Pull URL has spaces or characters a stream URL can't contain."
+  let u: URL
+  try { u = new URL(url) } catch { return "Not a URL. Use rtmp://, rtsp://, srt:// or an HLS https://…/….m3u8 address." }
+  const scheme = u.protocol.replace(/:$/, "").toLowerCase()
+  if (!u.hostname) return "Pull URL has no host."
+  if (["rtmp", "rtmps", "rtsp", "rtsps", "srt"].includes(scheme)) return null
+  if (scheme === "http" || scheme === "https") {
+    if (WEB_PAGE_HOSTS.test(u.hostname)) return `${u.hostname} is a web page, not a stream URL. Pull needs the stream itself: rtmp://, rtsp://, srt:// or an HLS .m3u8 link (YouTube/Twitch watch pages can't be pulled).`
+    if (/\.m3u8$/i.test(u.pathname)) return null
+    return "http(s) pull must be an HLS playlist ending in .m3u8 (web pages can't be pulled). Otherwise use rtmp://, rtsp:// or srt://."
+  }
+  return `${scheme}:// isn't supported. Use rtmp://, rtsp://, srt:// or an HLS .m3u8 link.`
+}

@@ -85,7 +85,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false }
+const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false, ramp: 1 }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -162,6 +162,7 @@ function switchProgramSource(source) {
   const old = prog.reader
   prog.source = source
   prog.latencyMs = null
+  prog.ramp = 0 // ~30ms fade-in on the new input: no click at the splice
   if (spare.reader && spare.source === source && spare.bytes > 0) {
     const r = spare.reader
     spare.reader = null
@@ -271,8 +272,9 @@ function pcmBlock(n, wallMs) {
     let l = bed[i * 2] * prog.gain * 32767
     let r = bed[i * 2 + 1] * prog.gain * 32767
     if (programPcm) {
-      const pl = programPcm.readInt16LE(i * 4)
-      const pr = programPcm.readInt16LE(i * 4 + 2)
+      if (prog.ramp < 1) prog.ramp = Math.min(1, prog.ramp + 1 / 1440)
+      const pl = Math.round(programPcm.readInt16LE(i * 4) * prog.ramp)
+      const pr = Math.round(programPcm.readInt16LE(i * 4 + 2) * prog.ramp)
       l += pl
       r += pr
       const m = Math.max(Math.abs(pl), Math.abs(pr))

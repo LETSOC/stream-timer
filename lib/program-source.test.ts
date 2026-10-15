@@ -42,3 +42,16 @@ test("parseFailover clamps and defaults", () => {
   assert.deepEqual(parseFailover(null), DEFAULT_FAILOVER)
   assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false })
 })
+
+test("backup dies while on air and main is fine: back to main (auto on), not with auto off", () => {
+  const settings = { auto: true, stallSec: 3, returnSec: 10, autoReturn: false }
+  const ok = { ready: true, kbps: 2000, dataAgeMs: 100 }
+  const dead = { ready: false, kbps: null, dataAgeMs: null }
+  let memory = FRESH_MEMORY
+  let s = failoverStep({ active: "backup", main: ok, backup: dead, settings, memory, now: 0 })
+  assert.equal(s.switchTo, null); memory = s.memory
+  s = failoverStep({ active: "backup", main: ok, backup: dead, settings, memory, now: 3100 })
+  assert.equal(s.switchTo, "main")
+  assert.equal(failoverStep({ active: "backup", main: ok, backup: dead, settings: { ...settings, auto: false }, memory, now: 3100 }).switchTo, null)
+  assert.equal(failoverStep({ active: "backup", main: dead, backup: dead, settings, memory, now: 3100 }).switchTo, null)
+})

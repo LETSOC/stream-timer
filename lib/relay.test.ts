@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { test } from "node:test"
-import { buildMediamtxConfig, credentials, validPullUrl, pickLanIp, parseIngestLog, liveConfigMatches, rotateProgramCredentials, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
+import { buildMediamtxConfig, credentials, validPullUrl, pullUrlError, pickLanIp, parseIngestLog, liveConfigMatches, rotateProgramCredentials, deriveForwardState, forwardConflict, isRelayUrl, parseRelayLoops, readSettings, relayDir, relayPublishUrl } from "./relay.ts"
 import { parseOwnSupervisorList } from "./encoder.ts"
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
@@ -100,6 +100,12 @@ test("program backup: own publish login, or a pull source; pull URLs validated",
   assert.ok(!validPullUrl("file:///etc/passwd"))
   assert.ok(!validPullUrl("rtmp://x/y\n  evil: 1"))
   assert.ok(!validPullUrl("rtmp://x/{a}"))
+  assert.ok(validPullUrl("srt://10.0.0.5:9000?streamid=read:backup"))
+  assert.ok(validPullUrl("https://cdn.example.com/live/master.m3u8?token=a&b=c"))
+  assert.match(pullUrlError("https://www.youtube.com/watch?v=abc") ?? "", /web page/)
+  assert.match(pullUrlError("https://youtu.be/abc") ?? "", /web page/)
+  assert.match(pullUrlError("https://example.com/live") ?? "", /\.m3u8/)
+  assert.match(pullUrlError("youtube.com/watch?v=abc") ?? "", /Not a URL|isn't supported/)
 })
 
 test("LAN ingest: RTMP on the ingest host, only OBS logins from anywhere (publish-only), reads/API/internal stay loopback", () => {
