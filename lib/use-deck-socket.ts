@@ -74,15 +74,24 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
     }
     connect()
     // Phones sleep: reconnect straight away when the page comes back.
+    // iOS often keeps a dead socket object after the background: if we were away a while, drop it and
+    // reconnect (the server sends fresh state on connect).
+    let hiddenAt: number | null = null
     const wake = () => {
-      if (document.visibilityState !== "visible" || wsRef.current) return
+      if (document.visibilityState !== "visible") { hiddenAt ??= Date.now(); return }
+      const away = hiddenAt !== null && Date.now() - hiddenAt > 3000
+      hiddenAt = null
+      if (wsRef.current && away) { const old = wsRef.current; wsRef.current = null; old.onclose = null; old.close(); for (const resolve of pending.current.values()) resolve({ ok: false, status: 0, error: "Reconnected; check the state.", via: "ws" }); pending.current.clear() }
+      if (wsRef.current) return
       if (retry !== null) window.clearTimeout(retry)
       attempt = 0
       connect()
     }
     document.addEventListener("visibilitychange", wake)
     window.addEventListener("online", wake)
+    window.addEventListener("pageshow", wake)
     return () => {
+      window.removeEventListener("pageshow", wake)
       stopped = true
       if (retry !== null) window.clearTimeout(retry)
       document.removeEventListener("visibilitychange", wake)

@@ -1,5 +1,7 @@
 "use client"
 
+import { isViewerMuted } from "@/components/stream-audio-overlay"
+import { stallBackoffMs, useResumeGeneration } from "@/lib/use-resume"
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type Hls from "hls.js"
 import { keepLoaded, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
@@ -45,6 +47,11 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   useEffect(() => {
     wantSoundRef.current = wantSound
   })
+  // Rebuild the player (not the page) when the page comes back (iOS suspends media in the
+  // background) and when the watchdog finds it stuck while OBS is publishing.
+  // Back from the background: rebuild, holding the last picture meanwhile (not "Waiting for OBS").
+  const resumeGen = useResumeGeneration(1000, () => setLastFrameAt((at) => (at === null ? null : Date.now())))
+  const [kick, setKick] = useState(0)
   useEffect(() => {
     const video = videoRef.current
     if (!video || !load) return
@@ -75,7 +82,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
           else hls.startLoad()
         })
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = src
+        // Native HLS (iOS): cache-bust so Safari doesn't resume a dead suspended session.
+        video.src = `${src}${src.includes("?") ? "&" : "?"}r=${Date.now().toString(36)}`
         play()
       }
     })()
@@ -85,18 +93,39 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       hls?.destroy()
       video.removeAttribute("src")
       video.load()
-      setLastFrameAt(null)
-      setLatency(null)
     }
-  }, [videoRef, src, load])
+  }, [videoRef, src, load, resumeGen, kick])
+  // Only a real unload (other source, OBS gone) forgets the last frame; a rebuild keeps it so the
+  // picture holds instead of flashing "Waiting for OBS".
+  useEffect(() => () => {
+    setLastFrameAt(null)
+    setLatency(null)
+  }, [src, load])
 
   // "Advancing" = a new frame is on screen, not a frozen last frame.
   useEffect(() => {
     const video = videoRef.current
     if (!video || !load) return
     let last = -1
+    let advancedAt = Date.now()
+    let attempt = 0
+    let nextKickAt = Date.now() + stallBackoffMs(0)
+    // Native HLS (iOS) reports stalls as events; the currentTime check below catches the rest.
+    const onStall = () => { if (Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload() }
+    const reload = () => {
+      nextKickAt = Date.now() + stallBackoffMs(++attempt)
+      advancedAt = Date.now()
+      setLastFrameAt((at) => (at === null ? null : Date.now())) // hold the picture while it reloads
+      setKick((k) => k + 1)
+    }
+    video.addEventListener("stalled", onStall)
+    video.addEventListener("waiting", onStall)
+    video.addEventListener("error", onStall)
     const id = window.setInterval(() => {
       const t = video.currentTime
+      if (t !== last && t > 0 && !video.paused) { advancedAt = Date.now(); attempt = 0 }
+      // Watchdog: OBS is publishing (load) but the picture hasn't moved for 3s → rebuild, with backoff.
+      else if (document.visibilityState === "visible" && Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload()
       // Paused by the browser (refused autoplay with sound, tab policy): resume, muted if it must be.
       if (!wantSoundRef.current() && !video.muted) video.muted = true
       if (video.paused && video.readyState >= 2 && !video.ended) {
@@ -112,7 +141,12 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       }
       last = t
     }, 150)
-    return () => window.clearInterval(id)
+    return () => {
+      window.clearInterval(id)
+      video.removeEventListener("stalled", onStall)
+      video.removeEventListener("waiting", onStall)
+      video.removeEventListener("error", onStall)
+    }
   }, [videoRef, load])
   return { lastFrameAt, latency }
 }
@@ -140,7 +174,7 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   const activeSince = useActiveSince(active, now)
   const load = keepLoaded(ready, notReadySince, now)
   const showing = useRef<ProgramDisplay>("under")
-  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted)
+  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted())
   const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
   useEffect(() => {
