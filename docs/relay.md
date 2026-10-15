@@ -175,3 +175,17 @@ ping -c 3 hyphen-stream.local        # resolves to the stream Mac's LAN IP
 dns-sd -B _rtmp._tcp                 # lists "hyphen-stream" (Ctrl-C to stop)
 dns-sd -L hyphen-stream _rtmp._tcp   # → hyphen-stream.local.:19350
 ```
+
+## Remote backup: jitter buffer and gapless switching
+
+A backup OBS on another network delivers audio in bursts. Browser capture keeps program audio in a
+per-input jitter buffer: the queue level is averaged over ~2s, its burst spread is measured
+(**jitter** in the capture's program-audio status line), and timing is only corrected outside a dead
+band that grows with that jitter, by short crossfaded splices (≤5ms), never by changing playback rate,
+so the pitch can't wobble. Each input keeps its own latency/jitter state across switches. Audio is
+always resampled to 48 kHz with timestamp gap fill only (`aresample async=1`, no stretching); the
+Relay card shows the backup's audio format and warns if it isn't 48 kHz.
+
+Switching Main ↔ Backup never shows "Waiting for OBS": the input on air stays up while the incoming one
+plays hidden for the **switch buffer** (Transport › Program source, default 1s, 0–5s), then it
+crossfades. If the input on air is already gone, the incoming one is taken at its first frame.
