@@ -6,6 +6,6 @@ import path from "node:path"
 export const CAPTURE_CODE_FILES = ["capture-stream.mjs", "audio-feeder.mjs", "program-jitter.mjs"]
 export function captureCodeVersion(dir) {
   const h = crypto.createHash("sha1")
-  for (const f of CAPTURE_CODE_FILES) { try { h.update(fs.readFileSync(path.join(dir, f))) } catch { h.update(`missing:${f}`) } }
+  for (const f of CAPTURE_CODE_FILES) { try { h.update(fs.readFileSync(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ dir, f))) } catch { h.update(`missing:${f}`) } }
   return h.digest("hex").slice(0, 10)
 }

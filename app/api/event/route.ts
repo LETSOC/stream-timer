@@ -54,7 +54,7 @@ export async function PUT(request: Request) {
   try {
     // Main/Backup is owned by the transport (switch buttons, auto-failover): a desk saving its whole
     // stage must never write back a stale source (that re-selected a dead Backup → failover loop).
-    const stage = record?.stage && typeof record.stage === "object" ? { ...(record.stage as Record<string, unknown>), programSource: readServerState().stage.programSource } : record?.stage
+    const stage = record?.stage && typeof record.stage === "object" ? { ...(record.stage as Record<string, unknown>), programSource: readServerState().stage.programSource, streamProgramAudio: readServerState().stage.streamProgramAudio, streamBedAudio: readServerState().stage.streamBedAudio } : record?.stage
     const saved = writeServerEvent(record?.event ?? body, testUntil, pausedAt, stage, expectedRev)
     if (!saved) {
       const problems = eventProblems(record?.event ?? body)

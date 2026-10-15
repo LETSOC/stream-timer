@@ -125,6 +125,7 @@ export function OperatorConsole() {
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
   const [program, setProgram] = useState(false)
   const [programSource, setProgramSource] = useState<"main" | "backup">("main")
+  const [streamAudio, setStreamAudio] = useState<{ program: boolean; bed: boolean }>({ program: true, bed: false })
   // Both program inputs' health + failover settings (server monitor), polled; null = relay not armed.
   const [sources, setSources] = useState<ProgramSourcesView | null>(null)
   // What /stream has for the draft-managed sections (Event, Links, Look, Socials, End/Break/Hold card, Speakers).
@@ -164,8 +165,9 @@ export function OperatorConsole() {
   const setToast = useCallback((text: string | null) => (text ? showToast("error", text) : dismissToast()), [showToast, dismissToast])
   useEffect(() => {
     let stop = false
-    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } | null) => {
+    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null; streamAudio?: { program: boolean; bed: boolean } } | null) => {
       if (!stop && body) setSources(body.programSources ?? null)
+      if (!stop && body?.streamAudio) setStreamAudio((cur) => (cur.program === body.streamAudio!.program && cur.bed === body.streamAudio!.bed ? cur : body.streamAudio!))
       if (!stop && (body?.programSource === "main" || body?.programSource === "backup")) setProgramSource(body.programSource)
     }).catch(() => undefined)
     void poll()
@@ -323,6 +325,7 @@ export function OperatorConsole() {
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
     if (typeof stage.program === "boolean") setProgram(stage.program)
     if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
+    if (typeof stage.streamProgramAudio === "boolean" || typeof stage.streamBedAudio === "boolean") setStreamAudio((cur) => ({ program: stage.streamProgramAudio ?? cur.program, bed: stage.streamBedAudio ?? cur.bed }))
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
   }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
@@ -368,7 +371,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, deskLive: liveMode }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -765,11 +768,17 @@ export function OperatorConsole() {
   }
   /** Main/Backup: through the server's transport (logged, synced to every device over the deck socket). */
   async function switchProgramSource(source: ProgramSource) {
-    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source } }) }).catch(() => null)
+    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source }, from: "desk" }) }).catch(() => null)
     const body = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string; state?: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } } | null
     if (!response?.ok || !body?.ok) return setToast(body?.error ?? "Could not switch the program source.")
     if (body.state?.programSource) setProgramSource(body.state.programSource)
     if (body.state) setSources(body.state.programSources ?? null)
+  }
+  async function saveStreamAudio(patch: { program?: boolean; bed?: boolean }) {
+    const prev = streamAudio
+    setStreamAudio({ ...prev, ...patch })
+    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "streamAudio", ...patch }, from: "desk" }) }).catch(() => null)
+    if (!response?.ok) { setStreamAudio(prev); setToast("Could not save the /stream audio routing.") }
   }
   async function saveFailover(patch: Partial<FailoverSettings>) {
     const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
@@ -1128,7 +1137,7 @@ export function OperatorConsole() {
                 )
               })}
               <RelayCard dests={dests.items} />
-              <AudioCard />
+              <AudioCard routing={streamAudio} onRouting={(patch) => void saveStreamAudio(patch)} />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
               <div className="space-y-2">
@@ -2273,7 +2282,7 @@ function fmtDuration(sec: number) {
 }
 
 /** Per-channel stream audio (silence / test tone / looped audio bed) with a shared library. Saved on the server (rev-synced), edited as a draft. */
-function AudioCard() {
+function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: boolean }; onRouting: (patch: { program?: boolean; bed?: boolean }) => void }) {
   const [saved, setSaved] = useState<AudioSettingsView | null>(null)
   const [files, setFiles] = useState<AudioFileView[]>([])
   const [draft, setDraft] = useState<AudioSettingsView["channels"] | null>(null)
@@ -2337,6 +2346,12 @@ function AudioCard() {
         {dirty ? <span data-testid="audio-unsaved" className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[11px] font-bold text-white uppercase">Unsaved</span> : null}
       </div>
       <p className="font-mono text-[12px] text-black/70">What /slate and /browser capture send as audio: silence, a test tone, or a looped audio bed (one file or a playlist). AAC 128k, 48 kHz stereo. Saved changes switch live within about a second with a short crossfade: no restart, no reconnect.</p>
+      <div data-testid="stream-audio-routing" className="space-y-1 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
+        <p className="font-bold">/stream page audio</p>
+        <p className="text-black/60">What plays in /stream itself (viewers in a browser and the OBS Browser Source). Saved and synced at once.</p>
+        <label className="flex min-h-7 items-center gap-2"><input type="checkbox" data-testid="stream-audio-program" checked={routing.program} onChange={(e) => onRouting({ program: e.target.checked })} />Raw program audio (Main/Backup while on air)</label>
+        <label className="flex min-h-7 items-center gap-2"><input type="checkbox" data-testid="stream-audio-bed" checked={routing.bed} onChange={(e) => onRouting({ bed: e.target.checked })} />Stream audio (bed/tone) — capture channel settings; muted while the program is on air</label>
+      </div>
       {view ? (["slate", "capture"] as const).map((ch) => {
         const cfg = view[ch]
         const tid = (s: string) => `audio-${ch}-${s}`

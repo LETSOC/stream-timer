@@ -56,17 +56,13 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       style={{ aspectRatio: "16 / 9" }}
     >
       <div
-        className="pointer-events-none absolute inset-0 bg-cover bg-center"
-        style={
-          transparent
-            ? { background: "transparent" }
-            : { backgroundColor: "#070a16", backgroundImage: "url('/brand/hero-bg.png')" }
-        }
+        className={cn("pointer-events-none absolute inset-0", transparent ? "" : "stage-bg")}
+        style={transparent ? { background: "transparent" } : undefined}
       />
       {live && !transparent ? <div className="live-wash pointer-events-none absolute inset-0" /> : null}
       <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
 
-      <div className="relative z-10 h-full px-[5.4%] pt-[4.6%] pb-[3.2%]">
+      <div data-testid="stage-content" className="relative z-10 h-full" style={{ padding: "var(--inset) var(--safe) var(--safe) var(--inset)" }}>
         <div className="flex min-w-0 max-w-[58%] flex-col justify-start">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
             <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
@@ -347,9 +343,11 @@ function RollingQr({ divisions, second, label }: { divisions: number; second: nu
   const marker = markerIndex(second, cells)
 
   return (
-    <div className="pointer-events-none absolute top-[4.6%] right-[4.4%] z-20 flex flex-col items-center">
+    <div className="pointer-events-none absolute z-20 flex flex-col items-center" style={{ top: "var(--safe)", right: "var(--safe)" }}>
       <div
-        className="size-[8.4cqi] rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]"
+        data-testid="stage-qr"
+        style={{ width: "var(--qr)", height: "var(--qr)" }}
+        className="box-border rounded-[1.05cqi] bg-white p-[0.62cqi] shadow-[0_0.6cqi_1.6cqi_rgba(0,0,0,0.28)]"
         aria-hidden
       >
         <div

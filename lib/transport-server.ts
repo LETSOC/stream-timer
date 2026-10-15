@@ -1,5 +1,6 @@
 import { readServerState, RevConflict, writeServerEvent } from "@/lib/event-server"
 import { programReadyCached } from "@/lib/relay"
+import { plog } from "@/lib/program-log"
 import { manualSwitchError } from "@/lib/program-source"
 import { noteSourceSwitch, programSourcesView } from "@/lib/program-monitor"
 import { applyTransport, deckState, type DeckState, type TransportAction } from "@/lib/transport"
@@ -22,7 +23,7 @@ export function currentDeckState(now = Date.now()): DeckState {
  * atomic rename, rev). `expectedRev` = the rev the client last saw: a stale deck gets a 409 plus
  * the fresh state instead of acting on a screen it hasn't seen yet.
  */
-export function runServerTransport(action: TransportAction, expectedRev: number | undefined, now = Date.now(), opts: { auto?: boolean } = {}): ServerTransportResult {
+export function runServerTransport(action: TransportAction, expectedRev: number | undefined, now = Date.now(), opts: { auto?: boolean; by?: "desk" | "deck" } = {}): ServerTransportResult {
   const current = readServerState()
   if (expectedRev !== undefined && expectedRev !== current.rev) {
     return { ok: false, status: 409, error: "Changed on another device. Check the state and tap again.", state: deckState(current, now, ready(current), programSourcesView(now)) }
@@ -30,6 +31,7 @@ export function runServerTransport(action: TransportAction, expectedRev: number 
   if (action.type === "programSource" && !opts.auto) {
     const view = programSourcesView(now)
     const error = manualSwitchError(view, current.stage.programSource, action.source)
+    if (error) plog(`switch to ${action.source} refused (${opts.by ?? "deck"}): ${error}`)
     if (error) return { ok: false, status: 409, error, state: deckState(current, now, ready(current), view) }
   }
   const result = applyTransport(current, action, now)
@@ -42,7 +44,8 @@ export function runServerTransport(action: TransportAction, expectedRev: number 
     throw error
   }
   if (action.type === "programSource" && !opts.auto && current.stage.programSource !== action.source) {
-    noteSourceSwitch({ at: now, from: current.stage.programSource, to: action.source, reason: "Switched by operator", auto: false })
+    plog(`manual switch ${current.stage.programSource} → ${action.source} (${opts.by ?? "deck"})`)
+    noteSourceSwitch({ at: now, from: current.stage.programSource, to: action.source, reason: `Switched by operator (${opts.by ?? "deck"})`, auto: false })
   }
   return { ok: true, state: currentDeckState(now) }
 }

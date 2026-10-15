@@ -239,7 +239,7 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
   const visual: ProgramDisplay = incoming ? "under" : shown
   return (
-    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
+    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-want-sound={shown === "video" && !muted ? "1" : "0"} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
       <video ref={videoRef} className="h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture />
       {visual === "standby" ? <Standby /> : null}
     </div>

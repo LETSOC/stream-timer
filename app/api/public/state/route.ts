@@ -3,6 +3,7 @@ import { VIEW_COOKIE } from "@/lib/auth"
 import { publicState, readServerState } from "@/lib/event-server"
 import { canView, viewKeyMatches } from "@/lib/view-key"
 import { programReady, readSettings } from "@/lib/relay"
+import { readAudioSettings } from "@/lib/audio-bed"
 
 /**
  * Read-only state for OBS pages (/stream, /end). Only what they render:
@@ -20,5 +21,8 @@ export async function GET(request: Request) {
   const state = readServerState()
   const [mainReady, backupReady] = await Promise.all([programReady("main").catch(() => false), programReady("backup").catch(() => false)])
   const programReadyNow = state.stage.programSource === "backup" ? backupReady : mainReady
-  return Response.json({ ...publicState(state), programReady: programReadyNow, mainReady, backupReady, switchBufferMs: readSettings().failover.switchBufferMs, build: process.env.APP_BUILD ?? null }, { headers })
+  // In-page bed for /stream (only when routed): the capture channel's bed settings, file ids only.
+  const cap = state.stage.streamBedAudio ? readAudioSettings().channels.capture : null
+  const bed = cap ? { mode: cap.mode, files: cap.files, shuffle: cap.order === "shuffle", volumeDb: cap.volumeDb, toneHz: cap.toneHz, toneDb: cap.toneDb, fadeInSec: cap.fadeInSec } : null
+  return Response.json({ ...publicState(state), bed, programReady: programReadyNow, mainReady, backupReady, switchBufferMs: readSettings().failover.switchBufferMs, build: process.env.APP_BUILD ?? null }, { headers })
 }

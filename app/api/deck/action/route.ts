@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!isOperator(request)) return Response.json({ error: "Log in to the desk first.", login: "/login" }, { status: 401 })
   const raw = await request.text()
   if (raw.length > 4096) return Response.json({ error: "Too large." }, { status: 413 })
-  let body: { action?: unknown; rev?: unknown } | null = null
+  let body: { action?: unknown; rev?: unknown; from?: unknown } | null = null
   try {
     body = JSON.parse(raw)
   } catch {
@@ -22,6 +22,6 @@ export async function POST(request: Request) {
   }
   const action = parseAction(body?.action)
   if (!action) return Response.json({ error: "Unknown action." }, { status: 400 })
-  const result = runServerTransport(action, typeof body?.rev === "number" ? body.rev : undefined)
+  const result = runServerTransport(action, typeof body?.rev === "number" ? body.rev : undefined, Date.now(), { by: body?.from === "desk" ? "desk" : "deck" })
   return Response.json(result, { status: result.ok ? 200 : result.status })
 }
