@@ -16,7 +16,7 @@ function probes(): Record<ProgramSource, Probe> {
 
 function stop(p: Probe) {
   p.child?.kill("SIGKILL")
-  Object.assign(p, { child: null, url: null, stats: { ...EMPTY_STATS }, frames: null, recent: [] })
+  Object.assign(p, { child: null, url: null, stats: { ...EMPTY_STATS }, frames: null, framesAt: 0, recent: [] })
 }
 
 /** Keep a reader running for each publishing input (url = null → stop). */
@@ -52,7 +52,7 @@ export function syncInputProbe(source: ProgramSource, url: string | null, now = 
       }
     }
   })
-  child.on("exit", () => { if (p.child === child) { p.child = null; p.stats = { ...EMPTY_STATS }; p.frames = null; p.recent = [] } })
+  child.on("exit", () => { if (p.child === child) { p.child = null; p.stats = { ...EMPTY_STATS }; p.frames = null; p.framesAt = 0; p.recent = [] } })
 }
 
 export function inputStats(source: ProgramSource, now = Date.now()): InputStats {

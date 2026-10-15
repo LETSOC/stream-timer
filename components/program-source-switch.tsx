@@ -35,6 +35,21 @@ export function readoutText(h: Readout | undefined): string {
   return parts.join(" · ")
 }
 
+/** Short label/value rows for the button grid. */
+export function readoutRows(h: Readout | undefined): [string, string][] {
+  if (!h?.ready) return []
+  const st = h.stats
+  const kb = h.kbps === null ? "…" : h.kbps >= 1000 ? `${(h.kbps / 1000).toFixed(1)}M` : `${h.kbps}k`
+  return [
+    ["fps", st?.fps != null ? `${Math.round(st.fps)}${st.fpsNominal ? `/${Math.round(st.fpsNominal)}` : ""}` : st?.video ? "…" : "none"],
+    ["aud", st?.audio ? `${st.audio.hz / 1000}k ${st.audio.channels === "mono" ? "1ch" : st.audio.channels === "stereo" ? "2ch" : st.audio.channels}` : "none"],
+    ["rate", kb],
+    ["jitter", h.jitterMs != null ? `${h.jitterMs}ms` : "–"],
+    ["delay", h.audioDelayMs != null ? `${(h.audioDelayMs / 1000).toFixed(2)}s${h.offsetMs ? `${h.offsetMs > 0 ? "+" : ""}${h.offsetMs}` : ""}` : h.offsetMs ? `${h.offsetMs > 0 ? "+" : ""}${h.offsetMs}ms` : "–"],
+    ["age", h.dataAgeMs !== null ? `${(h.dataAgeMs / 1000).toFixed(1)}s` : "–"],
+  ]
+}
+
 /** Calls `onEvent` once per new failover/switch event (not for the one already there on load). */
 export function useFailoverEvents(last: FailoverEvent | null | undefined, onEvent: (e: FailoverEvent) => void) {
   const seen = useRef<number | null | undefined>(undefined)
@@ -84,14 +99,21 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
                 if (!on && notReady && typeof window !== "undefined" && !window.confirm(`${SOURCE_LABEL[source]} is not READY (${h?.issues?.join(", ")}). Switch anyway?`)) return
                 onSwitch(source)
               }}
-              className={`min-h-16 rounded-xl px-3 py-2 text-left disabled:opacity-50 ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"}`}>
-              <span className="block text-[15px] font-black">{on ? "● " : ""}{SOURCE_LABEL[source]}{source === "backup" && view?.backup.pull ? " (pull)" : ""}
-                {view && state ? <span data-testid={`program-source-${source}-state`} data-input-state={state} title={h?.stateReason ?? undefined} className={`ml-2 rounded px-1.5 py-0.5 align-middle font-mono text-[10px] font-bold ${stateCls}`}>{STATE_LABEL[state]}</span> : null}
-                {view && h?.ready ? <span data-testid={`program-source-${source}-ready`} data-ready={h.readyOk ? "yes" : "no"} title={h.issues?.join(", ") || "video + audio, fps stable, data fresh, 48 kHz"} className={`ml-1 rounded px-1.5 py-0.5 align-middle font-mono text-[10px] font-bold ${h.readyOk ? "bg-[#12b76a] text-black" : "border border-current opacity-70"}`}>{h.readyOk ? "READY" : "not ready"}</span> : null}
+              className={`min-h-16 min-w-0 overflow-hidden rounded-xl px-2.5 py-2 text-left disabled:opacity-50 ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"}`}>
+              <span className="flex min-w-0 items-center gap-1.5">
+                {view && h?.ready ? <span data-testid={`program-source-${source}-ready`} data-ready={h.readyOk ? "yes" : "no"} title={h.readyOk ? "READY: video + audio, fps stable, data fresh, 48 kHz" : `Not ready: ${h.issues?.join(", ")}`} aria-label={h.readyOk ? "READY" : "not ready"} className={`size-2.5 shrink-0 rounded-full ${h.readyOk ? "bg-[#12b76a]" : "border-2 border-[#f79009]"}`} /> : null}
+                <span className="min-w-0 truncate text-[15px] font-black">{on ? "● " : ""}{SOURCE_LABEL[source]}{source === "backup" && view?.backup.pull ? " (pull)" : ""}</span>
+                {view && state ? <span data-testid={`program-source-${source}-state`} data-input-state={state} title={h?.stateReason ?? undefined} className={`ml-auto shrink-0 rounded px-1 py-px font-mono text-[9px] font-bold leading-tight ${stateCls}`}>{STATE_LABEL[state]}</span> : null}
               </span>
-              <span data-testid={`program-source-${source}-status`} className={`block font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? (dead ? `no signal · ${st.text}` : st.text) : "relay not armed"}</span>
-              {view && h?.ready ? <span data-testid={`program-source-${source}-readout`} className="block font-mono text-[10px] opacity-80">{readoutText(h)}</span> : null}
-              {view && h?.ready && (h.stateReason || (notReady && h.issues?.length)) ? <span className="block font-mono text-[10px] text-[#f79009]">{[h.stateReason, notReady ? `not ready: ${h.issues?.join(", ")}` : null].filter(Boolean).join(" · ")}</span> : null}
+              <span data-testid={`program-source-${source}-status`} className={`block truncate font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? (dead ? `no signal · ${st.text}` : h?.ready ? (h.readyOk ? "READY" : `not ready: ${h.issues?.join(", ")}`) : st.text) : "relay not armed"}</span>
+              {view && h?.ready ? (
+                <span data-testid={`program-source-${source}-readout`} className="mt-1 grid grid-cols-2 gap-x-1.5 font-mono text-[10px] leading-snug opacity-80">
+                  {readoutRows(h).map(([k, v]) => (
+                    <span key={k} className="flex min-w-0 gap-1"><span className="shrink-0 opacity-60">{k}</span><span className="min-w-0 truncate" title={v}>{v}</span></span>
+                  ))}
+                </span>
+              ) : null}
+              {view && h?.ready && h.stateReason ? <span className="block truncate font-mono text-[10px] text-[#f79009]" title={h.stateReason}>{h.stateReason}</span> : null}
             </button>
           )
         })}

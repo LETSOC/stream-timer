@@ -16,6 +16,9 @@ import { inputState, nextBaseline, readiness, type InputReadout } from "@/lib/in
 import { inputStats, syncInputProbe } from "@/lib/input-probe"
 import { BACKUP_PATH, PROGRAM_PATH, relayReadUrl } from "@/lib/relay"
 import { readChannelStatus } from "@/lib/encoder"
+import { changeLogger, plog, PROGRAM_LOG_VERBOSE } from "@/lib/program-log"
+const onChange = changeLogger()
+let verboseAt = 0
 import type { ProgramSource, ReturnStatus, SourceHealth } from "@/lib/program-source"
 
 const KEY = Symbol.for("stream-timer.program-monitor")
@@ -104,21 +107,52 @@ export async function programMonitorTick(now = Date.now()) {
     m.baseline[source] = h.ready ? nextBaseline(m.baseline[source], h.kbps, st.state) : null
   }
   if (settings.programArmed) {
+    for (const source of ["main", "backup"] as const) {
+      const r = inputReadout(source, now, settings.failover.stallSec * 1000)
+      const label = SOURCE_LABEL[source]
+      const a = onChange(`${source}:state`, r.state, `${label} ${r.state.toUpperCase()}${r.stateReason ? ` (${r.stateReason})` : ""}`)
+      if (a) plog(a)
+      const rk = r.ready ? (r.readyOk ? "ready" : `not:${r.issues.join(",")}`) : "off"
+      const b = onChange(`${source}:ready`, rk, r.readyOk ? `${label} READY` : r.ready ? `${label} not READY: ${r.issues.join(", ")}` : `${label} not READY: no signal`)
+      if (b) plog(b)
+    }
+    if (PROGRAM_LOG_VERBOSE() && now - verboseAt >= 10000) {
+      verboseAt = now
+      for (const source of ["main", "backup"] as const) {
+        const r = inputReadout(source, now, settings.failover.stallSec * 1000)
+        const st = r.stats
+        plog(`${SOURCE_LABEL[source]} stats: ${r.state.toUpperCase()} ${r.readyOk ? "READY" : "not-ready"} · fps ${st?.fps ?? "–"}/${st?.fpsNominal ?? "–"} · audio ${st?.audio ? `${st.audio.hz / 1000}k ${st.audio.channels}` : "–"} · ${r.kbps ?? "–"} kb/s · age ${r.dataAgeMs ?? "–"}ms`)
+      }
+    }
     const state = readServerState()
     const active = state.stage.programSource
     const step = failoverStep({ active, main: programSourceHealth("main", now), backup: programSourceHealth("backup", now), settings: settings.failover, memory: m.memory, now, mainReady: inputReadout("main", now, settings.failover.stallSec * 1000).readyOk })
     m.memory = step.memory
     m.status = step.status ?? null
+    const fc = onChange("flaps", String(step.memory.mainFails?.length ?? 0), `Main failures in the last ${Math.round(settings.failover.flapWindowSec / 60)} min: ${step.memory.mainFails?.length ?? 0} (flapping above ${settings.failover.flapCount})`)
+    if (fc) plog(fc)
+    const hold = onChange("hold", step.status?.holdText ? "on" : "off", step.status?.holdText ? `hold start: Main flapping, holding Backup until Main is stable ${settings.failover.flapStableSec}s` : "hold end")
+    if (hold) plog(hold)
+    const ask = onChange("ask", step.status?.askReturn ? "on" : "off", step.status?.askReturn ? "Ask me: Main ready · waiting for the operator to return" : "Ask me: return prompt cleared")
+    if (ask) plog(ask)
     if (step.note) {
-      console.log(`[program] ${step.note}`)
+      plog(step.note)
       noteSourceSwitch({ at: now, from: active, to: active, reason: step.note, auto: true })
     }
     if (step.switchTo && step.reason) {
-      const result = runServerTransport({ type: "programSource", source: step.switchTo }, undefined, now, { auto: true })
-      // Log only a switch that really happened (never the same "Backup stalled Ns" over and over).
-      if (result.ok && readServerState().stage.programSource === step.switchTo) {
-        console.log(`[program] auto-failover ${SOURCE_LABEL[active]} → ${SOURCE_LABEL[step.switchTo]}: ${step.reason}`)
-        noteSourceSwitch({ at: now, from: active, to: step.switchTo, reason: step.reason, auto: true })
+      // Re-check the on-air input right before acting: the step may be based on a stale read, and a
+      // second "Backup → Main" while already on Main must never be logged or applied.
+      const fresh = readServerState().stage.programSource
+      const recent = m.last && m.last.auto && m.last.to === step.switchTo && m.last.from === active && now - m.last.at < 5000
+      if (fresh !== active || fresh === step.switchTo || recent) {
+        if (fresh !== active) plog(`auto-failover skipped: decided on ${SOURCE_LABEL[active]} but ${SOURCE_LABEL[fresh]} is on air (${step.reason})`)
+        if (fresh === step.switchTo) m.memory = { ...m.memory, failedOver: false }
+      } else {
+        const result = runServerTransport({ type: "programSource", source: step.switchTo }, undefined, now, { auto: true })
+        if (result.ok && readServerState().stage.programSource === step.switchTo) {
+          plog(`auto-failover ${SOURCE_LABEL[active]} → ${SOURCE_LABEL[step.switchTo]}: ${step.reason}`)
+          noteSourceSwitch({ at: now, from: active, to: step.switchTo, reason: step.reason, auto: true })
+        }
       }
     }
   } else { m.memory = FRESH_MEMORY; m.status = null }

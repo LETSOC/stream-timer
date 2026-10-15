@@ -765,7 +765,7 @@ export function OperatorConsole() {
   }
   /** Main/Backup: through the server's transport (logged, synced to every device over the deck socket). */
   async function switchProgramSource(source: ProgramSource) {
-    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source } }) }).catch(() => null)
+    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source }, from: "desk" }) }).catch(() => null)
     const body = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string; state?: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } } | null
     if (!response?.ok || !body?.ok) return setToast(body?.error ?? "Could not switch the program source.")
     if (body.state?.programSource) setProgramSource(body.state.programSource)
