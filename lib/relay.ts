@@ -9,6 +9,7 @@
  * MediaMTX listens on 127.0.0.1 only; the desk preview goes through /api/relay/hls (operator auth).
  */
 import os from "node:os"
+import { cleanMdnsName, DEFAULT_MDNS_NAME, mdnsStatus, type MdnsConfig, type MdnsState } from "@/lib/mdns"
 import { parseFailover, pullUrlError, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
 import crypto from "node:crypto"
 import { spawn, spawnSync } from "node:child_process"
@@ -43,10 +44,33 @@ export function pickLanIp(ifaces: Record<string, { family: string | number; addr
   const score = (f: { name: string; address: string }) => (priv(f.address) ? 0 : 10) + (/^(en0|eth0|wlan0|en1)$/.test(f.name) ? 0 : 1) + (/^(utun|tun|tap|docker|br-|veth|bridge|vboxnet|zt)/.test(f.name) ? 5 : 0)
   return found.sort((a, b) => score(a) - score(b))[0]?.address ?? null
 }
+/** The LAN IP OBS should reach (INGEST_HOST if pinned to one address, else detected). */
+export function lanIp(): string | null {
+  return process.env.INGEST_HOST && process.env.INGEST_HOST !== "0.0.0.0" ? process.env.INGEST_HOST : pickLanIp(os.networkInterfaces())
+}
 export function lanServerUrl(): string | null {
   if (!readSettings().lanIngest) return null
-  const host = process.env.INGEST_HOST && process.env.INGEST_HOST !== "0.0.0.0" ? process.env.INGEST_HOST : pickLanIp(os.networkInterfaces())
+  const host = lanIp()
   return host ? `rtmp://${host}:${relayPorts().rtmp}/` : null
+}
+/** rtmp://<name>.local:<port>/ while the mDNS name is actually being advertised. */
+export function mdnsServerUrl(): string | null {
+  const st = mdnsStatus()
+  return readSettings().lanIngest && st.state === "active" && st.host ? `rtmp://${st.host}:${relayPorts().rtmp}/` : null
+}
+/** What the mDNS advertiser should publish right now (null = nothing). */
+export function wantedMdns(): MdnsConfig | null {
+  const settings = readSettings()
+  const ip = settings.programArmed && settings.lanIngest ? lanIp() : null
+  return ip ? { name: settings.mdnsName, ip, port: relayPorts().rtmp } : null
+}
+export function setMdnsName(raw: unknown): Promise<RelayResult> {
+  return withLock(async () => {
+    const name = cleanMdnsName(raw)
+    if (!name) return { ok: false, status: 400, error: "Name: letters, digits and hyphens only (e.g. hyphen-stream), up to 63." }
+    writeSettings({ ...readSettings(), mdnsName: name })
+    return { ok: true, note: `LAN name: ${name}.local` }
+  })
 }
 export function setLanIngest(on: boolean): Promise<RelayResult> {
   return withLock(async () => {
@@ -90,6 +114,8 @@ export type RelaySettings = {
   failover: FailoverSettings
   /** Accept OBS on /program and /program-backup from the LAN (RTMP ingest on 0.0.0.0 / INGEST_HOST). Default off. */
   lanIngest: boolean
+  /** mDNS name: <mdnsName>.local while LAN ingest is on */
+  mdnsName: string
 }
 /** Pure: what may go in `source:` for the backup pull (no file:, no shell, no YAML breakage). */
 export { pullUrlError }
@@ -103,6 +129,7 @@ export function readSettings(): RelaySettings {
     backupPullUrl: typeof raw?.backupPullUrl === "string" && validPullUrl(raw.backupPullUrl) ? raw.backupPullUrl : "",
     failover: parseFailover(raw?.failover),
     lanIngest: raw?.lanIngest === true,
+    mdnsName: cleanMdnsName(raw?.mdnsName) ?? DEFAULT_MDNS_NAME,
   }
 }
 function writeSettings(settings: RelaySettings) {
@@ -420,19 +447,19 @@ export function disarmProgram(): Promise<RelayResult> {
 }
 
 /** OBS settings (Server + Stream Key). Operator-only, on demand; never in status or logs. */
-export function programObsUrl(): { server: string; streamKey: string; url: string; lanServer: string | null } {
+export function programObsUrl(): { server: string; streamKey: string; url: string; lanServer: string | null; mdnsServer: string | null } {
   const c = credentials()
   const server = `rtmp://127.0.0.1:${relayPorts().rtmp}/`
   const streamKey = `${PROGRAM_PATH}?user=${encodeURIComponent(c.programUser ?? "")}&pass=${encodeURIComponent(c.programPass ?? "")}`
-  return { server, streamKey, url: `${server}${streamKey}`, lanServer: lanServerUrl() }
+  return { server, streamKey, url: `${server}${streamKey}`, lanServer: lanServerUrl(), mdnsServer: mdnsServerUrl() }
 }
 
 /** Backup publisher settings (second computer). Operator-only, on demand. */
-export function backupObsUrl(): { server: string; streamKey: string; url: string; lanServer: string | null } {
+export function backupObsUrl(): { server: string; streamKey: string; url: string; lanServer: string | null; mdnsServer: string | null } {
   const c = credentials()
   const server = `rtmp://127.0.0.1:${relayPorts().rtmp}/`
   const streamKey = `${BACKUP_PATH}?user=${encodeURIComponent(c.backupUser ?? "")}&pass=${encodeURIComponent(c.backupPass ?? "")}`
-  return { server, streamKey, url: `${server}${streamKey}`, lanServer: lanServerUrl() }
+  return { server, streamKey, url: `${server}${streamKey}`, lanServer: lanServerUrl(), mdnsServer: mdnsServerUrl() }
 }
 
 /**
@@ -774,7 +801,7 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
 /** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
 export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-export type IngestDiag = { resyncs: number; listen: string | null; lan: boolean; lanUrl: string | null; lastReject: { at: string; text: string } | null; logFile: string }
+export type IngestDiag = { resyncs: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl: string | null; mdns: MdnsState; lastReject: { at: string; text: string } | null; logFile: string }
 /**
  * Pure: from MediaMTX's log, where the RTMP ingest last started listening and the last refused /
  * failed publish (auth failure, path taken, timeout), redacted of query strings.
@@ -868,7 +895,7 @@ export async function relayStatus(): Promise<RelayStatus> {
   const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
   // Live bind from MediaMTX itself (the startup log line scrolls out of the tail on a busy relay).
   const live = api ? await liveGlobalConfig() : null
-  const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: (live?.rtmpAddress !== "?" ? live?.rtmpAddress : undefined) ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
+  const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: (live?.rtmpAddress !== "?" ? live?.rtmpAddress : undefined) ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), mdnsUrl: mdnsServerUrl(), mdns: mdnsStatus(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
   return {
     ingest,
     backup,

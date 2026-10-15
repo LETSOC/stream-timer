@@ -10,7 +10,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true }, lanIngest: false })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true }, lanIngest: false, mdnsName: "hyphen-stream" })
 })
 
 test("credentials are random, stable, and stored 0600", () => {

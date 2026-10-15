@@ -4,6 +4,7 @@
  *   npm start  -> production (needs `npm run build` first)
  *   npm run dev -> dev with HMR (HMR's own WebSocket is passed through to Next untouched)
  */
+import { stopMdns } from "./lib/mdns"
 import { createServer } from "node:http"
 import next from "next"
 import { WebSocketServer } from "ws"
@@ -32,6 +33,7 @@ async function main() {
     console.log(`▲ stream-timer ${dev ? "dev" : "production"} on http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port} (deck WebSocket on the same port)`)
   })
   const shutdown = () => {
+    stopMdns() // goodbye packets: <name>.local disappears from the LAN at once
     for (const client of wss.clients) client.close(1001, "Server shutting down")
     server.close(() => process.exit(0))
     setTimeout(() => process.exit(0), 3000).unref()

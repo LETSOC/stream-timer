@@ -8,7 +8,8 @@ import { readServerState } from "@/lib/event-server"
 import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type FailoverMemory } from "@/lib/program-source"
 import fs from "node:fs"
 import path from "node:path"
-import { programSourceHealth, readSettings, relayDir, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
+import { syncMdns } from "@/lib/mdns"
+import { programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
 
@@ -64,6 +65,8 @@ export async function programMonitorTick(now = Date.now()) {
   const m = monitor()
   await refreshProgramSources()
   await verifyMediamtxConfig(now)
+  // Bonjour follows LAN ingest + arm + the current LAN IP (re-announced when the IP changes).
+  void syncMdns(wantedMdns(), readSettings().mdnsName).catch(() => undefined)
   const settings = readSettings()
   if (settings.programArmed) {
     const state = readServerState()

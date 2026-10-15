@@ -143,3 +143,35 @@ CMD ["npm", "start"]
 ```
 
 Only the app port has to be published. MediaMTX stays on the container's loopback.
+
+## LAN name (mDNS / Bonjour): `rtmp://hyphen-stream.local:19350/`
+
+While **Accept program ingest from LAN** is on *and* the program input is armed, the app advertises
+this Mac on the local network:
+
+- an A record **`<name>.local` → current LAN IP** (default name `hyphen-stream`; rename it in the Relay
+  card under the LAN checkbox, letters/digits/hyphens), and
+- a Bonjour service **`_rtmp._tcp`** on the ingest port (19350), instance `<name>`, TXT `path=/program`.
+
+The second laptop's OBS can then use **Server `rtmp://hyphen-stream.local:19350/`** (Stream key as
+revealed) instead of an IP that changes with DHCP. The reveal panels show it as **LAN** with Copy, and
+the IP as **LAN IP** as a fallback (use the IP if `.local` doesn't resolve on that network, e.g. some
+guest Wi-Fi blocks multicast). The phone `/deck` shows both and a **QR code of the Server URL** for the
+backup laptop (keys are never shown on the deck).
+
+- **macOS** uses `dns-sd -P` (mDNSResponder owns port 5353 and handles probing). Other systems, or
+  `MDNS_BACKEND=js`, use a built-in multicast-dns responder.
+- The IP is re-checked every monitor tick; on a change the records are re-published and re-announced.
+- It stops (goodbye packets) when LAN ingest is turned off, the program input is disarmed, or the
+  server shuts down.
+- **Name conflict:** before publishing, the app asks the LAN who has `<name>.local`. If another device
+  answers, it does **not** advertise and the Relay card shows a red warning
+  ("hyphen-stream.local is already used by 192.168.1.77"): pick another name (e.g. `hyphen-stream-2`).
+
+Verify from the second laptop (macOS):
+
+```sh
+ping -c 3 hyphen-stream.local        # resolves to the stream Mac's LAN IP
+dns-sd -B _rtmp._tcp                 # lists "hyphen-stream" (Ctrl-C to stop)
+dns-sd -L hyphen-stream _rtmp._tcp   # → hyphen-stream.local.:19350
+```

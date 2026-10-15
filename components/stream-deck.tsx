@@ -2,6 +2,7 @@
 
 import { failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
 import type { FailoverSettings } from "@/lib/program-source"
+import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
@@ -225,6 +226,7 @@ export function StreamDeck() {
             <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} />
           </div>
         ) : null}
+        {state?.programSources ? <LanIngestInfo /> : null}
         {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
       </div>
 
