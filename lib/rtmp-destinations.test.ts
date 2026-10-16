@@ -54,3 +54,9 @@ test("RTMP allow-list defaults: LAN/private + common providers; env overrides; *
   assert.equal(allowedRtmpHost("rtmp://evil.example/live/k"), true)
   delete process.env.RTMP_ALLOWED_HOSTS
 })
+
+test("drawtext detection from ffmpeg -filters", async () => {
+  const { hasDrawtextFilter } = await import("@/lib/encoder")
+  assert.equal(hasDrawtextFilter(" ... drawbox           V->V       Draw a box\n T.C drawtext          V->V       Draw text on top of video frames using libfreetype library.\n"), true)
+  assert.equal(hasDrawtextFilter(" ... drawbox           V->V       Draw a box\n ... drawgrid          V->V       Draw a grid\n"), false)
+})

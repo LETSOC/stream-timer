@@ -199,6 +199,20 @@ export function ffmpegAvailable(options: { fresh?: boolean } = {}): boolean {
   return found
 }
 
+/** Does this ffmpeg have the drawtext filter (needs libfreetype; Homebrew's plain "ffmpeg" may lack it)? Cached 60s. */
+let drawtextCache = { until: 0, value: true }
+export function hasDrawtextFilter(filtersOutput: string): boolean {
+  return /^\s*\S+\s+drawtext\s/m.test(filtersOutput)
+}
+export function ffmpegHasDrawtext(): boolean {
+  if (Date.now() < drawtextCache.until) return drawtextCache.value
+  const out = spawnSync("ffmpeg", ["-hide_banner", "-filters"], { encoding: "utf8" })
+  const value = out.status === 0 ? hasDrawtextFilter(String(out.stdout ?? "")) : true // can't tell: don't block
+  drawtextCache = { value, until: Date.now() + 60_000 }
+  return value
+}
+export const DRAWTEXT_MISSING = "This ffmpeg has no drawtext filter, which the Slate needs (text rendering). Install a full build, e.g. on macOS: brew uninstall ffmpeg && brew install ffmpeg-full (or brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg). Browser capture doesn't need it."
+
 export type RtmpUrlCheck = { ok: true; url: string } | { ok: false; error: string }
 
 /**
@@ -794,6 +808,7 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
     return { ok: false, error: process.env.RTMP_ALLOWED_HOSTS ? "That RTMP host is not in RTMP_ALLOWED_HOSTS." : "That RTMP host is not a known provider (YouTube, Restream, Castr, Twitch, Facebook) or a LAN address. Set RTMP_ALLOWED_HOSTS (e.g. RTMP_ALLOWED_HOSTS=myhost.com, or * for any) to allow it.", status: 400 }
   }
   if (!ffmpegAvailable({ fresh: true })) return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 }
+  if (source.kind === "slate" && !ffmpegHasDrawtext()) return { ok: false, error: DRAWTEXT_MISSING, status: 500 }
   if (!fs.existsSync(/* turbopackIgnore: true */ SCRIPT) || !fs.existsSync(/* turbopackIgnore: true */ SUPERVISOR)) {
     return { ok: false, error: "The countdown script is missing.", status: 500 }
   }
