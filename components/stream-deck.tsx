@@ -42,6 +42,10 @@ export function StreamDeck() {
   const [armed, setArmed] = useState<string | null>(null)
   const [toast, setToast] = useState<{ tone: "error" | "ok"; text: string; undo?: TransportAction } | null>(null)
   const [preview, setPreview] = useStoredPref<Preview>("deck-preview-mode", "off", ["off", "stream", "slate", "capture"])
+  // Capture/Slate out preview sound: off by default, and back off whenever the tab changes (/stream preview stays muted).
+  const [previewSound, setPreviewSound] = useState(false)
+  const [soundFor, setSoundFor] = useState(preview)
+  if (soundFor !== preview) { setSoundFor(preview); setPreviewSound(false) }
   const [collapsed, setCollapsed] = useStoredPref<"0" | "1">("deck-preview-collapsed", "0", ["0", "1"])
   const [big, setBig] = useState(false)
   const [relayReady, setRelayReady] = useState<{ slate: boolean; capture: boolean }>({ slate: false, capture: false })
@@ -172,7 +176,16 @@ export function StreamDeck() {
             className={`relative mx-auto mt-2 block aspect-video touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}
           >
             {preview === "stream" && screen === "program" ? <ProgramPlayer key={state?.programSource ?? "main"} scope="deck" src={programOperatorSrc(state?.programSource === "backup" ? "program-backup" : "program")} ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
-              <span data-testid="deck-preview-hls"><StreamPlayer inline src={`/api/relay/hls/${preview}/index.m3u8`} /></span>
+              <span data-testid="deck-preview-hls"><StreamPlayer key={preview} inline src={`/api/relay/hls/${preview}/index.m3u8`} />
+                <button type="button" data-testid="deck-preview-sound" aria-pressed={previewSound} onClick={(e) => {
+                  // Inside the tap (iOS only unmutes from a gesture); never let the tap reach the preview.
+                  e.stopPropagation()
+                  const video = document.querySelector<HTMLVideoElement>("[data-testid=deck-preview-hls] video")
+                  const on = !previewSound
+                  if (video) { video.muted = !on; if (on) void video.play().catch(() => { video.muted = true; setPreviewSound(false) }) }
+                  setPreviewSound(on)
+                }} className={`absolute right-2 bottom-2 z-10 min-h-8 rounded-md px-2 font-mono text-[12px] font-bold ${previewSound ? "bg-[#128a3e] text-white" : "bg-black/70 text-white"}`}>{previewSound ? "🔊 Mute" : "🔇 Unmute"}</button>
+              </span>
             ) : (
               <span data-testid="deck-preview-placeholder" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono text-[12px] text-white/60">
                 <span className="text-[13px] font-bold text-white/80">No signal on {preview === "slate" ? "Slate" : "Capture"} out</span>
