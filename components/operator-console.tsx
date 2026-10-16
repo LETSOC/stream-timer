@@ -38,6 +38,7 @@ import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
+import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DEFAULT_STAGE, localClock, parseStage, serverClock, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
@@ -57,7 +58,7 @@ export function OperatorConsole() {
   const [dests, setDests] = useState<{ selectedId: string | null; selectedCaptureId: string | null; items: Dest[] }>({ selectedId: null, selectedCaptureId: null, items: [] })
   // Destination shown in the "Saved destinations" manager (rename/reveal/copy/delete); separate from what each channel streams to.
   const [manageId, setManageId] = useState<string | null>(null)
-  const [destForm, setDestForm] = useState<{ mode: "add" | "rename" | null; name: string; url: string }>({ mode: null, name: "", url: "" })
+  const [destForm, setDestForm] = useState<{ mode: "add" | "rename" | null; name: string; url: string; key?: string }>({ mode: null, name: "", url: "", key: "" })
   const [destError, setDestError] = useState("")
   const [revealed, setRevealed] = useState<{ id: string; url: string } | null>(null)
   const [legacyRtmp, setLegacyRtmp] = useState<string | null>(null)
@@ -1192,7 +1193,7 @@ export function OperatorConsole() {
                     className="space-y-2 rounded-xl border border-black/10 bg-white p-3"
                     onSubmit={(event) => {
                       event.preventDefault()
-                      const payload = destForm.mode === "add" ? { action: "add", name: destForm.name, url: destForm.url } : { action: "rename", id: selectedDest?.id, name: destForm.name }
+                      const payload = destForm.mode === "add" ? { action: "add", name: destForm.name, url: joinRtmpServerAndKey(destForm.url, destForm.key ?? "") } : { action: "rename", id: selectedDest?.id, name: destForm.name }
                       void destAction(payload).then((ok) => {
                         if (ok) setDestForm({ mode: null, name: "", url: "" })
                       })
@@ -1200,7 +1201,15 @@ export function OperatorConsole() {
                   >
                     <Input aria-label="Destination name" data-testid="dest-name" placeholder="Name, e.g. Restream main" value={destForm.name} onChange={(event) => setDestForm({ ...destForm, name: event.target.value })} />
                     {destForm.mode === "add" ? (
-                      <Input aria-label="Ingest URL with key" data-testid="dest-url" type="password" autoComplete="off" placeholder="rtmp://live.restream.io/live/KEY" value={destForm.url} onChange={(event) => setDestForm({ ...destForm, url: event.target.value })} />
+                      <>
+                        <label className="block font-mono text-[11px] text-black/60">Server
+                          <Input aria-label="Server" data-testid="dest-url" autoComplete="off" spellCheck={false} placeholder="rtmp://a.rtmp.youtube.com/live2" value={destForm.url} onChange={(event) => setDestForm({ ...destForm, url: event.target.value })} />
+                        </label>
+                        <label className="block font-mono text-[11px] text-black/60">Stream key
+                          <Input aria-label="Stream key" data-testid="dest-key" type="password" autoComplete="off" spellCheck={false} placeholder="xxxx-xxxx-xxxx (or ?password=…; leave empty if the server field has the full URL)" value={destForm.key ?? ""} onChange={(event) => setDestForm({ ...destForm, key: event.target.value })} />
+                        </label>
+                        {destForm.url.trim() ? <p data-testid="dest-joined" className="font-mono text-[11px] break-all text-black/60">Publishes to {joinRtmpServerAndKey(destForm.url, destForm.key?.trim() ? `${destForm.key.trim().startsWith("?") ? "?" : ""}${"•".repeat(8)}` : "")}</p> : null}
+                      </>
                     ) : null}
                     <div className="flex gap-2">
                       <button type="submit" data-testid="dest-save" className={pillClass("live", "sm")}>{destForm.mode === "add" ? "Save destination" : "Save name"}</button>
