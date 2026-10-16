@@ -94,7 +94,7 @@ test("parseAction accepts only known shapes; risky actions flagged", () => {
   assert.equal(parseAction({ type: "__proto__" }), null)
   assert.equal(parseAction(null), null)
   assert.deepEqual(parseAction({ type: "pause", extra: 1 }), { type: "pause" })
-  assert.equal(isRisky({ type: "goLive" }) && isRisky({ type: "reset" }) && isRisky({ type: "restore" }) && isRisky({ type: "screen", screen: "end" }), true)
+  assert.equal(isRisky({ type: "goLive" }) && isRisky({ type: "reset" }) && isRisky({ type: "restore" }) && isRisky({ type: "screen", screen: "end" }) && isRisky({ type: "screen", screen: "program" }), true)
   assert.equal(isRisky({ type: "pause" }) || isRisky({ type: "screen", screen: "break" }) || isRisky({ type: "jump", seconds: 15 }), false)
 })
 

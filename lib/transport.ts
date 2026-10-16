@@ -97,7 +97,7 @@ export type TransportState = {
 }
 
 /** Actions that touch /stream in a way that's hard to undo: the deck asks for a second tap. */
-export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "screen:end"])
+export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "screen:end", "screen:program"])
 export function isRisky(action: TransportAction): boolean {
   return RISKY.has(action.type) || (action.type === "screen" && RISKY.has(`screen:${action.screen}`))
 }
