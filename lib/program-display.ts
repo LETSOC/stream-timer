@@ -8,6 +8,8 @@
 export const NOT_READY_MS = 3000
 export const FIRST_FRAME_GRACE_MS = 5000
 export const STALL_HOLD_MS = 4000
+/** While MediaMTX still reports the input publishing, a player stall (LL-HLS hiccup) keeps the last frame this long before "Waiting for OBS". */
+export const READY_STALL_TIMEOUT_MS = 20000
 
 export type ProgramDisplay = "video" | "standby" | "under"
 
@@ -30,7 +32,10 @@ export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
   if (activeSince === null) return "under"
   const gone = !ready && (notReadySince === null || now - notReadySince > NOT_READY_MS)
   if (lastFrameAt !== null) {
-    if (now - lastFrameAt <= STALL_HOLD_MS) return "video"
+    const stalled = now - lastFrameAt
+    if (stalled <= STALL_HOLD_MS) return "video"
+    // Publisher still there: an LL-HLS stall, not OBS gone. Keep the last frame (the watchdog reloads).
+    if (!gone && stalled <= READY_STALL_TIMEOUT_MS) return "video"
     return "standby"
   }
   if (gone && now - activeSince > Math.min(NOT_READY_MS, FIRST_FRAME_GRACE_MS)) return "standby"
