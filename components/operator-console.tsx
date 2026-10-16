@@ -38,7 +38,7 @@ import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
-import { DEFAULT_STAGE, parseStage, stageScreen, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { DEFAULT_STAGE, localClock, parseStage, serverClock, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
@@ -139,6 +139,14 @@ export function OperatorConsole() {
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
+  const testSetAtRef = useRef<number | null>(null)
+  // A desk left open past the test-clock TTL drops it too (so the hero matches /stream).
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (testSetAtRef.current !== null && testClockStale(testSetAtRef.current)) { testSetAtRef.current = null; setTestUntil(null); setPausedAt(null) }
+    }, 30_000)
+    return () => window.clearInterval(id)
+  }, [])
   const [previewFlash, setPreviewFlash] = useState(false)
   // One toast at a time; each kind has its own title, duration and timer. Polling never touches it.
   type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend" | "failover"; text: string; undo?: () => void }
@@ -337,9 +345,10 @@ export function OperatorConsole() {
     const applyLocalFallback = () => {
       try {
         if (stageRaw) applyStage(JSON.parse(stageRaw) as Partial<StageOptions>)
-        const clock = clockRaw ? (JSON.parse(clockRaw) as { testUntil?: number | null; pausedAt?: number | null }) : null
-        if (typeof clock?.testUntil === "number") setTestUntil(clock.testUntil)
-        if (typeof clock?.pausedAt === "number") setPausedAt(new Date(clock.pausedAt))
+        // Stale (older than the test-clock TTL, or undated from an older build) = no test clock.
+        const clock = localClock(clockRaw)
+        if (clock.testUntil !== null) setTestUntil(clock.testUntil)
+        if (clock.pausedAt !== null) setPausedAt(new Date(clock.pausedAt))
       } catch {
         /* ignore a bad local cache */
       }
@@ -356,8 +365,10 @@ export function OperatorConsole() {
         const serverWins = body.hasSaved === true
         if (saved && (serverWins || !window.localStorage.getItem("hyphen-countdown-event"))) updateEvent(saved)
         if (serverWins) {
-          setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
-          setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
+          const clock = serverClock(body)
+          testSetAtRef.current = clock.testSetAt
+          setTestUntil(clock.testUntil)
+          setPausedAt(clock.pausedAt !== null ? new Date(clock.pausedAt) : null)
           if (body.stage) applyStage(body.stage)
         } else applyLocalFallback()
         setPublished({ event: saved ?? { ...DEFAULT_EVENT }, stage: parseStage(body.stage) })
@@ -386,7 +397,7 @@ export function OperatorConsole() {
     // Follows testUntil/pausedAt whoever set them (this desk or a synced one): clearing the test clock
     // on another device must put this preview back on real time too, not just hide the banner.
     setSkewMs((current) => previewSkew(target.getTime(), testUntil, pausedMs || null, current))
-    window.localStorage.setItem("hyphen-countdown-clock", JSON.stringify({ testUntil, pausedAt: pausedMs || null }))
+    window.localStorage.setItem("hyphen-countdown-clock", JSON.stringify({ testUntil, pausedAt: pausedMs || null, savedAt: testSetAtRef.current ?? Date.now() }))
   }, [hydrated, valid, target, testUntil, pausedMs])
 
   const loadDests = useCallback(async () => {
@@ -488,8 +499,10 @@ export function OperatorConsole() {
     }
     // Live switches and the test clock always follow the server.
     applyStage(Object.fromEntries(IMMEDIATE_STAGE.map((key) => [key, remote.stage[key]])) as Partial<StageOptions>)
-    setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
-    setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
+    const clock = serverClock(body)
+    testSetAtRef.current = clock.testSetAt
+    setTestUntil(clock.testUntil)
+    setPausedAt(clock.pausedAt !== null ? new Date(clock.pausedAt) : null)
     setPublished(remote)
     revRef.current = body.rev
     lastSent.current = ""

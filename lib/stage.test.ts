@@ -58,3 +58,15 @@ test("sameSpeakers: order and fields matter (speaker draft)", async () => {
   assert.equal(sameSpeakers([a], [{ ...a, name: "A2" }]), false)
   assert.equal(sameSpeakers([], []), true)
 })
+
+test("desk test clock: stale server clock and stale/undated local cache are ignored", async () => {
+  const { serverClock, localClock, TEST_CLOCK_TTL_MS } = await import("@/lib/stage")
+  const now = 10 * TEST_CLOCK_TTL_MS
+  assert.deepEqual(serverClock({ testUntil: 5, pausedAt: null, testSetAt: now - 1000 }, now), { testUntil: 5, pausedAt: null, testSetAt: now - 1000 })
+  assert.equal(serverClock({ testUntil: 5, testSetAt: now - TEST_CLOCK_TTL_MS - 1 }, now).testUntil, null)
+  assert.equal(serverClock({ testUntil: 5, testStale: true }, now).testUntil, null)
+  assert.equal(localClock(JSON.stringify({ testUntil: 5, savedAt: now - 1000 }), now).testUntil, 5)
+  assert.equal(localClock(JSON.stringify({ testUntil: 5, savedAt: now - TEST_CLOCK_TTL_MS - 1 }), now).testUntil, null)
+  assert.equal(localClock(JSON.stringify({ testUntil: 5 }), now).testUntil, null)
+  assert.equal(localClock("{bad", now).testUntil, null)
+})

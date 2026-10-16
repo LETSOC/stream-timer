@@ -225,3 +225,18 @@ export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "
   if (stage.forceEnd || (!stage.holdCountdown && pastEnd)) return "end"
   return "countdown"
 }
+
+/** The test clock a desk should use from a server body: none once it is stale (same TTL as /stream). */
+export function serverClock(body: { testUntil?: unknown; pausedAt?: unknown; testSetAt?: unknown; testStale?: unknown }, now = Date.now()): { testUntil: number | null; pausedAt: number | null; testSetAt: number | null } {
+  const setAt = typeof body.testSetAt === "number" ? body.testSetAt : null
+  if (body.testStale === true || testClockStale(setAt, now)) return { testUntil: null, pausedAt: null, testSetAt: null }
+  return { testUntil: typeof body.testUntil === "number" ? body.testUntil : null, pausedAt: typeof body.pausedAt === "number" ? body.pausedAt : null, testSetAt: setAt }
+}
+/** The desk's localStorage clock fallback: dropped when it was saved longer ago than the TTL (or undated). */
+export function localClock(raw: string | null, now = Date.now()): { testUntil: number | null; pausedAt: number | null } {
+  try {
+    const c = raw ? (JSON.parse(raw) as { testUntil?: unknown; pausedAt?: unknown; savedAt?: unknown }) : null
+    if (!c || typeof c.savedAt !== "number" || testClockStale(c.savedAt, now)) return { testUntil: null, pausedAt: null }
+    return { testUntil: typeof c.testUntil === "number" ? c.testUntil : null, pausedAt: typeof c.pausedAt === "number" ? c.pausedAt : null }
+  } catch { return { testUntil: null, pausedAt: null } }
+}

@@ -147,6 +147,16 @@ test("extendEnd: +5/+10 on Event end time, or on the end card override when set;
   assert.equal(isRisky({ type: "extendEnd", minutes: 5 }), false)
 })
 
+test("End in N min / setEnd clear a Countdown hold; Show end forces end and clears hold", () => {
+  const held = { ...DEFAULT_STAGE, holdCountdown: true }
+  assert.equal(ok(applyTransport(base({ stage: held }), { type: "extendEnd", minutes: 5 }, NOW)).stage.holdCountdown, false)
+  assert.equal(ok(applyTransport(base({ stage: held }), { type: "setEnd", endTime: "16:15", endAt: "" }, NOW)).stage.holdCountdown, false)
+  const e = ok(applyTransport(base({ stage: held }), { type: "screen", screen: "end" }, NOW)).stage
+  assert.equal(e.forceEnd, true); assert.equal(e.holdCountdown, false)
+  const c = ok(applyTransport(base(), { type: "screen", screen: "countdown" }, NOW)).stage
+  assert.equal(c.holdCountdown, true); assert.equal(c.forceEnd, false)
+})
+
 test("end time across midnight lands on the next day; past-end end card comes back to countdown", () => {
   assert.equal(addMinutes("23:55", 10), "00:05")
   const late = endInstant("2026-10-14", "22:00", "00:05", "Europe/London")

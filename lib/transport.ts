@@ -204,14 +204,15 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       const guard = endGuard(state, to, now)
       if (guard) return { ok: false, error: guard }
       // forceEnd (operator chose "end") stays; otherwise the new end time decides countdown/LIVE vs end card.
-      return field === "endAt" ? next({}, { endAt: to }) : next({ event: { ...state.event, endTime: to } })
+      // A new end time is a decision about the end: an earlier "Countdown" hold must not keep the end card away.
+      return field === "endAt" ? next({}, { endAt: to, holdCountdown: false }) : next({ event: { ...state.event, endTime: to } }, { holdCountdown: false })
     }
     case "programSource":
       return next({}, { programSource: action.source })
     case "streamAudio":
       return next({}, { ...(action.program === undefined ? {} : { streamProgramAudio: action.program }), ...(action.bed === undefined ? {} : { streamBedAudio: action.bed }) })
     case "setEnd":
-      return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt })
+      return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt, holdCountdown: false })
   }
 }
 
