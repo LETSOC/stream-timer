@@ -36,3 +36,31 @@ test("STREAM timecode switch: off by default, live, preserved", () => {
   const r = applyTransport({ event: { ...DEFAULT_EVENT }, testUntil: null, pausedAt: null, stage: parseStage({}) }, { type: "timecode", show: true, fps: 60 }, 1)
   assert.ok(r.ok && r.next.stage.streamTimecode && r.next.stage.streamTimecodeFps === 60)
 })
+
+import { beepTimes, ctxTimeFor, flashOn, parseBeepEvery, parseVol } from "@/lib/av-diagnostics"
+
+test("TC1 beep schedule: whole seconds, minute flag, every N, local tz", () => {
+  const base = Date.UTC(2026, 9, 17, 13, 0, 58, 700)
+  const b = beepTimes(base, base + 2500, 1)
+  assert.deepEqual(b.map((x) => new Date(x.at).getUTCSeconds()), [59, 0, 1])
+  assert.deepEqual(b.map((x) => x.minute), [false, true, false])
+  assert.deepEqual(beepTimes(base, base + 12_000, 5).map((x) => new Date(x.at).getUTCSeconds()), [0, 5, 10])
+  assert.equal(beepTimes(base, base + 200, 1).length, 0)
+  // (from, to]: no double schedule across ticks
+  const t = Date.UTC(2026, 0, 1, 0, 0, 1, 0)
+  assert.equal(beepTimes(t - 100, t, 1).length + beepTimes(t, t + 100, 1).length, 1)
+  assert.equal(ctxTimeFor(10_500, { wallMs: 10_000, ctxTime: 2 }, 0.02), 2.48)
+  assert.equal(flashOn(t + 50, 1), true)
+  assert.equal(flashOn(t + 150, 1), false)
+  assert.equal(parseBeepEvery("10"), 10)
+  assert.equal(parseBeepEvery("3"), 1)
+  assert.equal(parseVol("2"), 1)
+  assert.equal(parseVol(null), 0.5)
+})
+
+test("audio offset column", () => {
+  const live = liveFromStatus(null, { avOffsetMs: 0, programOffsetMs: { main: 0, backup: 0 } }, "main")
+  const s = makeSample(live, { audioOffsetMs: "-35" }, 1)
+  assert.equal(s.audioOffsetMs, -35)
+  assert.match(samplesToCsv([s]).split("\n")[0], /readingMs,audioOffsetMs,note$/)
+})

@@ -14,6 +14,7 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
   const [diag, setDiag] = useState<Diag | null>(null)
   const [reading, setReading] = useState("")
   const [note, setNote] = useState("")
+  const [audioOff, setAudioOff] = useState("")
   const [msg, setMsg] = useState("")
   const [tc, setTc] = useState<{ on: boolean; fps: number } | null>(null)
   // The synced value changed (another desk or the save came back): drop the optimistic copy.
@@ -39,10 +40,11 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
     return r?.ok ? ((await r.json()) as { sample?: AvSample; count?: number; archived?: string | null }) : null
   }
   async function mark() {
-    const out = await post({ action: "mark", readingMs: reading, note })
+    const out = await post({ action: "mark", readingMs: reading, audioOffsetMs: audioOff, note })
     if (!out) return setMsg("Mark failed.")
     setMsg(`Marked #${out.count} at ${new Date(out.sample!.at).toLocaleTimeString()}`)
     setReading("")
+    setAudioOff("")
     setNote("")
   }
 
@@ -78,8 +80,9 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
 
       <div className="grid gap-2 rounded-xl border border-black/15 p-3">
         <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Drift log ({diag?.count ?? 0} samples · data/av-log.jsonl)</p>
-        <div className="grid grid-cols-[1fr_2fr] gap-2">
+        <div className="grid grid-cols-[1fr_1fr_2fr] gap-2">
           <input data-testid="av-reading" inputMode="numeric" placeholder="STREAM − OBS SRC ms" className="h-9 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={reading} onChange={(e) => setReading(e.target.value)} />
+          <input data-testid="av-audio-offset" inputMode="numeric" placeholder="Audio offset ms (+ = late)" className="h-9 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={audioOff} onChange={(e) => setAudioOff(e.target.value)} />
           <input data-testid="av-note" placeholder="Note (e.g. YouTube phone, TC4 +6.2s)" className="h-9 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
         <div className="flex flex-wrap gap-2">
@@ -90,10 +93,10 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
         {msg ? <p data-testid="av-msg" className="font-mono text-[12px] text-black/70">{msg}</p> : null}
         {diag?.samples.length ? (
           <table className="w-full font-mono text-[11px]">
-            <thead><tr className="text-left text-black/60"><th>Time</th><th>Player</th><th>Delay</th><th>Offs</th><th>Reading</th><th>Note</th></tr></thead>
+            <thead><tr className="text-left text-black/60"><th>Time</th><th>Player</th><th>Delay</th><th>Offs</th><th>Reading</th><th>Audio</th><th>Note</th></tr></thead>
             <tbody>
               {diag.samples.slice(-8).reverse().map((s) => (
-                <tr key={s.at}><td>{new Date(s.at).toLocaleTimeString()}</td><td>{s.playerLatencyMs ?? "—"}</td><td>{s.audioDelayMs ?? "—"}</td><td>{s.avOffsetMs + s.programOffsetMs}</td><td>{s.readingMs ?? "—"}</td><td className="truncate">{s.note}</td></tr>
+                <tr key={s.at}><td>{new Date(s.at).toLocaleTimeString()}</td><td>{s.playerLatencyMs ?? "—"}</td><td>{s.audioDelayMs ?? "—"}</td><td>{s.avOffsetMs + s.programOffsetMs}</td><td>{s.readingMs ?? "—"}</td><td>{s.audioOffsetMs ?? "—"}</td><td className="truncate">{s.note}</td></tr>
               ))}
             </tbody>
           </table>

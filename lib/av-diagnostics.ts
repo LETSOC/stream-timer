@@ -36,20 +36,25 @@ export type AvLive = {
   jitterMs: number | null
 }
 
-export type AvSample = AvLive & { at: number; iso: string; readingMs: number | null; note: string }
+export type AvSample = AvLive & { at: number; iso: string; readingMs: number | null; /** typed: audio marker vs picture at the output, ms (+ = audio late) */ audioOffsetMs?: number | null; note: string }
 
-export function makeSample(live: AvLive, input: { readingMs?: unknown; note?: unknown }, now = Date.now()): AvSample {
-  const r = typeof input.readingMs === "number" ? input.readingMs : typeof input.readingMs === "string" && input.readingMs.trim() ? Number(input.readingMs) : NaN
+const typedMs = (v: unknown) => {
+  const r = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN
+  return Number.isFinite(r) && Math.abs(r) <= 600_000 ? Math.round(r) : null
+}
+
+export function makeSample(live: AvLive, input: { readingMs?: unknown; audioOffsetMs?: unknown; note?: unknown }, now = Date.now()): AvSample {
   return {
     at: now,
     iso: new Date(now).toISOString(),
     ...live,
-    readingMs: Number.isFinite(r) && Math.abs(r) <= 600_000 ? Math.round(r) : null,
+    readingMs: typedMs(input.readingMs),
+    audioOffsetMs: typedMs(input.audioOffsetMs),
     note: typeof input.note === "string" ? input.note.replace(/[\r\n]+/g, " ").slice(0, 200) : "",
   }
 }
 
-export const CSV_COLUMNS = ["iso", "at", "playerLatencyMs", "audioDelayMs", "autoOffsetMs", "avOffsetMs", "programOffsetMs", "source", "mixing", "jitterMs", "readingMs", "note"] as const
+export const CSV_COLUMNS = ["iso", "at", "playerLatencyMs", "audioDelayMs", "autoOffsetMs", "avOffsetMs", "programOffsetMs", "source", "mixing", "jitterMs", "readingMs", "audioOffsetMs", "note"] as const
 
 function cell(v: unknown): string {
   if (v === null || v === undefined) return ""
@@ -91,4 +96,46 @@ export function liveFromStatus(programAudio: Record<string, unknown> | null | un
     mixing: pa.mixing === true,
     jitterMs: num(pa.jitterMs),
   }
+}
+
+// ---------- TC1 audio marker (/overlay/timecode?beep=1) ----------
+
+export const BEEP_EVERY = [1, 5, 10] as const
+/** Distinct from the /stream sync beep (1 kHz, 100 ms): short 1.5 kHz, 3 kHz on the minute. */
+export const TC_BEEP = { hz: 1500, minuteHz: 3000, ms: 40 } as const
+export const TC_FLASH_MS = 100
+
+export function parseBeepEvery(value: unknown): number {
+  const n = Number(value)
+  return (BEEP_EVERY as readonly number[]).includes(n) ? n : 1
+}
+export function parseVol(value: unknown, fallback = 0.5): number {
+  const n = Number(value)
+  return value === null || value === undefined || value === "" || !Number.isFinite(n) ? fallback : Math.min(1, Math.max(0, n))
+}
+
+/**
+ * Wall-clock instants to beep in (fromMs, toMs]: whole seconds that are multiples of `everyS`,
+ * in local time (tzOffsetMin = minutes east of UTC, so "on the minute" matches what TC1 displays).
+ */
+export function beepTimes(fromMs: number, toMs: number, everyS: number, tzOffsetMin = 0): { at: number; minute: boolean }[] {
+  const step = everyS * 1000
+  const tz = tzOffsetMin * 60_000
+  const out: { at: number; minute: boolean }[] = []
+  for (let local = Math.floor((fromMs + tz) / step) * step + step; local <= toMs + tz; local += step) {
+    out.push({ at: local - tz, minute: ((local % 60_000) + 60_000) % 60_000 === 0 })
+  }
+  return out
+}
+
+/** AudioContext time at which a wall-clock instant reaches the speaker (anchor sampled together; minus output latency). */
+export function ctxTimeFor(atMs: number, anchor: { wallMs: number; ctxTime: number }, outputLatencyS = 0): number {
+  return anchor.ctxTime + (atMs - anchor.wallMs) / 1000 - outputLatencyS
+}
+
+/** Visual flash window: the first TC_FLASH_MS of each beep instant. */
+export function flashOn(nowMs: number, everyS: number, tzOffsetMin = 0): boolean {
+  const local = nowMs + tzOffsetMin * 60_000
+  const step = everyS * 1000
+  return ((local % step) + step) % step < TC_FLASH_MS
 }

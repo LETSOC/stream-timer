@@ -27,6 +27,33 @@ Recommended: our page as a Browser Source (frame-accurate, transparent, labelled
 
 The page needs no view key (it shows only the time of day).
 
+### TC1 audio marker (`?beep=1`)
+
+`/overlay/timecode?fps=30&beep=1` adds a WebAudio beep exactly on each whole second of the same clock TC1 shows,
+and flashes the OBS SRC badge white for 100 ms at the same instant (the frame where FF rolls to `00`).
+
+- Beep: **1.5 kHz, 40 ms**; **3 kHz on the minute** (`:00`). Deliberately different from the /stream sync beep (1 kHz, 100 ms), so you can tell them apart by ear and on a waveform.
+- `?beepEvery=1|5|10` seconds (default 1), `?vol=0..1` (default 0.5).
+- Scheduled on the AudioContext clock with lookahead (anchored to `Date.now()` every 50 ms, beeps placed 400 ms ahead, output latency subtracted), so timer jitter never moves the beep.
+- **OBS**: in the Browser Source properties tick **Control audio via OBS**, then route it to the program (Audio Mixer / Advanced Audio Properties: monitor off, track 1 on). OBS browser sources play audio without a click.
+- **Normal browser**: autoplay is blocked until you click; the page shows *Click to enable audio (beep)*. Click anywhere once.
+
+Example OBS URL: `http://127.0.0.1:43211/overlay/timecode?fps=30&beep=1&beepEvery=1&vol=0.5`
+
+### Reading audio drift at the output
+
+Record or screen-capture the output (YouTube, or the capture HLS) and step through frames with audio waveform visible:
+
+- **OBS beep vs OBS SRC rollover** (badge flashes / FF = `00`): both made in OBS at the same instant, so any gap is the
+  **source leg's A/V offset** (OBS → relay → /stream player → capture → platform carrying OBS's own audio and video).
+  `audio offset ms` = beep onset − flash frame time (+ = audio late).
+- **/stream sync beep vs sync flash** (desk › capture › A/V sync test): both made by our capture page, so their gap is
+  **our pipeline's** A/V offset (capture → ffmpeg → relay → platform), independent of OBS.
+- If the OBS pair is off but the /stream pair is fine, the drift is on the OBS/program-audio leg; if both are off by the same amount, it's after capture.
+
+Type the measured number into Desk › A/V diagnostics › **Audio offset ms** when you press **Mark**; it is logged as
+`audioOffsetMs` in `data/av-log.jsonl` and the CSV.
+
 Alternative without a browser: OBS **Text (FreeType 2/GDI+)** source driven by a clock script (Tools › Scripts, e.g. a
 Lua clock script that sets the text to `os.date("%H:%M:%S")` plus a frame counter each tick). Scripts tick on OBS's
 render loop but are only ms-accurate to the script's timer; prefer the Browser Source for frame accuracy.
@@ -51,7 +78,7 @@ Desk › A/V diagnostics › MediaMTX shows each relay path: ready, bytes in/out
 2. Desk › A/V diagnostics › **New test (archive log)**.
 3. Every 30 s for 3 minutes: read both badges off the YouTube player (pause or screenshot), type **STREAM − OBS SRC in ms**
    (frames × 1000 / fps) into the box, optionally a note, press **Mark**. Each mark logs wall clock, /stream player latency,
-   adaptive program audio delay, auto + manual offsets and your reading to `data/av-log.jsonl`.
+   adaptive program audio delay, auto + manual offsets, your reading and the optional **audio offset ms** to `data/av-log.jsonl`.
 4. **Download CSV** and chart `readingMs` and `playerLatencyMs` over time. Flat = no drift; a steady slope = drift;
    steps = the adaptive delay re-locking (compare with `audioDelayMs`).
 

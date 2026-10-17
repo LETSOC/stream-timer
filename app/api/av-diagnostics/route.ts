@@ -35,12 +35,12 @@ export async function GET(request: Request) {
   }, { headers: NO_STORE })
 }
 
-/** { action: "mark", readingMs?, note? } logs one sample; { action: "new" } archives the log and starts fresh. */
+/** { action: "mark", readingMs?, audioOffsetMs?, note? } logs one sample; { action: "new" } archives the log and starts fresh. */
 export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
   if (denied) return denied
-  const body = (await request.json().catch(() => null)) as { action?: unknown; readingMs?: unknown; note?: unknown } | null
+  const body = (await request.json().catch(() => null)) as { action?: unknown; readingMs?: unknown; audioOffsetMs?: unknown; note?: unknown } | null
   if (body?.action === "mark") {
     const sample = makeSample(await live(), body)
     appendAvSample(sample)
