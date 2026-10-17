@@ -1,3 +1,4 @@
+import { stageScreen } from "@/lib/stage"
 import assert from "node:assert/strict"
 import fs from "node:fs"
 import os from "node:os"
@@ -6,7 +7,7 @@ import { beforeEach, test } from "node:test"
 
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { DEFAULT_STAGE } from "@/lib/stage"
-import { addMinutes, applyTransport, deckScreen, deckState, effectiveNow, endInstant, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
+import { addMinutes, applyTransport, endSoonAt, deckScreen, deckState, effectiveNow, endInstant, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
 import { readServerState, writeServerEvent } from "@/lib/event-server"
 import { runServerTransport } from "@/lib/transport-server"
 import { onSaved } from "@/lib/event-bus"
@@ -68,8 +69,8 @@ test("program: cards sit on top of it, countdown/end switch it off; precedence",
   const s = (st: TransportState) => deckScreen(deckState({ ...st, rev: 1, testSetAt: null }, NOW), NOW)
   assert.equal(s(brk), "break")
   assert.equal(s(ok(applyTransport(brk, { type: "screen", screen: "program" }, NOW))), "program")
-  // program beats a forced end card and a past end time
-  assert.equal(s({ ...prog, stage: { ...prog.stage, forceEnd: true } }), "program")
+  // a forced end card beats program (end card override); a past Event › End time alone does not
+  assert.equal(s({ ...prog, stage: { ...prog.stage, forceEnd: true } }), "end")
   assert.equal(ok(applyTransport(prog, { type: "screen", screen: "end" }, NOW)).stage.program, false)
   assert.equal(ok(applyTransport(prog, { type: "screen", screen: "countdown" }, NOW)).stage.program, false)
   assert.deepEqual(parseAction({ type: "screen", screen: "program" }), { type: "screen", screen: "program" })
@@ -95,7 +96,8 @@ test("parseAction accepts only known shapes; risky actions flagged", () => {
   assert.equal(parseAction(null), null)
   assert.deepEqual(parseAction({ type: "pause", extra: 1 }), { type: "pause" })
   assert.equal(isRisky({ type: "goLive" }) && isRisky({ type: "reset" }) && isRisky({ type: "restore" }) && isRisky({ type: "screen", screen: "end" }) && isRisky({ type: "screen", screen: "program" }), true)
-  assert.equal(isRisky({ type: "pause" }) || isRisky({ type: "screen", screen: "break" }) || isRisky({ type: "jump", seconds: 15 }), false)
+  for (const screen of ["countdown", "break", "hold", "welcome"] as const) assert.equal(isRisky({ type: "screen", screen }), true, screen)
+  assert.equal(isRisky({ type: "pause" }) || isRisky({ type: "jump", seconds: 15 }) || isRisky({ type: "setEnd", endTime: "20:00", endAt: "19:00" }), false)
 })
 
 test("deck state is compact and deckScreen matches /stream precedence", () => {
@@ -187,4 +189,22 @@ test("extendEnd −5/−10: shortens, rolls back across midnight, refuses before
   assert.ok(!d.ok && /already past/.test(d.error))
   assert.deepEqual(parseAction({ type: "extendEnd", minutes: -10 }), { type: "extendEnd", minutes: -10 })
   assert.equal(parseAction({ type: "extendEnd", minutes: -7 }), null)
+})
+
+test("end card override: due endAt cuts over Program; Program/Countdown tap holds; plain end time never cuts Program", () => {
+  const base = { overlay: "none" as const, forceEnd: false, holdCountdown: false, program: true }
+  assert.equal(stageScreen({ ...base, endAt: "19:00" }, true), "end")
+  assert.equal(stageScreen({ ...base, endAt: "19:00" }, false), "program")
+  assert.equal(stageScreen({ ...base, endAt: "" }, true), "program")
+  assert.equal(stageScreen({ ...base, endAt: "19:00", holdCountdown: true }, true), "program")
+  assert.equal(stageScreen({ ...base, overlay: "hold", endAt: "19:00" }, true), "hold")
+  assert.equal(stageScreen({ ...base, program: false, endAt: "" }, true), "end")
+})
+
+test("endSoonAt follows the test clock in the event zone", () => {
+  const event = { date: "2026-10-15", time: "19:00", timeZone: "Europe/London" }
+  const target = endInstant(event.date, event.time, event.time, event.timeZone).getTime()
+  // test clock: 10 min before start
+  assert.equal(endSoonAt({ event, testUntil: target + 600_000, pausedAt: null } as never, target, 2), "18:52")
+  assert.equal(endSoonAt({ event, testUntil: null, pausedAt: target } as never, 0, 5), "19:05")
 })

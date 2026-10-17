@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
-import { deckScreen, effectiveNow, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
+import { deckScreen, effectiveNow, endSoonAt, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
@@ -219,6 +219,19 @@ export function StreamDeck() {
       </div>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
+      <div className="mb-2 flex items-center gap-1.5">
+        {state
+          ? ([2, 5] as const).map((m) => {
+              const hhmm = endSoonAt(
+                { event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: state.testStale ? null : state.testUntil, pausedAt: state.testStale ? null : state.pausedAt },
+                serverNow,
+                m,
+              )
+              return button(`end-soon-${m}`, { type: "setEnd", endTime: state.endTime, endAt: hhmm }, `End in ${m}m`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]!")
+            })
+          : null}
+      </div>
+      <p className="mb-2 font-mono text-[12px] text-white/60">End in 2m/5m sets the end card override on the test clock. When due it cuts over Program; tap Program or Countdown to stay on.</p>
       <div className="flex items-center gap-1.5">
         {EXTENDS.map((m) => button(`extend-${m < 0 ? `minus${-m}` : m}`, { type: "extendEnd", minutes: m }, m < 0 ? `−${-m}` : `+${m}`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[16px]! tabular-nums"))}
         <span className="font-mono text-[12px] text-white/60">min</span>

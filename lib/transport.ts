@@ -97,7 +97,7 @@ export type TransportState = {
 }
 
 /** Actions that touch /stream in a way that's hard to undo: the deck asks for a second tap. */
-export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "screen:end", "screen:program"])
+export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "screen:end", "screen:program", "screen:countdown", "screen:break", "screen:hold", "screen:welcome"])
 export function isRisky(action: TransportAction): boolean {
   return RISKY.has(action.type) || (action.type === "screen" && RISKY.has(`screen:${action.screen}`))
 }
@@ -118,6 +118,14 @@ export function effectiveNow(state: Pick<TransportState, "event" | "testUntil" |
   const target = eventTarget(state.event).getTime()
   if (state.testUntil !== null && Number.isFinite(target)) return now + (target - state.testUntil)
   return now
+}
+
+/** HH:MM in the event zone, `minutes` after the time /stream counts against (test clock aware). Feeds deck "End in Nm". */
+export function endSoonAt(state: Pick<TransportState, "event" | "testUntil" | "pausedAt">, now: number, minutes: number): string {
+  const at = new Date(effectiveNow(state, now) + minutes * 60_000)
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: state.event.timeZone || "UTC", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at)
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00"
+  return `${get("hour")}:${get("minute")}`
 }
 
 /** Validate untrusted JSON (WebSocket / POST body) into an action. */
@@ -190,7 +198,9 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       const overlayAt = overlay === "none" ? null : overlay === state.stage.overlay ? state.stage.overlayAt ?? now : now
       // Cards sit on top of the program feed (it stays "on" underneath); countdown/end switch it off.
       const program = action.screen === "program" ? true : overlay !== "none" ? state.stage.program : false
-      return next({}, { overlay, overlayAt, program, forceEnd: action.screen === "end", holdCountdown: action.screen === "countdown" })
+      // Program and Countdown both hold past a due end-card override (else End in 2m → end card → Program snaps back to end).
+      const holdCountdown = action.screen === "countdown" || action.screen === "program" || (overlay !== "none" && state.stage.holdCountdown)
+      return next({}, { overlay, overlayAt, program, forceEnd: action.screen === "end", holdCountdown })
     }
     case "mode":
       return next({}, { deskLive: action.live })
