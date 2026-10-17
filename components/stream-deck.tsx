@@ -169,6 +169,7 @@ export function StreamDeck() {
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]} ${link === "connecting" ? "animate-pulse" : ""}`} />
           {LINK_LABEL[link]}
         </span>
+        <Link href="/visuals" data-testid="deck-visuals-link" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Visuals</Link>
         <Link href="/" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Desk</Link>
       </header>
         <PreviewBar preview={preview} setPreview={setPreview} collapsed={collapsed === "1"} toggle={() => setCollapsed(collapsed === "1" ? "0" : "1")} />

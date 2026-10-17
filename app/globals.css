@@ -293,3 +293,73 @@ html:has([data-desk-root]) body {
   .social-circle { transition: opacity 0.3s ease; }
   .social-circle-active { transform: none; box-shadow: none; }
 }
+
+/* ---------- Visuals overlays (/overlay/strap, /overlay/socials): transparent 1920x1080 OBS sources ---------- */
+.overlay-stage {
+  container-type: inline-size;
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  --bold-font: Arial, Helvetica, sans-serif;
+  --px: calc(100cqi / 1920);
+  --safe: calc(32 * var(--px));
+  --inset: calc(96 * var(--px));
+}
+.overlay-checker {
+  background-color: #bdbdbd;
+  background-image: linear-gradient(45deg, #8a8a8a 25%, transparent 25%), linear-gradient(-45deg, #8a8a8a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #8a8a8a 75%), linear-gradient(-45deg, transparent 75%, #8a8a8a 75%);
+  background-size: 32px 32px;
+  background-position: 0 0, 0 16px, 16px -16px, -16px 0;
+}
+.overlay-anchor {
+  position: absolute;
+  /* never closer than the 32px safe area */
+  max-width: calc(1920 * var(--px) - 2 * var(--safe));
+}
+.strap {
+  font-family: var(--bold-font);
+  color: var(--strap-text, #fff);
+  line-height: 1.12;
+  --strap-ease-in: cubic-bezier(.16, 1, .3, 1);
+  --strap-ease-out: cubic-bezier(.7, 0, .84, 0);
+}
+.strap-body {
+  transition: transform 0.68s var(--strap-ease-in), opacity 0.68s var(--strap-ease-in), clip-path 0.68s var(--strap-ease-in);
+  will-change: transform, opacity, clip-path;
+}
+.strap-off .strap-body {
+  transition-duration: 0.48s;
+  transition-timing-function: var(--strap-ease-out);
+  opacity: 0;
+}
+.strap-m-slide-left.strap-off .strap-body { transform: translateX(calc(-140 * var(--px))); }
+.strap-m-slide-up.strap-off .strap-body { transform: translateY(calc(90 * var(--px))); }
+.strap-m-wipe .strap-body { clip-path: inset(0 0 0 0); }
+.strap-m-wipe.strap-off .strap-body { clip-path: inset(0 100% 0 0); opacity: 1; }
+.strap-m-wipe.strap-off .strap-body { transition-property: clip-path; }
+.strap-name { display: block; font-weight: 700; font-size: calc(46 * var(--px)); letter-spacing: -0.01em; }
+.strap-title { display: block; font-weight: 400; font-size: calc(26 * var(--px)); margin-top: calc(8 * var(--px)); }
+.strap-social { display: inline-flex; align-items: center; gap: calc(10 * var(--px)); font-size: calc(22 * var(--px)); margin-top: calc(12 * var(--px)); font-weight: 700; }
+.strap-social > span:first-child[data-platform] { font-size: calc(34 * var(--px)); }
+/* minimal line */
+.strap-line .strap-body { display: flex; align-items: stretch; gap: calc(20 * var(--px)); text-shadow: 0 calc(2 * var(--px)) calc(10 * var(--px)) rgba(0, 0, 0, 0.55); }
+.strap-line .strap-bar { width: calc(6 * var(--px)); border-radius: calc(3 * var(--px)); background: var(--strap-accent); }
+.strap-line .strap-social { display: flex; }
+/* block */
+.strap-block .strap-body { display: inline-flex; flex-direction: column; align-items: flex-start; }
+.strap-block .strap-name { background: var(--strap-accent); color: #0b0b0f; padding: calc(14 * var(--px)) calc(26 * var(--px)); }
+.strap-block .strap-title { margin-top: 0; background: #0000b6; padding: calc(12 * var(--px)) calc(26 * var(--px)); display: flex; align-items: center; gap: calc(18 * var(--px)); }
+.strap-block .strap-title .strap-social { margin-top: 0; }
+/* social pill */
+.strap-pill .strap-body { display: inline-flex; align-items: center; gap: calc(18 * var(--px)); padding: calc(12 * var(--px)) calc(34 * var(--px)) calc(12 * var(--px)) calc(12 * var(--px)); border-radius: 9999px; background: rgba(8, 8, 20, 0.82); border: calc(2 * var(--px)) solid var(--strap-accent); }
+.strap-pill .strap-pill-icon { font-size: calc(72 * var(--px)); }
+.strap-pill .strap-name { font-size: calc(34 * var(--px)); }
+.strap-pill .strap-title { font-size: calc(22 * var(--px)); margin-top: calc(4 * var(--px)); opacity: 0.85; }
+/* event gradient */
+.strap-gradient .strap-body { display: inline-block; padding: calc(22 * var(--px)) calc(40 * var(--px)) calc(24 * var(--px)); border-radius: calc(14 * var(--px)); background: linear-gradient(100deg, #0000b6 0%, #0a0ac8 55%, color-mix(in srgb, var(--strap-accent) 70%, #0000b6) 130%); box-shadow: 0 calc(10 * var(--px)) calc(40 * var(--px)) rgba(0, 0, 40, 0.45); }
+.strap-gradient .strap-social { display: flex; }
+@media (prefers-reduced-motion: reduce) {
+  .strap-body { transition-property: opacity !important; transform: none !important; clip-path: none !important; }
+}

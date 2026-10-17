@@ -399,7 +399,7 @@ function seeded(second: number, index: number) {
 }
 
 
-function XIcon() {
+export function XIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-black">
       <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>
@@ -409,7 +409,7 @@ function XIcon() {
   )
 }
 
-function FacebookIcon() {
+export function FacebookIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-[#3b5998]">
       <svg viewBox="0 0 24 24" className="size-[1.35cqi]" fill="white" aria-hidden>
@@ -419,7 +419,7 @@ function FacebookIcon() {
   )
 }
 
-function LinkedInIcon() {
+export function LinkedInIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-[#0a66c2]">
       <svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="white" aria-hidden>
@@ -429,7 +429,7 @@ function LinkedInIcon() {
   )
 }
 
-function InstagramIcon() {
+export function InstagramIcon() {
   return (
     <span
       className="flex size-full items-center justify-center rounded-full"
@@ -444,7 +444,7 @@ function InstagramIcon() {
   )
 }
 
-function YouTubeIcon() {
+export function YouTubeIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-[#ff0033]">
       <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>

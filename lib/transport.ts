@@ -8,6 +8,7 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import type { FailoverEvent, FailoverSettings, ReturnStatus, SourceHealth } from "@/lib/program-source"
 import type { InputReadout } from "@/lib/input-state"
 import { stageScreen, testClockStale, type StageOptions } from "@/lib/stage"
+import { clampHold, CORNERS, STRAP_MODES, STRAP_MOTIONS, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export const JUMPS = [
   { label: "15s", seconds: 15 },
@@ -36,6 +37,10 @@ export type TransportAction =
   | { type: "programSource"; source: "main" | "backup" }
   /** /stream in-page audio routing: raw program audio and/or the bed (applied at once, synced). */
   | { type: "streamAudio"; program?: boolean; bed?: boolean }
+  /** Visuals: name strap IN / OUT / LOOP and its live look. Applied at once (no Save). */
+  | { type: "strap"; mode?: StrapMode; id?: string; holdSec?: number; motion?: StrapMotion; style?: StrapStyle | ""; corner?: Corner }
+  /** Visuals: social circles overlay show/hide + corner. */
+  | { type: "socials"; show?: boolean; corner?: Corner }
 
 export type ProgramSourcesView = {
   main: SourceHealth & Partial<InputReadout>
@@ -167,6 +172,22 @@ export function parseAction(value: unknown): TransportAction | null {
       if (typeof v.bed === "boolean") out.bed = v.bed
       return out.program === undefined && out.bed === undefined ? null : out
     }
+    case "strap": {
+      const out: Extract<TransportAction, { type: "strap" }> = { type: "strap" }
+      if (STRAP_MODES.includes(v.mode as StrapMode)) out.mode = v.mode as StrapMode
+      if (typeof v.id === "string" && /^[a-z0-9_-]{1,32}$/i.test(v.id)) out.id = v.id
+      if (typeof v.holdSec === "number" && Number.isFinite(v.holdSec)) out.holdSec = clampHold(v.holdSec)
+      if (STRAP_MOTIONS.includes(v.motion as StrapMotion)) out.motion = v.motion as StrapMotion
+      if (v.style === "" || STRAP_STYLES.includes(v.style as StrapStyle)) out.style = v.style as StrapStyle | ""
+      if (CORNERS.includes(v.corner as Corner)) out.corner = v.corner as Corner
+      return Object.keys(out).length > 1 ? out : null
+    }
+    case "socials": {
+      const out: Extract<TransportAction, { type: "socials" }> = { type: "socials" }
+      if (typeof v.show === "boolean") out.show = v.show
+      if (CORNERS.includes(v.corner as Corner)) out.corner = v.corner as Corner
+      return Object.keys(out).length > 1 ? out : null
+    }
     default:
       return null
   }
@@ -231,6 +252,20 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       return next({}, { ...(action.program === undefined ? {} : { streamProgramAudio: action.program }), ...(action.bed === undefined ? {} : { streamBedAudio: action.bed }) })
     case "setEnd":
       return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt, holdCountdown: false })
+    case "strap": {
+      const id = action.id ?? state.stage.strapId
+      if (action.mode && action.mode !== "out" && !state.stage.straps.some((p) => p.id === id)) return { ok: false, error: "Pick a saved strap first." }
+      const patch: Partial<StageOptions> = { strapId: id }
+      if (action.holdSec !== undefined) patch.strapHoldSec = action.holdSec
+      if (action.motion) patch.strapMotion = action.motion
+      if (action.style !== undefined) patch.strapStyle = action.style
+      if (action.corner) patch.strapCorner = action.corner
+      // IN / LOOP restart the motion from now; OUT just takes it off.
+      if (action.mode) Object.assign(patch, { strapMode: action.mode, strapAt: action.mode === "out" ? state.stage.strapAt : now })
+      return next({}, patch)
+    }
+    case "socials":
+      return next({}, { ...(action.show === undefined ? {} : { socialsOverlay: action.show }), ...(action.corner ? { socialsCorner: action.corner } : {}) })
   }
 }
 
@@ -259,6 +294,19 @@ export type DeckState = {
   forceEnd: boolean
   holdCountdown: boolean
   endAt: string
+  /** Visuals deck: strap presets (text only) and the live overlay state. */
+  visuals?: {
+    straps: StrapPreset[]
+    strapId: string
+    strapMode: StrapMode
+    strapAt: number | null
+    strapHoldSec: number
+    strapMotion: StrapMotion
+    strapStyle: StrapStyle | ""
+    strapCorner: Corner
+    socialsOverlay: boolean
+    socialsCorner: Corner
+  }
   serverNow: number
 }
 
@@ -290,6 +338,18 @@ export function deckState(
     forceEnd: state.stage.forceEnd,
     holdCountdown: state.stage.holdCountdown,
     endAt: state.stage.endAt,
+    visuals: {
+      straps: state.stage.straps ?? [],
+      strapId: state.stage.strapId ?? "",
+      strapMode: state.stage.strapMode ?? "out",
+      strapAt: state.stage.strapAt ?? null,
+      strapHoldSec: state.stage.strapHoldSec ?? 5,
+      strapMotion: state.stage.strapMotion ?? "slide-left",
+      strapStyle: state.stage.strapStyle ?? "",
+      strapCorner: state.stage.strapCorner ?? "bottom-left",
+      socialsOverlay: state.stage.socialsOverlay === true,
+      socialsCorner: state.stage.socialsCorner ?? "bottom-left",
+    },
     serverNow: now,
   }
 }

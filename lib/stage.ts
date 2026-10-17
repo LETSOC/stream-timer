@@ -4,6 +4,7 @@
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
+import { clampHold, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export type StageOptions = {
   /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
@@ -19,6 +20,21 @@ export type StageOptions = {
   /** Countdown unit boxes: stroke px @1080p and colour */
   countdownStrokePx: number
   countdownStrokeColor: string
+  /** Visuals overlays. Saved (desk › Visuals): presets + colours. */
+  straps: StrapPreset[]
+  strapAccent: string
+  strapText: string
+  /** Live (deck /visuals, applied at once): which strap, IN/OUT/LOOP and when, look overrides, socials overlay. */
+  strapId: string
+  strapMode: StrapMode
+  strapAt: number | null
+  strapHoldSec: number
+  strapMotion: StrapMotion
+  /** "" = the preset's own style */
+  strapStyle: StrapStyle | ""
+  strapCorner: Corner
+  socialsOverlay: boolean
+  socialsCorner: Corner
   checker: number
   showMeta: boolean
   showLink: boolean
@@ -84,6 +100,18 @@ export const DEFAULT_STAGE: StageOptions = {
   socialShowHandle: true,
   countdownStrokePx: 2,
   countdownStrokeColor: "#ffffff",
+  straps: DEFAULT_STRAPS,
+  strapAccent: "#d4ff32",
+  strapText: "#ffffff",
+  strapId: "",
+  strapMode: "out",
+  strapAt: null,
+  strapHoldSec: 5,
+  strapMotion: "slide-left",
+  strapStyle: "",
+  strapCorner: "bottom-left",
+  socialsOverlay: false,
+  socialsCorner: "bottom-left",
   lineSpacing: 1.14,
   blockGap: 1.2,
   clockScale: 1,
@@ -181,6 +209,18 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     socialShowHandle: pick("socialShowHandle", (v) => v !== false),
     countdownStrokePx: pick("countdownStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
     countdownStrokeColor: pick("countdownStrokeColor", (v, f) => hexColor(v, f)),
+    straps: pick("straps", (v) => sanitizeStraps(v)),
+    strapAccent: pick("strapAccent", (v, f) => hexColor(v, f)),
+    strapText: pick("strapText", (v, f) => hexColor(v, f)),
+    strapId: pick("strapId", (v) => (typeof v === "string" ? v.replace(/[^a-z0-9_-]/gi, "").slice(0, 32) : "")),
+    strapMode: pick("strapMode", (v) => parseStrapMode(v)),
+    strapAt: pick("strapAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
+    strapHoldSec: pick("strapHoldSec", (v, f) => clampHold(v, f)),
+    strapMotion: pick("strapMotion", (v) => parseStrapMotion(v)),
+    strapStyle: pick("strapStyle", (v) => (STRAP_STYLES.includes(v as StrapStyle) ? (v as StrapStyle) : "")),
+    strapCorner: pick("strapCorner", (v) => parseCorner(v)),
+    socialsOverlay: pick("socialsOverlay", (v) => v === true),
+    socialsCorner: pick("socialsCorner", (v) => parseCorner(v)),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),
     blockGap: pick("blockGap", (v, f) => clamp(v, 0, 8, f)),
     clockScale: pick("clockScale", (v, f) => clampSize(v, CLOCK_SCALE_RANGE, f)),
@@ -286,3 +326,6 @@ export function socialLook(stage: StageOptions) {
     showHandle: stage.socialShowHandle,
   }
 }
+
+/** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner"] as const satisfies readonly (keyof StageOptions)[]

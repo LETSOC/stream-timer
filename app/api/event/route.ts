@@ -2,7 +2,7 @@ import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
 import { eventProblems } from "@/lib/event"
 import { hasServerEvent, readServerState, RevConflict, validClockValue, writeServerEvent } from "@/lib/event-server"
-import { testClockStale } from "@/lib/stage"
+import { LIVE_VISUAL_KEYS, testClockStale } from "@/lib/stage"
 
 /** Inline data: images make bodies big; anything past this is a mistake or abuse. */
 const MAX_BODY_BYTES = 2_000_000
@@ -54,7 +54,8 @@ export async function PUT(request: Request) {
   try {
     // Main/Backup is owned by the transport (switch buttons, auto-failover): a desk saving its whole
     // stage must never write back a stale source (that re-selected a dead Backup → failover loop).
-    const stage = record?.stage && typeof record.stage === "object" ? { ...(record.stage as Record<string, unknown>), programSource: readServerState().stage.programSource, streamProgramAudio: readServerState().stage.streamProgramAudio, streamBedAudio: readServerState().stage.streamBedAudio } : record?.stage
+    const live = readServerState().stage
+    const stage = record?.stage && typeof record.stage === "object" ? { ...(record.stage as Record<string, unknown>), programSource: live.programSource, streamProgramAudio: live.streamProgramAudio, streamBedAudio: live.streamBedAudio, ...Object.fromEntries(LIVE_VISUAL_KEYS.map((k) => [k, live[k]])) } : record?.stage
     const saved = writeServerEvent(record?.event ?? body, testUntil, pausedAt, stage, expectedRev)
     if (!saved) {
       const problems = eventProblems(record?.event ?? body)

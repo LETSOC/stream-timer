@@ -45,6 +45,7 @@ import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/secti
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
+import { VisualsDeskSection } from "@/components/visuals-desk"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import {
   buildLocalTestCommand,
@@ -877,6 +878,7 @@ export function OperatorConsole() {
               <span aria-hidden className={`size-2 rounded-full ${wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"}`} />
               Deck
             </Link>
+            <Link href="/visuals" data-testid="desk-visuals-nav" className={`${pillClass("outline", "sm")} no-underline`}>Visuals</Link>
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
@@ -1157,6 +1159,11 @@ export function OperatorConsole() {
                 <Slider id="social-stroke-px" label={`Circle stroke ${visuals.socialStrokePx}px @1080p`} min={0} max={12} step={0.5} value={visuals.socialStrokePx} onChange={(v) => setVisual("socialStrokePx", v)} />
               </div>
             </Panel>
+
+          <Panel id="visuals" title="Visuals" pill={`${visuals.straps.length} strap${visuals.straps.length === 1 ? "" : "s"}`} defaultOpen={false} dirty={drafts.isDirty("visuals")}>
+            {draftBar("visuals")}
+            <VisualsDeskSection straps={visuals.straps} accent={visuals.strapAccent} text={visuals.strapText} viewKey={operator.viewKey} onStraps={(v) => setVisual("straps", v)} onAccent={(v) => setVisual("strapAccent", v)} onText={(v) => setVisual("strapText", v)} />
+          </Panel>
 
           <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
             <p className="font-mono text-[12px] text-black/70">Slate and Browser capture are separate outputs. Run either, or both at once to different destinations.</p>
@@ -2495,7 +2502,7 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   )
 }
 
-const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor"] as const
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
   return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals
