@@ -9,6 +9,17 @@ export type StageOptions = {
   /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
   streamProgramAudio: boolean
   streamBedAudio: boolean
+  /** Social circles (ported from the Hyphen "Social Circles" design): spotlight one circle at a time. */
+  socialSpotlight: boolean
+  socialDwellMs: number
+  socialCooldownMs: number
+  /** Ring stroke around each circle, px @1080p, and the spotlight/progress colour */
+  socialStrokePx: number
+  socialStrokeColor: string
+  socialShowHandle: boolean
+  /** Countdown unit boxes: stroke px @1080p and colour */
+  countdownStrokePx: number
+  countdownStrokeColor: string
   checker: number
   showMeta: boolean
   showLink: boolean
@@ -67,6 +78,14 @@ export const DEFAULT_STAGE: StageOptions = {
   transparent: false,
   streamProgramAudio: true,
   streamBedAudio: false,
+  socialSpotlight: true,
+  socialDwellMs: 2500,
+  socialCooldownMs: 4000,
+  socialStrokePx: 3,
+  socialStrokeColor: "#d4ff32",
+  socialShowHandle: true,
+  countdownStrokePx: 2,
+  countdownStrokeColor: "#ffffff",
   lineSpacing: 1.14,
   blockGap: 1.2,
   clockScale: 1,
@@ -157,6 +176,14 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     transparent: pick("transparent", (v) => v === true),
     streamProgramAudio: pick("streamProgramAudio", (v) => v !== false),
     streamBedAudio: pick("streamBedAudio", (v) => v === true),
+    socialSpotlight: pick("socialSpotlight", (v) => v !== false),
+    socialDwellMs: pick("socialDwellMs", (v, f) => Math.round(clamp(v, 500, 15000, f))),
+    socialCooldownMs: pick("socialCooldownMs", (v, f) => Math.round(clamp(v, 0, 15000, f))),
+    socialStrokePx: pick("socialStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
+    socialStrokeColor: pick("socialStrokeColor", (v, f) => hexColor(v, f)),
+    socialShowHandle: pick("socialShowHandle", (v) => v !== false),
+    countdownStrokePx: pick("countdownStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
+    countdownStrokeColor: pick("countdownStrokeColor", (v, f) => hexColor(v, f)),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),
     blockGap: pick("blockGap", (v, f) => clamp(v, 0, 8, f)),
     clockScale: pick("clockScale", (v, f) => clampSize(v, CLOCK_SCALE_RANGE, f)),
@@ -217,12 +244,18 @@ export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[
 
 /**
  * What /stream shows, in order of precedence:
- * break/hold/welcome overlay  >  OBS program feed  >  end card (forced, or past the end time unless held)  >  countdown.
+ * break/hold/welcome overlay  >  forced end / due end-card override  >  OBS program feed  >  end card (past Event › End time unless held)  >  countdown.
+ *
+ * End card override (ported from agent-forge): when an override time (`endAt`, e.g. deck "End in 2m") is due, or End is
+ * forced, the end card cuts over Program. The plain Event › End time does NOT pre-empt Program (a running show is never
+ * cut by the schedule alone). After it fires, tap Program or Countdown to stay past the end: that sets holdCountdown.
  */
-export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean }, pastEnd: boolean): "break" | "hold" | "welcome" | "program" | "end" | "countdown" {
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endAt?: string }, pastEnd: boolean): "break" | "hold" | "welcome" | "program" | "end" | "countdown" {
   if (stage.overlay !== "none") return stage.overlay
+  if (stage.forceEnd) return "end"
+  if (stage.endAt && pastEnd && !stage.holdCountdown) return "end"
   if (stage.program) return "program"
-  if (stage.forceEnd || (!stage.holdCountdown && pastEnd)) return "end"
+  if (!stage.holdCountdown && pastEnd) return "end"
   return "countdown"
 }
 
@@ -239,4 +272,21 @@ export function localClock(raw: string | null, now = Date.now()): { testUntil: n
     if (!c || typeof c.savedAt !== "number" || testClockStale(c.savedAt, now)) return { testUntil: null, pausedAt: null }
     return { testUntil: typeof c.testUntil === "number" ? c.testUntil : null, pausedAt: typeof c.pausedAt === "number" ? c.pausedAt : null }
   } catch { return { testUntil: null, pausedAt: null } }
+}
+
+/** #rgb / #rrggbb only (goes into inline styles). */
+export function hexColor(value: unknown, fallback: string): string {
+  return typeof value === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim()) ? value.trim().toLowerCase() : fallback
+}
+
+/** The SocialCircles look from stage options. */
+export function socialLook(stage: StageOptions) {
+  return {
+    spotlight: stage.socialSpotlight,
+    dwellMs: stage.socialDwellMs,
+    cooldownMs: stage.socialCooldownMs,
+    strokePx: stage.socialStrokePx,
+    strokeColor: stage.socialStrokeColor,
+    showHandle: stage.socialShowHandle,
+  }
 }
