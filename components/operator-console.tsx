@@ -39,7 +39,7 @@ import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
-import { DEFAULT_STAGE, localClock, parseStage, serverClock, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { DEFAULT_STAGE, localClock, parseStage, serverClock, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
@@ -95,6 +95,8 @@ export function OperatorConsole() {
   const [blockGap, setBlockGap] = useState(1.2)
   const [clockScale, setClockScale] = useState(1)
   const [clockText, setClockText] = useState(1)
+  const [visuals, setVisuals] = useState<Visuals>(() => pickVisuals(DEFAULT_STAGE))
+  const setVisual = <K extends keyof Visuals>(key: K, value: Visuals[K]) => setVisuals((cur) => ({ ...cur, [key]: value }))
   const [logoUrl, setLogoUrl] = useState("")
   const [speakers, setSpeakers] = useState<SpeakerCard[]>([])
   const [gallerySeconds, setGallerySeconds] = useState(4)
@@ -334,6 +336,7 @@ export function OperatorConsole() {
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
     if (typeof stage.program === "boolean") setProgram(stage.program)
     if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
+    setVisuals((cur) => ({ ...cur, ...Object.fromEntries(VISUAL_KEYS.filter((k) => stage[k] !== undefined).map((k) => [k, stage[k]])) }))
     if (typeof stage.streamProgramAudio === "boolean" || typeof stage.streamBedAudio === "boolean") setStreamAudio((cur) => ({ program: stage.streamProgramAudio ?? cur.program, bed: stage.streamBedAudio ?? cur.bed }))
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
   }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
@@ -383,7 +386,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -713,7 +716,7 @@ export function OperatorConsole() {
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
   const endTarget = endInstant(date, time, endAt || endTime, timeZone)
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
-  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
+  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program, endAt }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
   /**
    * Every Transport button goes through lib/transport (the same code the phone deck runs on the
@@ -1125,6 +1128,11 @@ export function OperatorConsole() {
                 <Pill tone="outline" size="sm" aria-label="More checker divisions" onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Pill>
               </div>
             </Field>
+            <div data-testid="countdown-stroke" className="grid gap-3 rounded-xl border border-black/15 p-3">
+              <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Countdown box stroke</p>
+              <Slider id="countdown-stroke-px" label={`Stroke ${visuals.countdownStrokePx}px @1080p`} min={0} max={12} step={0.5} value={visuals.countdownStrokePx} onChange={(v) => setVisual("countdownStrokePx", v)} />
+              <ColorField id="countdown-stroke-color" label="Stroke colour" value={visuals.countdownStrokeColor} onChange={(v) => setVisual("countdownStrokeColor", v)} />
+            </div>
           </Panel>
 
           <Panel id="socials" title="Socials" pill={`${[xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl].filter((url) => url.trim()).length}/5 links set`} defaultOpen={false} dirty={drafts.isDirty("socials")}>
@@ -1134,6 +1142,21 @@ export function OperatorConsole() {
               <Field label="LinkedIn URL" htmlFor="li"><GrowingText id="li" value={linkedinUrl} onChange={(value) => updateEvent({ linkedinUrl: value })} /></Field>
               <Field label="Instagram URL" htmlFor="ig"><GrowingText id="ig" value={instagramUrl} onChange={(value) => updateEvent({ instagramUrl: value })} /></Field>
               <Field label="YouTube URL" htmlFor="yt"><GrowingText id="yt" value={youtubeUrl} onChange={(value) => updateEvent({ youtubeUrl: value })} /></Field>
+              <div data-testid="social-anim" className="mt-2 grid gap-3 rounded-xl border border-black/15 p-3">
+                <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Circle animation & stroke</p>
+                <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
+                  <input type="checkbox" data-testid="social-spotlight" className="size-4 accent-black" checked={visuals.socialSpotlight} onChange={(e) => setVisual("socialSpotlight", e.target.checked)} />
+                  Spotlight one circle at a time
+                </label>
+                <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
+                  <input type="checkbox" data-testid="social-handle-toggle" className="size-4 accent-black" checked={visuals.socialShowHandle} disabled={!visuals.socialSpotlight} onChange={(e) => setVisual("socialShowHandle", e.target.checked)} />
+                  Show handle under the row
+                </label>
+                <Slider id="social-dwell" label={`Dwell per circle ${(visuals.socialDwellMs / 1000).toFixed(1)}s`} min={500} max={15000} step={100} value={visuals.socialDwellMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialDwellMs", v)} />
+                <Slider id="social-cooldown" label={`Rest after the row ${(visuals.socialCooldownMs / 1000).toFixed(1)}s`} min={0} max={15000} step={100} value={visuals.socialCooldownMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialCooldownMs", v)} />
+                <Slider id="social-stroke-px" label={`Circle stroke ${visuals.socialStrokePx}px @1080p`} min={0} max={12} step={0.5} value={visuals.socialStrokePx} onChange={(v) => setVisual("socialStrokePx", v)} />
+                <ColorField id="social-stroke-color" label="Spotlight ring colour" value={visuals.socialStrokeColor} onChange={(v) => setVisual("socialStrokeColor", v)} />
+              </div>
             </Panel>
 
           <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
@@ -1345,9 +1368,9 @@ export function OperatorConsole() {
                   { label: "Instagram", href: instagramUrl, icon: null },
                   { label: "YouTube", href: youtubeUrl, icon: null },
                 ],
-              }} />
+              }} social={socialLook(draftStage)} />
             ) : (
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} social={socialLook(draftStage)} countdownStrokePx={visuals.countdownStrokePx} countdownStrokeColor={visuals.countdownStrokeColor} />
             )}
             {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
             {previewScreen === "program" ? <ProgramPlayer key={programSource} scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
@@ -1388,7 +1411,7 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-endcard-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div> : null}</Field>
+            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time. When an override is due it cuts over Program too; tap Program or Countdown to stay on past it.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-endcard-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div> : null}</Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
@@ -2470,5 +2493,30 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
       </div>
       {message ? <p role="status" data-testid="audio-message" className={`font-mono text-[12px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
     </div>
+  )
+}
+
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialStrokeColor", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor"] as const
+type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
+function pickVisuals(stage: StageOptions): Visuals {
+  return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals
+}
+
+function Slider({ id, label, min, max, step, value, disabled, onChange }: { id: string; label: string; min: number; max: number; step: number; value: number; disabled?: boolean; onChange: (value: number) => void }) {
+  return (
+    <label htmlFor={id} className="grid gap-1">
+      <span className="font-mono text-[12px] tracking-[0.08em] text-black/70 uppercase">{label}</span>
+      <input id={id} data-testid={id} type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-black disabled:opacity-40" />
+    </label>
+  )
+}
+
+function ColorField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (value: string) => void }) {
+  const full = /^#[0-9a-f]{3}$/i.test(value) ? `#${value.slice(1).split("").map((c) => c + c).join("")}` : value
+  return (
+    <label htmlFor={id} className="flex items-center gap-3">
+      <input id={id} data-testid={id} type="color" value={full} onChange={(e) => onChange(e.target.value)} className="h-8 w-12 cursor-pointer rounded border border-black/20 bg-white" />
+      <span className="font-mono text-[12px] tracking-[0.08em] text-black/70 uppercase">{label} · {value}</span>
+    </label>
   )
 }

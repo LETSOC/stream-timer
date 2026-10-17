@@ -9,7 +9,7 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
-import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
+import { clampChecker, effectiveEndTime, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { StageGuides } from "@/components/stage-guides"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
@@ -248,7 +248,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
             { label: "Instagram", href: event.instagramUrl, icon: null },
             { label: "YouTube", href: event.youtubeUrl, icon: null },
           ],
-        }} />
+        }} social={socialLook(stage)} />
       ) : (
       <CountdownStage
         event={event}
@@ -267,6 +267,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         galleryOffset={stage.galleryOffset}
         galleryScale={stage.galleryScale}
         clock={testClock}
+        social={socialLook(stage)}
+        countdownStrokePx={stage.countdownStrokePx}
+        countdownStrokeColor={stage.countdownStrokeColor}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
       )}
@@ -289,6 +292,9 @@ function StreamFallback({ initial }: { initial: StreamInitial | null }) {
         clockScale={stage.clockScale}
         clockText={stage.clockText}
         logoUrl={stage.logoUrl}
+        social={socialLook(stage)}
+        countdownStrokePx={stage.countdownStrokePx}
+        countdownStrokeColor={stage.countdownStrokeColor}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
     </main>

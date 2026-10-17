@@ -14,8 +14,8 @@ export type SectionId = "event" | "cta" | "look" | "socials" | "endCard" | "spea
 export const SECTIONS: Record<SectionId, { label: string; event?: (keyof EventConfig)[]; stage?: (keyof StageOptions)[] }> = {
   event: { label: "Event", event: ["name", "date", "time", "endTime", "timeZone", "venue"] },
   cta: { label: "Links & call to action", event: ["rsvpUrl", "badge", "rsvpLabel", "scanLabel", "joinLabel", "eventLink", "eventLinkLabel"] },
-  look: { label: "Look", stage: ["checker", "showMeta", "showLink", "transparent", "lineSpacing", "blockGap", "clockScale", "clockText", "logoUrl"] },
-  socials: { label: "Socials", event: ["xUrl", "facebookUrl", "linkedinUrl", "instagramUrl", "youtubeUrl"] },
+  look: { label: "Look", stage: ["checker", "showMeta", "showLink", "transparent", "lineSpacing", "blockGap", "clockScale", "clockText", "logoUrl", "countdownStrokePx", "countdownStrokeColor"] },
+  socials: { label: "Socials", event: ["xUrl", "facebookUrl", "linkedinUrl", "instagramUrl", "youtubeUrl"], stage: ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialStrokeColor", "socialShowHandle"] },
   endCard: { label: "End card", stage: ["endTitle", "endSubtitle", "endDate", "endBody", "endQrUrl", "endButton", "endAt"] },
   speakers: { label: "Speakers", stage: ["speakers", "gallerySeconds", "galleryPause", "galleryOffset", "galleryScale"] },
   breakCard: { label: "Break card", stage: ["breakTitle", "breakMessage", "breakImage", "breakFit"] },
