@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { TimecodeBadge } from "@/components/timecode-badge"
-import { beepTimes, ctxTimeFor, parseBeepEvery, parseFps, parseVol, TC_BEEP } from "@/lib/av-diagnostics"
+import { beepTimes, ctxTimeFor, parseBeepEvery, parseFps, parseTcSrc, parseVol, TC_BEEP, TC_VARIANT, tcLabel, type TcSrc } from "@/lib/av-diagnostics"
 import { parseCorner } from "@/lib/visuals"
 
 const LOOKAHEAD_MS = 400
@@ -14,7 +14,7 @@ const TICK_MS = 50
  * mapped from Date.now() through an anchor sampled each tick. Timer jitter only moves *when* we
  * schedule, never *where* the beep lands. Returns "blocked" until the browser allows audio.
  */
-function useTimecodeBeep(enabled: boolean, everyS: number, vol: number): "off" | "blocked" | "on" {
+function useTimecodeBeep(enabled: boolean, everyS: number, vol: number, pitch: { hz: number; minuteHz: number }): "off" | "blocked" | "on" {
   const [state, setState] = useState<"off" | "blocked" | "on">(enabled ? "blocked" : "off")
   useEffect(() => {
     if (!enabled) return
@@ -37,7 +37,7 @@ function useTimecodeBeep(enabled: boolean, everyS: number, vol: number): "off" |
         if (t < ctx.currentTime) continue
         const osc = ctx.createOscillator()
         const env = ctx.createGain()
-        osc.frequency.value = b.minute ? TC_BEEP.minuteHz : TC_BEEP.hz
+        osc.frequency.value = b.minute ? pitch.minuteHz : pitch.hz
         const d = TC_BEEP.ms / 1000
         // 2ms ramps: no click, onset stays on the second
         env.gain.setValueAtTime(0, t)
@@ -61,17 +61,19 @@ function useTimecodeBeep(enabled: boolean, everyS: number, vol: number): "off" |
       window.removeEventListener("keydown", resume)
       void ctx.close()
     }
-  }, [enabled, everyS, vol])
+  }, [enabled, everyS, vol, pitch.hz, pitch.minuteHz])
   return enabled ? state : "off"
 }
 
-function Inner() {
+function Inner({ forceSrc }: { forceSrc?: TcSrc }) {
   const params = useSearchParams()
+  const src = forceSrc ?? parseTcSrc(params.get("src"))
+  const variant = TC_VARIANT[src]
   const fps = parseFps(params.get("fps"))
-  const pos = parseCorner(params.get("pos"), "bottom-right")
+  const pos = parseCorner(params.get("pos"), variant.pos)
   const beep = params.get("beep") === "1"
   const everyS = parseBeepEvery(params.get("beepEvery"))
-  const audio = useTimecodeBeep(beep, everyS, parseVol(params.get("vol")))
+  const audio = useTimecodeBeep(beep, everyS, parseVol(params.get("vol")), variant)
   useEffect(() => {
     for (const el of [document.documentElement, document.body]) el.style.setProperty("background", "transparent", "important")
   }, [])
@@ -79,7 +81,7 @@ function Inner() {
   const style = { [pos.endsWith("right") ? "right" : "left"]: at(96), [pos.startsWith("top") ? "top" : "bottom"]: at(96) }
   return (
     <div className={params.get("checker") === "1" ? "overlay-stage overlay-checker" : "overlay-stage"} data-audio={audio}>
-      <TimecodeBadge label="OBS SRC" fps={fps} style={style} testId="tc-obs-src" flashEveryS={beep ? everyS : undefined} />
+      <TimecodeBadge label={tcLabel(params.get("label"), src)} border={variant.border} fps={fps} style={style} testId={src === "backup" ? "tc-backup-src" : "tc-obs-src"} flashEveryS={beep ? everyS : undefined} />
       {audio === "blocked" ? (
         <p data-testid="tc-audio-hint" className="absolute top-[3cqi] left-1/2 -translate-x-1/2 rounded-lg bg-black/80 px-[1.2cqi] py-[0.6cqi] font-mono text-[1.1cqi] text-white">Click to enable audio (beep)</p>
       ) : null}
@@ -87,6 +89,6 @@ function Inner() {
   )
 }
 
-export function TimecodeOverlay() {
-  return <Suspense fallback={null}><Inner /></Suspense>
+export function TimecodeOverlay({ src }: { src?: TcSrc } = {}) {
+  return <Suspense fallback={null}><Inner forceSrc={src} /></Suspense>
 }

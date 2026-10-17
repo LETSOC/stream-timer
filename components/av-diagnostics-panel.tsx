@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { copyOrShow } from "@/components/copy-fallback"
 import type { AvLive, AvSample } from "@/lib/av-diagnostics"
 import type { MediamtxPathStat } from "@/lib/relay"
 
-type Diag = { serverNow: number; live: AvLive; mediamtx: { api: "on" | "off"; url: string | null; paths: MediamtxPathStat[] }; samples: AvSample[]; count: number }
+type Diag = { lanIp?: string | null; serverNow: number; live: AvLive; mediamtx: { api: "on" | "off"; url: string | null; paths: MediamtxPathStat[] }; samples: AvSample[]; count: number }
 
 const ms = (v: number | null | undefined) => (typeof v === "number" ? `${v} ms` : "—")
 const mb = (b: number | null) => (b === null ? "—" : b > 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`)
@@ -65,6 +66,7 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
             {[25, 30, 50, 60].map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
         </label>
+        <TcUrls fps={tcFps} lanIp={diag?.lanIp ?? null} />
         <p className="font-mono text-[12px] text-black/60">TC1 “OBS SRC” = OBS Browser Source <code>/overlay/timecode?fps={tcFps}</code> (1920×1080, bottom-right). STREAM sits just left of it, so both read side by side on YouTube. STREAM − OBS SRC = chain delay.</p>
       </div>
 
@@ -114,6 +116,36 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
           </table>
         ) : <p className="font-mono text-[12px]">API on, no paths yet.</p>}
       </div>
+    </div>
+  )
+}
+
+/** OBS URLs for TC1 main (computer 1, this Mac) and backup (computer 2, over the LAN). */
+function TcUrls({ fps, lanIp }: { fps: number; lanIp: string | null }) {
+  const [copied, setCopied] = useState<string | null>(null)
+  const port = typeof window === "undefined" ? "43211" : window.location.port || "43211"
+  const lan = lanIp ? `http://${lanIp}:${port}` : null
+  const items = [
+    { id: "main", label: "OBS computer 1 · OBS SRC", url: `http://127.0.0.1:${port}/overlay/timecode?fps=${fps}&beep=1`, hint: "This Mac (bottom-right, white)." },
+    { id: "backup", label: "OBS computer 2 · BACKUP SRC", url: `${lan ?? `http://<this-mac-LAN-IP>:${port}`}/overlay/timecode/backup?fps=${fps}&beep=1`, hint: lan ? `Over the LAN (${lanIp}); start the app with BIND_HOST=0.0.0.0. Bottom-left, amber.` : "LAN IP not found: use this Mac's LAN IP and BIND_HOST=0.0.0.0." },
+  ]
+  const copy = async (id: string, url: string) => {
+    if ((await copyOrShow("Timecode OBS URL", url)) !== "copied") return
+    setCopied(id)
+    window.setTimeout(() => setCopied(null), 1600)
+  }
+  return (
+    <div className="grid gap-2" data-testid="tc-urls">
+      {items.map((i) => (
+        <div key={i.id} className="grid gap-1 font-mono text-[12px]">
+          <span className="font-bold">{i.label}</span>
+          <div className="flex items-center gap-2">
+            <code data-testid={`tc-url-${i.id}`} className="min-w-0 flex-1 truncate rounded-lg bg-[#F6F6F3] px-2 py-1">{i.url}</code>
+            <button type="button" data-testid={`tc-copy-${i.id}`} className="shrink-0 rounded-full bg-black px-3 py-1 text-white" onClick={() => void copy(i.id, i.url)}>{copied === i.id ? "Copied" : "Copy"}</button>
+          </div>
+          <span className="text-black/60">{i.hint}</span>
+        </div>
+      ))}
     </div>
   )
 }

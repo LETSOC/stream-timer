@@ -139,3 +139,19 @@ export function flashOn(nowMs: number, everyS: number, tzOffsetMin = 0): boolean
   const step = everyS * 1000
   return ((local % step) + step) % step < TC_FLASH_MS
 }
+
+// ---------- TC1 variants: main (OBS computer 1) / backup (OBS computer 2) ----------
+
+export type TcSrc = "main" | "backup"
+export const TC_VARIANT: Record<TcSrc, { label: string; pos: "bottom-right" | "bottom-left"; hz: number; minuteHz: number; border: string }> = {
+  main: { label: "OBS SRC", pos: "bottom-right", hz: TC_BEEP.hz, minuteHz: TC_BEEP.minuteHz, border: "rgba(255,255,255,0.9)" },
+  backup: { label: "BACKUP SRC", pos: "bottom-left", hz: 1200, minuteHz: 2400, border: "#f5a524" },
+}
+export function parseTcSrc(value: unknown): TcSrc {
+  return value === "backup" ? "backup" : "main"
+}
+/** ?label= override: printable, max 16 chars, uppercase; else the variant's label. */
+export function tcLabel(custom: unknown, src: TcSrc): string {
+  const v = typeof custom === "string" ? custom.replace(/[^\p{L}\p{N} ._\-#/]/gu, "").trim().slice(0, 16).toUpperCase() : ""
+  return v || TC_VARIANT[src].label
+}

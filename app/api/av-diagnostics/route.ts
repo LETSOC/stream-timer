@@ -4,7 +4,7 @@ import { liveFromStatus, makeSample, samplesToCsv } from "@/lib/av-diagnostics"
 import { appendAvSample, archiveAvLog, readAvSamples } from "@/lib/av-log"
 import { readAudioSettings } from "@/lib/audio-bed"
 import { readServerState } from "@/lib/event-server"
-import { mediamtxPathStats, relayStatus } from "@/lib/relay"
+import { lanIp, mediamtxPathStats, relayStatus } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -28,6 +28,7 @@ export async function GET(request: Request) {
   const samples = readAvSamples()
   return Response.json({
     serverNow: Date.now(),
+    lanIp: lanIp(),
     live: now,
     mediamtx: mtx ? { api: "on", url: mtx.url, paths: mtx.paths } : { api: "off", url: process.env.MEDIAMTX_API_URL || null, paths: [] },
     samples: samples.slice(-20),

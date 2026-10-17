@@ -27,6 +27,23 @@ Recommended: our page as a Browser Source (frame-accurate, transparent, labelled
 
 The page needs no view key (it shows only the time of day).
 
+### Two OBS computers: main + backup
+
+| | OBS computer 1 (main) | OBS computer 2 (backup) |
+|---|---|---|
+| URL | `http://127.0.0.1:43211/overlay/timecode?fps=30&beep=1` | `http://<Mac LAN IP>:43211/overlay/timecode/backup?fps=30&beep=1` (same as `?src=backup`) |
+| Label | `OBS SRC`, white border | `BACKUP SRC`, amber border |
+| Default position | bottom-right, 96 px | bottom-left, 96 px |
+| Beep | 1.5 kHz, 3 kHz on the minute | 1.2 kHz, 2.4 kHz on the minute |
+
+`?label=` sets a custom label (up to 16 characters), `?pos=` overrides the corner. Desk › A/V diagnostics lists both URLs with
+Copy buttons (computer 2 uses this Mac's LAN IP; start the app with `BIND_HOST=0.0.0.0`).
+
+**Both computers must have automatic time sync on** (macOS: System Settings › General › Date & Time › *Set time and date
+automatically*; Windows: Settings › Time & language › *Set time automatically* + *Sync now*). Each badge shows its own
+computer's clock, so any clock difference between the two OBS machines shows up as a fake delay. Check before a test:
+both badges side by side should agree within a frame or two.
+
 ### TC1 audio marker (`?beep=1`)
 
 `/overlay/timecode?fps=30&beep=1` adds a WebAudio beep exactly on each whole second of the same clock TC1 shows,

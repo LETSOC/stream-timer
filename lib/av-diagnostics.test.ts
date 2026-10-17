@@ -64,3 +64,17 @@ test("audio offset column", () => {
   assert.equal(s.audioOffsetMs, -35)
   assert.match(samplesToCsv([s]).split("\n")[0], /readingMs,audioOffsetMs,note$/)
 })
+
+import { parseTcSrc, TC_VARIANT, tcLabel } from "@/lib/av-diagnostics"
+
+test("TC1 main/backup variants", () => {
+  assert.equal(parseTcSrc(null), "main")
+  assert.equal(parseTcSrc("backup"), "backup")
+  assert.equal(tcLabel(null, "main"), "OBS SRC")
+  assert.equal(tcLabel("", "backup"), "BACKUP SRC")
+  assert.equal(tcLabel("obs 2 <b>", "backup"), "OBS 2 B")
+  assert.equal(TC_VARIANT.main.pos, "bottom-right")
+  assert.equal(TC_VARIANT.backup.pos, "bottom-left")
+  const pitches = [TC_VARIANT.main.hz, TC_VARIANT.main.minuteHz, TC_VARIANT.backup.hz, TC_VARIANT.backup.minuteHz, 1000]
+  assert.equal(new Set(pitches).size, pitches.length)
+})
