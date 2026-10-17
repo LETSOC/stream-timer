@@ -26,20 +26,23 @@ function LoginForm() {
     event.preventDefault()
     setBusy(true)
     setError("")
+    const send = () => fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+      cache: "no-store",
+    })
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-      })
+      // A network error on the first try is usually a stale keep-alive socket (iOS Safari): retry once on a fresh one.
+      const response = await send().catch(() => new Promise<Response>((resolve, reject) => setTimeout(() => send().then(resolve, reject), 300)))
       if (response.ok) {
         window.location.assign(safeNext(params.get("next")))
         return
       }
       const body = (await response.json().catch(() => null)) as { error?: string } | null
       setError(body?.error ?? `Login failed (${response.status}).`)
-    } catch {
-      setError("Could not reach the server.")
+    } catch (error) {
+      setError(`Could not reach the server (${error instanceof Error ? error.message : "network error"}). Reload the page and try again.`)
     } finally {
       setBusy(false)
     }
