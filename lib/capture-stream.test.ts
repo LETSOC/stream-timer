@@ -20,3 +20,9 @@ test("capture script exits non-zero (so the supervisor restarts it) and never pr
   const out = `${run.stdout}${run.stderr}`
   assert.ok(!out.includes("STREAMKEYSECRET") && !out.includes("VIEWKEYSECRET"), out)
 })
+
+test("program audio delay may follow a player up to 10s behind (Backup latency ~6s was capped at 5s)", async () => {
+  const src = (await import("node:fs")).readFileSync(script, "utf8")
+  const body = src.slice(src.indexOf("function programTargetMs()"), src.indexOf("function readUrlFor("))
+  assert.match(body, /Math\.max\(100, Math\.min\(10000, /)
+})

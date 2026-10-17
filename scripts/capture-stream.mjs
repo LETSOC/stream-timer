@@ -117,7 +117,7 @@ let lastSpliceAt = 0
 function programTargetMs() {
   const input = inputs[prog.source]
   const base = prog.latencyMs === null ? progFallbackMs : prog.latencyMs + screencastLag() - readerLagMs - input.arrival.excessMs
-  return Math.max(100, Math.min(5000, base + sync.trimMs + input.offsetMs + videoDelayMs()))
+  return Math.max(100, Math.min(10000, base + sync.trimMs + input.offsetMs + videoDelayMs()))
 }
 function readUrlFor(source) {
   // Main = program-read.url, Backup = program-backup-read.url next to it (both 0600, written by lib/relay).

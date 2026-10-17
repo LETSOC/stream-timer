@@ -106,7 +106,7 @@ OBS's live TC1 (on the monitor) − TC1 burned into the phone picture = full gla
 Subtract the TC2 − TC1 reading to get the platform's share. Log it with **Mark** as a note, e.g. `TC4 phone +7.4s`.
 Phone and Mac clocks don't matter here: both numbers are read from the same photo.
 
-## Known issue: audio leads video on Backup (analysis, not fixed yet)
+## Fixed: audio led video on Backup (delay was capped at 5 s)
 
 Seen in the drift log: on Backup the program audio delay reads exactly **5000 ms** while the /stream player latency is
 ~**6.2 s** (Main: delay ~3.1–3.7 s for ~3.1 s latency). In `scripts/capture-stream.mjs` the reader-path target is
@@ -115,3 +115,9 @@ Whenever the Backup player sits more than ~5 s behind the live edge, the delay i
 early by (target − 5000) ms, and because that latency wanders (Backup jitter 47 ms, the hls.js player drifting up to
 `liveMaxLatencyDurationCount` segments behind), the lead is not constant. The reader buffer limit (`targetMs + 1 s`) follows the same cap.
 The "switch buffer 5 s" setting only times the Main↔Backup hand-over on /stream; it is not the cause.
+
+**Fix (A):** the cap is now **10000 ms**, so the delay follows the Backup player up to 10 s behind (the reader buffer limit
+follows it). Main is unaffected. If the delay still reads 10000 on Backup, the player is >10 s behind: fix the source.
+
+**Also on OBS computer 2:** Settings › Output › Streaming › **Keyframe Interval = 1 s** (same as Main). Longer keyframe
+intervals make bigger HLS segments, so the Backup player sits further behind the live edge and jitters more.
