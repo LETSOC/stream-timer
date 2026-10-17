@@ -3,7 +3,7 @@
  * each circle is spotlit for `dwellMs` in turn, then all rest for `cooldownMs`, and the cycle repeats.
  * Driven by the wall clock so /stream, the desk preview and capture all show the same circle.
  */
-export const SOCIAL_DWELL_MS = 2500
+export const SOCIAL_DWELL_MS = 2800
 export const SOCIAL_COOLDOWN_MS = 4000
 
 export type Spotlight = {

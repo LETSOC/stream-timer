@@ -13,9 +13,8 @@ export type StageOptions = {
   socialSpotlight: boolean
   socialDwellMs: number
   socialCooldownMs: number
-  /** Ring stroke around each circle, px @1080p, and the spotlight/progress colour */
+  /** White ring stroke around each circle, px @1080p */
   socialStrokePx: number
-  socialStrokeColor: string
   socialShowHandle: boolean
   /** Countdown unit boxes: stroke px @1080p and colour */
   countdownStrokePx: number
@@ -79,10 +78,9 @@ export const DEFAULT_STAGE: StageOptions = {
   streamProgramAudio: true,
   streamBedAudio: false,
   socialSpotlight: true,
-  socialDwellMs: 2500,
+  socialDwellMs: 2800,
   socialCooldownMs: 4000,
   socialStrokePx: 3,
-  socialStrokeColor: "#d4ff32",
   socialShowHandle: true,
   countdownStrokePx: 2,
   countdownStrokeColor: "#ffffff",
@@ -180,7 +178,6 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     socialDwellMs: pick("socialDwellMs", (v, f) => Math.round(clamp(v, 500, 15000, f))),
     socialCooldownMs: pick("socialCooldownMs", (v, f) => Math.round(clamp(v, 0, 15000, f))),
     socialStrokePx: pick("socialStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
-    socialStrokeColor: pick("socialStrokeColor", (v, f) => hexColor(v, f)),
     socialShowHandle: pick("socialShowHandle", (v) => v !== false),
     countdownStrokePx: pick("countdownStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
     countdownStrokeColor: pick("countdownStrokeColor", (v, f) => hexColor(v, f)),
@@ -286,7 +283,6 @@ export function socialLook(stage: StageOptions) {
     dwellMs: stage.socialDwellMs,
     cooldownMs: stage.socialCooldownMs,
     strokePx: stage.socialStrokePx,
-    strokeColor: stage.socialStrokeColor,
     showHandle: stage.socialShowHandle,
   }
 }

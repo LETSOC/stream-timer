@@ -73,14 +73,12 @@ test("desk test clock: stale server clock and stale/undated local cache are igno
 
 test("social + countdown stroke options clamp and validate colours", () => {
   const d = parseStage({})
-  assert.equal(d.socialDwellMs, 2500)
-  assert.equal(d.socialStrokeColor, "#d4ff32")
+  assert.equal(d.socialDwellMs, 2800)
   assert.equal(d.countdownStrokePx, 2)
-  const s = parseStage({ socialDwellMs: 50, socialCooldownMs: 99999, socialStrokePx: 3.3, socialStrokeColor: "red;}", countdownStrokePx: 40, countdownStrokeColor: "#ABC", socialSpotlight: false })
+  const s = parseStage({ socialDwellMs: 50, socialCooldownMs: 99999, socialStrokePx: 3.3, countdownStrokePx: 40, countdownStrokeColor: "#ABC", socialSpotlight: false })
   assert.equal(s.socialDwellMs, 500)
   assert.equal(s.socialCooldownMs, 15000)
   assert.equal(s.socialStrokePx, 3.5)
-  assert.equal(s.socialStrokeColor, "#d4ff32")
   assert.equal(s.countdownStrokePx, 12)
   assert.equal(s.countdownStrokeColor, "#abc")
   assert.equal(s.socialSpotlight, false)

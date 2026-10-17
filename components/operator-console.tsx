@@ -1155,7 +1155,6 @@ export function OperatorConsole() {
                 <Slider id="social-dwell" label={`Dwell per circle ${(visuals.socialDwellMs / 1000).toFixed(1)}s`} min={500} max={15000} step={100} value={visuals.socialDwellMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialDwellMs", v)} />
                 <Slider id="social-cooldown" label={`Rest after the row ${(visuals.socialCooldownMs / 1000).toFixed(1)}s`} min={0} max={15000} step={100} value={visuals.socialCooldownMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialCooldownMs", v)} />
                 <Slider id="social-stroke-px" label={`Circle stroke ${visuals.socialStrokePx}px @1080p`} min={0} max={12} step={0.5} value={visuals.socialStrokePx} onChange={(v) => setVisual("socialStrokePx", v)} />
-                <ColorField id="social-stroke-color" label="Spotlight ring colour" value={visuals.socialStrokeColor} onChange={(v) => setVisual("socialStrokeColor", v)} />
               </div>
             </Panel>
 
@@ -2496,7 +2495,7 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   )
 }
 
-const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialStrokeColor", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor"] as const
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
   return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals
