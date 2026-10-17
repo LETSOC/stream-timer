@@ -50,12 +50,12 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
   }
 
   const l = diag?.live
-  const row = "flex justify-between gap-2 border-b border-black/5 py-1 font-mono text-[13px]"
+  const row = "flex min-w-0 justify-between gap-2 border-b border-black/5 py-1 font-mono text-[12px] min-[520px]:text-[13px]"
   return (
-    <div className="grid gap-4" data-testid="av-diagnostics">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 break-words [&_code]:break-all" data-testid="av-diagnostics">
       <p className="font-mono text-[12px] text-black/70">Read-only. Nothing here changes sync. See docs/av-timecode.md for the TC1–TC4 drift test.</p>
 
-      <div className="grid gap-2 rounded-xl border border-black/15 p-3">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-xl border border-black/15 p-3">
         <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Timecodes</p>
         <label className="flex items-center gap-2 font-mono text-[13px] text-black/80">
           <input type="checkbox" data-testid="tc-stream-toggle" className="size-4 accent-black" checked={tcOn} onChange={(e) => void setTimecode({ show: e.target.checked })} />
@@ -80,12 +80,18 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
         <div className={row}><span>Jitter</span><b>{ms(l?.jitterMs)}</b></div>
       </div>
 
-      <div className="grid gap-2 rounded-xl border border-black/15 p-3">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-xl border border-black/15 p-3">
         <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Drift log ({diag?.count ?? 0} samples · data/av-log.jsonl)</p>
-        <div className="grid grid-cols-[1fr_1fr_2fr] gap-2">
-          <input data-testid="av-reading" inputMode="numeric" placeholder="STREAM − OBS SRC ms" className="h-9 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={reading} onChange={(e) => setReading(e.target.value)} />
-          <input data-testid="av-audio-offset" inputMode="numeric" placeholder="Audio offset ms (+ = late)" className="h-9 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={audioOff} onChange={(e) => setAudioOff(e.target.value)} />
-          <input data-testid="av-note" placeholder="Note (e.g. YouTube phone, TC4 +6.2s)" className="h-9 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={note} onChange={(e) => setNote(e.target.value)} />
+        <div className="grid grid-cols-1 gap-2 min-[520px]:grid-cols-[1fr_1fr_2fr]">
+          <label className="grid min-w-0 gap-1 font-mono text-[11px] text-black/70">STREAM − SRC (ms)
+            <input data-testid="av-reading" inputMode="numeric" placeholder="e.g. 533" className="h-9 w-full min-w-0 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={reading} onChange={(e) => setReading(e.target.value)} />
+          </label>
+          <label className="grid min-w-0 gap-1 font-mono text-[11px] text-black/70">Audio offset (ms, + late)
+            <input data-testid="av-audio-offset" inputMode="numeric" placeholder="e.g. -40" className="h-9 w-full min-w-0 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={audioOff} onChange={(e) => setAudioOff(e.target.value)} />
+          </label>
+          <label className="grid min-w-0 gap-1 font-mono text-[11px] text-black/70">Note
+            <input data-testid="av-note" placeholder="e.g. YT phone, TC4 +6.2s" className="h-9 w-full min-w-0 rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm" value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" data-testid="av-mark" className="rounded-full bg-black px-4 py-2 font-mono text-[12px] text-white" onClick={() => void mark()}>Mark</button>
@@ -94,26 +100,56 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
         </div>
         {msg ? <p data-testid="av-msg" className="font-mono text-[12px] text-black/70">{msg}</p> : null}
         {diag?.samples.length ? (
-          <table className="w-full font-mono text-[11px]">
-            <thead><tr className="text-left text-black/60"><th>Time</th><th>Player</th><th>Delay</th><th>Offs</th><th>Reading</th><th>Audio</th><th>Note</th></tr></thead>
-            <tbody>
+          <>
+            <div className="hidden overflow-x-auto min-[520px]:block">
+              <table data-testid="av-samples-table" className="w-full font-mono text-[11px]">
+                <thead><tr className="text-left text-black/60"><th>Time</th><th>Player</th><th>Delay</th><th>Offs</th><th>Δ TC</th><th>Audio</th><th>Note</th></tr></thead>
+                <tbody>
+                  {diag.samples.slice(-8).reverse().map((s) => (
+                    <tr key={s.at}><td>{new Date(s.at).toLocaleTimeString()}</td><td>{s.playerLatencyMs ?? "—"}</td><td>{s.audioDelayMs ?? "—"}</td><td>{s.avOffsetMs + s.programOffsetMs}</td><td>{s.readingMs ?? "—"}</td><td>{s.audioOffsetMs ?? "—"}</td><td className="max-w-[12rem] truncate">{s.note}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <ul data-testid="av-samples-cards" className="grid gap-1.5 min-[520px]:hidden">
               {diag.samples.slice(-8).reverse().map((s) => (
-                <tr key={s.at}><td>{new Date(s.at).toLocaleTimeString()}</td><td>{s.playerLatencyMs ?? "—"}</td><td>{s.audioDelayMs ?? "—"}</td><td>{s.avOffsetMs + s.programOffsetMs}</td><td>{s.readingMs ?? "—"}</td><td>{s.audioOffsetMs ?? "—"}</td><td className="truncate">{s.note}</td></tr>
+                <li key={s.at} className="rounded-lg bg-[#F6F6F3] px-2.5 py-1.5 font-mono text-[11px]">
+                  <div className="flex justify-between gap-2 font-bold"><span>{new Date(s.at).toLocaleTimeString()}</span><span>{s.source}</span></div>
+                  <div className="grid grid-cols-3 gap-x-2">
+                    <span>player {s.playerLatencyMs ?? "—"}</span><span>delay {s.audioDelayMs ?? "—"}</span><span>offs {s.avOffsetMs + s.programOffsetMs}</span>
+                    <span>ΔTC {s.readingMs ?? "—"}</span><span>audio {s.audioOffsetMs ?? "—"}</span>
+                  </div>
+                  {s.note ? <div className="break-words text-black/70">{s.note}</div> : null}
+                </li>
               ))}
-            </tbody>
-          </table>
+            </ul>
+          </>
         ) : null}
       </div>
 
       <div className="rounded-xl border border-black/15 p-3" data-testid="av-mediamtx">
-        <p className="mb-1 font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">MediaMTX (TC3) {diag?.mediamtx.api === "on" ? `· ${diag.mediamtx.url}` : ""}</p>
+        <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">MediaMTX (TC3)</p>
+        {diag?.mediamtx.api === "on" ? <p className="mb-1 font-mono text-[11px] break-all text-black/50">{diag.mediamtx.url}</p> : null}
         {!diag ? <p className="font-mono text-[12px]">Loading…</p> : diag.mediamtx.api === "off" ? (
           <p data-testid="av-mediamtx-off" className="font-mono text-[12px] text-black/70">API off or unreachable. Our relay starts MediaMTX with its API on 127.0.0.1:{"{RELAY_API_PORT, default 19997}"}: start the relay (Encoder › Relay). For another MediaMTX set <code>api: yes</code> (apiAddress :9997) in its mediamtx.yml and start the app with <code>MEDIAMTX_API_URL=http://127.0.0.1:9997</code>.</p>
         ) : diag.mediamtx.paths.length ? (
-          <table className="w-full font-mono text-[12px]">
-            <thead><tr className="text-left text-black/60"><th>Path</th><th>Ready</th><th>In</th><th>Out</th><th>Readers</th><th>Tracks</th></tr></thead>
-            <tbody>{diag.mediamtx.paths.map((p) => <tr key={p.name}><td>{p.name}</td><td>{p.ready ? "yes" : "no"}</td><td>{mb(p.bytesReceived)}</td><td>{mb(p.bytesSent)}</td><td>{p.readers}</td><td>{p.tracks.join(", ") || "—"}</td></tr>)}</tbody>
-          </table>
+          <>
+            <div className="hidden overflow-x-auto min-[520px]:block">
+              <table data-testid="av-mtx-table" className="w-full font-mono text-[12px]">
+                <thead><tr className="text-left text-black/60"><th>Path</th><th>Ready</th><th>In</th><th>Out</th><th>Readers</th><th>Tracks</th></tr></thead>
+                <tbody>{diag.mediamtx.paths.map((p) => <tr key={p.name}><td>{p.name}</td><td>{p.ready ? "yes" : "no"}</td><td className="whitespace-nowrap">{mb(p.bytesReceived)}</td><td className="whitespace-nowrap">{mb(p.bytesSent)}</td><td>{p.readers}</td><td>{p.tracks.join(", ") || "—"}</td></tr>)}</tbody>
+              </table>
+            </div>
+            <ul data-testid="av-mtx-cards" className="grid gap-1.5 min-[520px]:hidden">
+              {diag.mediamtx.paths.map((p) => (
+                <li key={p.name} className="rounded-lg bg-[#F6F6F3] px-2.5 py-1.5 font-mono text-[11px]">
+                  <div className="flex justify-between gap-2 font-bold"><span className="break-all">{p.name}</span><span className={p.ready ? "text-[#067647]" : "text-black/50"}>{p.ready ? "READY" : "not ready"}</span></div>
+                  <div className="grid grid-cols-3 gap-x-2"><span>in {mb(p.bytesReceived)}</span><span>out {mb(p.bytesSent)}</span><span>readers {p.readers}</span></div>
+                  <div className="break-words text-black/70">tracks {p.tracks.join(", ") || "—"}</div>
+                </li>
+              ))}
+            </ul>
+          </>
         ) : <p className="font-mono text-[12px]">API on, no paths yet.</p>}
       </div>
     </div>
@@ -135,12 +171,12 @@ function TcUrls({ fps, lanIp }: { fps: number; lanIp: string | null }) {
     window.setTimeout(() => setCopied(null), 1600)
   }
   return (
-    <div className="grid gap-2" data-testid="tc-urls">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2" data-testid="tc-urls">
       {items.map((i) => (
-        <div key={i.id} className="grid gap-1 font-mono text-[12px]">
+        <div key={i.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 font-mono text-[12px]">
           <span className="font-bold">{i.label}</span>
           <div className="flex items-center gap-2">
-            <code data-testid={`tc-url-${i.id}`} className="min-w-0 flex-1 truncate rounded-lg bg-[#F6F6F3] px-2 py-1">{i.url}</code>
+            <code data-testid={`tc-url-${i.id}`} className="min-w-0 flex-1 truncate rounded-lg bg-[#F6F6F3] px-2 py-1 [word-break:normal]">{i.url}</code>
             <button type="button" data-testid={`tc-copy-${i.id}`} className="shrink-0 rounded-full bg-black px-3 py-1 text-white" onClick={() => void copy(i.id, i.url)}>{copied === i.id ? "Copied" : "Copy"}</button>
           </div>
           <span className="text-black/60">{i.hint}</span>

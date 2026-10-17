@@ -107,9 +107,9 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
               </span>
               <span data-testid={`program-source-${source}-status`} className={`block truncate font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? (dead ? `no signal · ${st.text}` : h?.ready ? (h.readyOk ? "READY" : `not ready: ${h.issues?.join(", ")}`) : st.text) : "relay not armed"}</span>
               {view && h?.ready ? (
-                <span data-testid={`program-source-${source}-readout`} className="mt-1 grid grid-cols-2 gap-x-1.5 font-mono text-[10px] leading-snug opacity-80">
+                <span data-testid={`program-source-${source}-readout`} className="mt-1 grid grid-cols-1 gap-x-1.5 font-mono text-[10px] leading-snug opacity-80 min-[520px]:grid-cols-2">
                   {readoutRows(h).map(([k, v]) => (
-                    <span key={k} className="flex min-w-0 gap-1"><span className="shrink-0 opacity-60">{k}</span><span className="min-w-0 truncate" title={v}>{v}</span></span>
+                    <span key={k} className="flex min-w-0 justify-between gap-1"><span className="shrink-0 opacity-60">{k}</span><span className="min-w-0 text-right break-all" title={v}>{v}</span></span>
                   ))}
                 </span>
               ) : null}

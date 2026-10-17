@@ -105,3 +105,13 @@ Play the platform (YouTube) on a phone held next to the OBS monitor and photogra
 OBS's live TC1 (on the monitor) − TC1 burned into the phone picture = full glass-to-glass delay (encode + relay + capture + platform).
 Subtract the TC2 − TC1 reading to get the platform's share. Log it with **Mark** as a note, e.g. `TC4 phone +7.4s`.
 Phone and Mac clocks don't matter here: both numbers are read from the same photo.
+
+## Known issue: audio leads video on Backup (analysis, not fixed yet)
+
+Seen in the drift log: on Backup the program audio delay reads exactly **5000 ms** while the /stream player latency is
+~**6.2 s** (Main: delay ~3.1–3.7 s for ~3.1 s latency). In `scripts/capture-stream.mjs` the reader-path target is
+`programTargetMs() = clamp(100, 5000, playerLatency + screencastLag − readerLag − arrivalExcess + trim + offset + videoDelay)`.
+Whenever the Backup player sits more than ~5 s behind the live edge, the delay is **capped at 5000 ms**, so audio is played
+early by (target − 5000) ms, and because that latency wanders (Backup jitter 47 ms, the hls.js player drifting up to
+`liveMaxLatencyDurationCount` segments behind), the lead is not constant. The reader buffer limit (`targetMs + 1 s`) follows the same cap.
+The "switch buffer 5 s" setting only times the Main↔Backup hand-over on /stream; it is not the cause.
