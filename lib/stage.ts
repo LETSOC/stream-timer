@@ -35,6 +35,9 @@ export type StageOptions = {
   strapCorner: Corner
   socialsOverlay: boolean
   socialsCorner: Corner
+  /** A/V diagnostics: labelled STREAM wall-clock timecode on /stream (TC2), live switch, default off. */
+  streamTimecode: boolean
+  streamTimecodeFps: number
   checker: number
   showMeta: boolean
   showLink: boolean
@@ -112,6 +115,8 @@ export const DEFAULT_STAGE: StageOptions = {
   strapCorner: "bottom-left",
   socialsOverlay: false,
   socialsCorner: "bottom-left",
+  streamTimecode: false,
+  streamTimecodeFps: 30,
   lineSpacing: 1.14,
   blockGap: 1.2,
   clockScale: 1,
@@ -221,6 +226,8 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     strapCorner: pick("strapCorner", (v) => parseCorner(v)),
     socialsOverlay: pick("socialsOverlay", (v) => v === true),
     socialsCorner: pick("socialsCorner", (v) => parseCorner(v)),
+    streamTimecode: pick("streamTimecode", (v) => v === true),
+    streamTimecodeFps: pick("streamTimecodeFps", (v) => ([25, 30, 50, 60].includes(Number(v)) ? Number(v) : 30)),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),
     blockGap: pick("blockGap", (v, f) => clamp(v, 0, 8, f)),
     clockScale: pick("clockScale", (v, f) => clampSize(v, CLOCK_SCALE_RANGE, f)),
@@ -328,4 +335,4 @@ export function socialLook(stage: StageOptions) {
 }
 
 /** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
-export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner"] as const satisfies readonly (keyof StageOptions)[]
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps"] as const satisfies readonly (keyof StageOptions)[]

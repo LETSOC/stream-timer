@@ -41,6 +41,8 @@ export type TransportAction =
   | { type: "strap"; mode?: StrapMode; id?: string; holdSec?: number; motion?: StrapMotion; style?: StrapStyle | ""; corner?: Corner }
   /** Visuals: social circles overlay show/hide + corner. */
   | { type: "socials"; show?: boolean; corner?: Corner }
+  /** A/V diagnostics: STREAM timecode on /stream (diagnostic only). */
+  | { type: "timecode"; show?: boolean; fps?: number }
 
 export type ProgramSourcesView = {
   main: SourceHealth & Partial<InputReadout>
@@ -188,6 +190,12 @@ export function parseAction(value: unknown): TransportAction | null {
       if (CORNERS.includes(v.corner as Corner)) out.corner = v.corner as Corner
       return Object.keys(out).length > 1 ? out : null
     }
+    case "timecode": {
+      const out: Extract<TransportAction, { type: "timecode" }> = { type: "timecode" }
+      if (typeof v.show === "boolean") out.show = v.show
+      if ([25, 30, 50, 60].includes(v.fps as number)) out.fps = v.fps as number
+      return Object.keys(out).length > 1 ? out : null
+    }
     default:
       return null
   }
@@ -264,6 +272,8 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       if (action.mode) Object.assign(patch, { strapMode: action.mode, strapAt: action.mode === "out" ? state.stage.strapAt : now })
       return next({}, patch)
     }
+    case "timecode":
+      return next({}, { ...(action.show === undefined ? {} : { streamTimecode: action.show }), ...(action.fps ? { streamTimecodeFps: action.fps } : {}) })
     case "socials":
       return next({}, { ...(action.show === undefined ? {} : { socialsOverlay: action.show }), ...(action.corner ? { socialsCorner: action.corner } : {}) })
   }

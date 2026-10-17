@@ -18,6 +18,8 @@ import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/progr
 import { endInstant } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 import { SyncTestOverlay } from "@/components/sync-test-overlay"
+import { TC_BADGE_W, TC_GAP, TimecodeBadge } from "@/components/timecode-badge"
+import { parseFps } from "@/lib/av-diagnostics"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
@@ -214,6 +216,12 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   return (
     <main className={`relative flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
       <SyncTestOverlay timeZone={event.timeZone} />
+      {stage.streamTimecode ? (
+        // TC2: left of where TC1 (OBS SRC, default bottom-right 96/96) lands in the program, so both read side by side.
+        <div aria-hidden className="pointer-events-none fixed inset-0 z-[60]" style={{ ["--px" as string]: "calc(100vw / 1920)" }}>
+          <TimecodeBadge label="STREAM" testId="tc-stream" fps={parseFps(stage.streamTimecodeFps)} style={{ right: `calc(${96 + TC_BADGE_W + TC_GAP} * var(--px))`, bottom: "calc(96 * var(--px))" }} />
+        </div>
+      ) : null}
       {/* Prewarmed whenever OBS is sending, so "Show program" is instant. */}
       {(["main", "backup"] as const).map((source) => {
         const isAir = source === air.source

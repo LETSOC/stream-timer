@@ -46,6 +46,7 @@ import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
 import { VisualsDeskSection } from "@/components/visuals-desk"
+import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import {
   buildLocalTestCommand,
@@ -1163,6 +1164,10 @@ export function OperatorConsole() {
           <Panel id="visuals" title="Visuals" pill={`${visuals.straps.length} strap${visuals.straps.length === 1 ? "" : "s"}`} defaultOpen={false} dirty={drafts.isDirty("visuals")}>
             {draftBar("visuals")}
             <VisualsDeskSection straps={visuals.straps} accent={visuals.strapAccent} text={visuals.strapText} viewKey={operator.viewKey} onStraps={(v) => setVisual("straps", v)} onAccent={(v) => setVisual("strapAccent", v)} onText={(v) => setVisual("strapText", v)} />
+          </Panel>
+
+          <Panel id="av-diagnostics" title="A/V diagnostics" pill={visuals.streamTimecode ? "STREAM TC on" : "read-only"} defaultOpen={false}>
+            <AvDiagnosticsPanel streamTimecode={visuals.streamTimecode} fps={visuals.streamTimecodeFps} />
           </Panel>
 
           <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
@@ -2502,7 +2507,7 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   )
 }
 
-const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner"] as const
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
   return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals

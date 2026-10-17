@@ -377,6 +377,28 @@ async function apiPaths(): Promise<Map<string, ApiPath> | null> {
   }
 }
 
+/**
+ * Read-only MediaMTX stats for the desk's A/V diagnostics (TC3). Our own relay API by default
+ * (RELAY_API_PORT, read user); MEDIAMTX_API_URL points at another MediaMTX (e.g. http://127.0.0.1:9997).
+ * null = API off / unreachable. Never changes anything.
+ */
+export type MediamtxPathStat = { name: string; ready: boolean; readyTime: string | null; source: string | null; readers: number; bytesReceived: number; bytesSent: number | null; tracks: string[] }
+export async function mediamtxPathStats(): Promise<{ url: string; paths: MediamtxPathStat[] } | null> {
+  const external = process.env.MEDIAMTX_API_URL?.replace(/\/+$/, "")
+  const url = external || `http://127.0.0.1:${relayPorts().api}`
+  try {
+    const response = await fetch(`${url}/v3/paths/list`, { headers: external ? {} : { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+    if (!response.ok) return null
+    const body = (await response.json()) as { items?: (ApiPath & { bytesSent?: number })[] }
+    return {
+      url,
+      paths: (body.items ?? []).map((p) => ({ name: p.name, ready: p.ready === true, readyTime: p.readyTime ?? null, source: p.source?.type ?? null, readers: p.readers?.length ?? 0, bytesReceived: p.bytesReceived ?? 0, bytesSent: typeof p.bytesSent === "number" ? p.bytesSent : null, tracks: p.tracks ?? [] })),
+    }
+  } catch {
+    return null
+  }
+}
+
 // ---------- public operations ----------
 
 const lock = { chain: Promise.resolve() as Promise<unknown> }
