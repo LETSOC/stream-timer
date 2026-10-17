@@ -120,6 +120,14 @@ export function effectiveNow(state: Pick<TransportState, "event" | "testUntil" |
   return now
 }
 
+/** "4 Nov 09:32" for the end card instant (adds " · next day" when the end rolls past midnight). */
+export function formatEndWhen(date: string, start: string, end: string, timeZone: string): string {
+  const instant = endInstant(date, start, end, timeZone)
+  if (!Number.isFinite(instant.getTime())) return end
+  const label = new Intl.DateTimeFormat("en-GB", { timeZone: timeZone || "UTC", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(instant).replace(",", "")
+  return end < start ? `${label} · next day` : label
+}
+
 /** HH:MM in the event zone, `minutes` after the time /stream counts against (test clock aware). Feeds deck "End in Nm". */
 export function endSoonAt(state: Pick<TransportState, "event" | "testUntil" | "pausedAt">, now: number, minutes: number): string {
   const at = new Date(effectiveNow(state, now) + minutes * 60_000)

@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
-import { deckScreen, effectiveNow, endSoonAt, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
+import { deckScreen, effectiveNow, endInstant, endSoonAt, formatEndWhen, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
@@ -18,6 +18,19 @@ const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
 type Preview = "off" | "stream" | "slate" | "capture"
+
+function endCardLabel(state: DeckState, now: number): { when: string; remaining: string; testClock: boolean } {
+  const hhmm = state.endAt || state.endTime
+  const stale = state.testStale
+  const testClock = Boolean(!stale && (state.testUntil !== null || state.pausedAt !== null))
+  const at = effectiveNow({ event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: stale ? null : state.testUntil, pausedAt: stale ? null : state.pausedAt }, now)
+  const when = formatEndWhen(state.date, state.time, hhmm, state.timeZone)
+  const end = endInstant(state.date, state.time, hhmm, state.timeZone)
+  if (!Number.isFinite(end.getTime())) return { when, remaining: "—", testClock }
+  const r = remainingUntil(end, new Date(at))
+  if (r.done) return { when, remaining: state.forceEnd || !state.holdCountdown ? "due / showing" : "past (held)", testClock }
+  return { when, remaining: `${r.days ? `${r.days}d ` : ""}${pad(r.hours)}:${pad(r.minutes)}:${pad(r.seconds)}`, testClock }
+}
 
 function pad(n: number) {
   return String(n).padStart(2, "0")
@@ -218,7 +231,21 @@ export function StreamDeck() {
         {button("restore", { type: "restore" }, "Restore festival", "danger", "col-span-2")}
       </div>
 
+      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Jump · time left</h2>
+      <div className="grid grid-cols-4 gap-2">
+        {JUMPS.map((jump) => button(`jump-${jump.label}`, { type: "jump", seconds: jump.seconds }, jump.label, "outline"))}
+      </div>
+
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
+      {state ? (() => {
+        const end = endCardLabel(state, serverNow)
+        return (
+          <div data-testid="deck-end-time" className="mb-2 rounded-2xl bg-white/5 px-4 py-3">
+            <p className="font-mono text-[13px] text-white/70">Shows <span data-testid="deck-end-when" className="font-bold text-white">{end.when}</span>{state.endAt ? " · override" : " · event end"}{end.testClock ? " · on test clock" : ""}</p>
+            <p data-testid="deck-end-remaining" className="mt-1 font-mono text-[18px] font-bold text-white tabular-nums">{end.remaining}</p>
+          </div>
+        )
+      })() : null}
       <div className="mb-2 flex items-center gap-1.5">
         {state
           ? ([2, 5] as const).map((m) => {
@@ -231,16 +258,11 @@ export function StreamDeck() {
             })
           : null}
       </div>
-      <p className="mb-2 font-mono text-[12px] text-white/60">End in 2m/5m sets the end card override on the test clock. When due it cuts over Program; tap Program or Countdown to stay on.</p>
       <div className="flex items-center gap-1.5">
         {EXTENDS.map((m) => button(`extend-${m < 0 ? `minus${-m}` : m}`, { type: "extendEnd", minutes: m }, m < 0 ? `−${-m}` : `+${m}`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[16px]! tabular-nums"))}
-        <span className="font-mono text-[12px] text-white/60">min</span>
+        <span className="shrink-0 font-mono text-[12px] text-white/60">min</span>
       </div>
-
-      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Jump · time left</h2>
-      <div className="grid grid-cols-4 gap-2">
-        {JUMPS.map((jump) => button(`jump-${jump.label}`, { type: "jump", seconds: jump.seconds }, jump.label, "outline"))}
-      </div>
+      <p className="mt-2 font-mono text-[12px] text-white/60">End in 2m/5m follows the test clock (not your phone time) and will cut over Program when due. After it shows, tap Program to stay on OBS past the end; tapping End in 2m again only delays another cut. ±min nudges the override or Event › End time. HH:MM before the start = next morning.</p>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Screen</h2>
       <div className="grid grid-cols-2 gap-2">

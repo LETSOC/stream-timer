@@ -7,7 +7,7 @@ import { beforeEach, test } from "node:test"
 
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { DEFAULT_STAGE } from "@/lib/stage"
-import { addMinutes, applyTransport, endSoonAt, deckScreen, deckState, effectiveNow, endInstant, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
+import { addMinutes, applyTransport, endSoonAt, formatEndWhen, deckScreen, deckState, effectiveNow, endInstant, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
 import { readServerState, writeServerEvent } from "@/lib/event-server"
 import { runServerTransport } from "@/lib/transport-server"
 import { onSaved } from "@/lib/event-bus"
@@ -207,4 +207,9 @@ test("endSoonAt follows the test clock in the event zone", () => {
   // test clock: 10 min before start
   assert.equal(endSoonAt({ event, testUntil: target + 600_000, pausedAt: null } as never, target, 2), "18:52")
   assert.equal(endSoonAt({ event, testUntil: null, pausedAt: target } as never, 0, 5), "19:05")
+})
+
+test("formatEndWhen: date + time in the event zone, next day when the end is before the start", () => {
+  assert.equal(formatEndWhen("2026-11-04", "09:30", "09:32", "Europe/London"), "4 Nov 09:32")
+  assert.equal(formatEndWhen("2026-11-04", "23:30", "00:15", "Europe/London"), "5 Nov 00:15 · next day")
 })
