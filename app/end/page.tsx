@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { DEFAULT_EVENT, asEventConfig, type EventConfig } from "@/lib/event"
 import { safeUrl } from "@/lib/event"
+import { QrImage } from "@/components/qr-image"
 import { SocialCircles, type SocialLook } from "@/components/social-circles"
 
 type EndCard = {
@@ -66,7 +67,9 @@ export function EndStreamPage({ card, className, social }: { card: EndCard; clas
       <h1 className="relative m-0 font-[Arial,Helvetica,sans-serif] text-[5cqi] leading-none font-bold">{card.title}</h1>
       <p className="relative mt-[1.2cqi] font-[Arial,Helvetica,sans-serif] text-[1.3cqi] text-white/80">{card.subtitle} • {card.date}</p>
       <p className="relative mt-[2cqi] max-w-[46cqi] font-[Arial,Helvetica,sans-serif] text-[1.05cqi] leading-relaxed text-white/60">{card.body}</p>
-      <img src="/brand/end-qr.png" alt="" className="relative mt-[2cqi] size-[8cqi] bg-white p-[0.4cqi]" />
+      <div className="relative mt-[2cqi] size-[8cqi] bg-white p-[0.4cqi]" aria-label="End card QR code">
+        {card.qrUrl.trim() ? <QrImage key={card.qrUrl} url={safeUrl(card.qrUrl, "")} className="size-full object-cover" /> : <img src="/brand/end-qr.png" alt="" className="size-full object-cover" />}
+      </div>
       <p className="relative mt-[0.5cqi] font-[Arial,Helvetica,sans-serif] text-[0.75cqi] tracking-[0.14em] uppercase">Scan to stay connected</p>
       <a href={safeUrl(card.qrUrl, "#")} className="relative mt-[1.6cqi] rounded-full bg-[#ff3c00] px-[2cqi] py-[0.8cqi] font-[Arial,Helvetica,sans-serif] text-[1cqi] font-bold tracking-[0.08em] text-white uppercase no-underline">{card.button}</a>
       <SocialCircles className="relative mt-[1.6cqi] items-center!" look={social} links={card.socials.map((item) => ({ ...item, icon: iconFor(item.label) }))} />

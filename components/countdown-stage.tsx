@@ -16,6 +16,7 @@ import type { EventConfig } from "@/lib/event"
 import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { safeUrl } from "@/lib/event"
+import { QrImage } from "@/components/qr-image"
 import { SocialCircles, type SocialLook } from "@/components/social-circles"
 
 type CountdownStageProps = {
@@ -101,7 +102,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             >
               {rsvpLabel}
             </a>
-            <QrSlot label={scanLabel} />
+            <QrSlot label={scanLabel} url={safeUrl(rsvpUrl, "")} />
           </div>
 
           <div className="mt-[1.6cqi]">
@@ -321,19 +322,18 @@ function UnitRow({
   )
 }
 
-function QrSlot({ label }: { label: string }) {
+function QrSlot({ label, url }: { label: string; url: string }) {
   return (
     <div className="flex flex-col items-center gap-[0.35cqi]">
       <div
         className="relative size-[5.6cqi] shrink-0 overflow-hidden rounded-[0.35cqi] bg-white"
         aria-label="RSVP QR code"
       >
-        <img
-          src="/brand/rsvp-qr.png"
-          alt=""
-          className="size-full object-cover"
-          draggable={false}
-        />
+        {url ? (
+          <QrImage key={url} url={url} className="size-full object-cover" alt="" />
+        ) : (
+          <img src="/brand/rsvp-qr.png" alt="" className="size-full object-cover" draggable={false} />
+        )}
       </div>
       <span className="font-[Arial,Helvetica,sans-serif] text-[0.72cqi] font-bold tracking-[0.12em] text-white uppercase">
         {label}
