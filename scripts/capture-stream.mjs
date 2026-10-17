@@ -350,7 +350,7 @@ function pcmBlock(n, wallMs) {
   // underruns, and only comes back when /stream leaves the program for a card/countdown.
   if (programPcm) { prog.mixedAt = Date.now(); prog.flowed = true }
   const suppress = prog.wanted && (prog.flowed || Date.now() - prog.wantedSince > 3000)
-  const target = suppress ? 0 : 1
+  const target = suppress && !sync.test ? 0 : 1
   for (let i = 0; i < n; i++) {
     if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
     else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
