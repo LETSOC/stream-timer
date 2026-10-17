@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       // sent as a header), not the OBS view key: rotating the view key must not blank a live capture.
       const port = new URL(request.url).port || "43211"
       const origin = process.env.CAPTURE_ORIGIN || `http://127.0.0.1:${port}`
-      source = { kind: "capture", pageUrl: `${origin}/stream`, size: rec.captureSize === "1920x1080" ? "1920x1080" : "1280x720" }
+      source = { kind: "capture", pageUrl: `${origin}/stream?capture=1`, size: rec.captureSize === "1920x1080" ? "1920x1080" : "1280x720" }
       const allowed: readonly number[] = CAPTURE_BITRATES[source.size]
       const asked = Number(rec.captureBitrate)
       source.bitrateK = allowed.includes(asked) ? asked : allowed[1]

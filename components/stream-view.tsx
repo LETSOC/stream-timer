@@ -17,6 +17,7 @@ import { ProgramFeed } from "@/components/program-feed"
 import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { endInstant } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
+import { SyncTestOverlay } from "@/components/sync-test-overlay"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
@@ -212,6 +213,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
 
   return (
     <main className={`relative flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
+      <SyncTestOverlay timeZone={event.timeZone} />
       {/* Prewarmed whenever OBS is sending, so "Show program" is instant. */}
       {(["main", "backup"] as const).map((source) => {
         const isAir = source === air.source
