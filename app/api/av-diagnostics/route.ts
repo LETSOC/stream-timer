@@ -4,6 +4,7 @@ import { liveFromStatus, makeSample, samplesToCsv } from "@/lib/av-diagnostics"
 import { appendAvSample, archiveAvLog, readAvSamples } from "@/lib/av-log"
 import { readAudioSettings } from "@/lib/audio-bed"
 import { readServerState } from "@/lib/event-server"
+import { rttView } from "@/lib/rtt-monitor"
 import { lanIp, mediamtxPathStats, relayStatus } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
@@ -12,7 +13,15 @@ async function live() {
   const status = await relayStatus().catch(() => null)
   const source = status?.paths.capture?.source as { capture?: { programAudio?: Record<string, unknown> } } | null | undefined
   const cap = readAudioSettings().channels.capture
-  return liveFromStatus(source?.capture?.programAudio ?? null, { avOffsetMs: cap.avOffsetMs ?? 0, programOffsetMs: cap.programOffsetMs ?? { main: 0, backup: 0 } }, readServerState().stage.programSource)
+  const m = rttView("main")
+  const b = rttView("backup")
+  return {
+    ...liveFromStatus(source?.capture?.programAudio ?? null, { avOffsetMs: cap.avOffsetMs ?? 0, programOffsetMs: cap.programOffsetMs ?? { main: 0, backup: 0 } }, readServerState().stage.programSource),
+    rttMainMs: m.host ? m.lastMs : null,
+    rttMainLossPct: m.host && m.samples ? m.lossPct : null,
+    rttBackupMs: b.host ? b.lastMs : null,
+    rttBackupLossPct: b.host && b.samples ? b.lossPct : null,
+  }
 }
 
 /** Read-only A/V numbers + MediaMTX path stats + the drift log. ?format=csv downloads the log. */

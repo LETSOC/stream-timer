@@ -1,5 +1,7 @@
 "use client"
 
+import { rttLabel } from "@/lib/rtt"
+
 import { useEffect, useRef, useState } from "react"
 import { PROGRAM_SOURCES, SOURCE_LABEL, type FailoverEvent, type FailoverSettings, type ProgramSource, type SourceHealth, hasSignal } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
@@ -113,6 +115,11 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
                   ))}
                 </span>
               ) : null}
+              {view ? (() => {
+                const r = h?.rtt
+                const tone = r?.level === "bad" || r?.level === "lost" ? "text-[#f04438]" : r?.level === "high" ? "text-[#f79009]" : ""
+                return <span data-testid={`program-source-${source}-rtt`} data-level={r?.level ?? ""} title={r?.host ? `${r.host} (${r.via}) · avg ${r.avgMs ?? "–"}ms max ${r.maxMs ?? "–"}ms · loss ${r.lossPct}% over 1 min` : "no publisher"} className={`mt-0.5 block truncate font-mono text-[10px] font-bold ${tone}`}>{rttLabel(r)}</span>
+              })() : null}
               {view && h?.ready && h.stateReason ? <span className="block truncate font-mono text-[10px] text-[#f79009]" title={h.stateReason}>{h.stateReason}</span> : null}
             </button>
           )

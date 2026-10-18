@@ -34,6 +34,11 @@ export type AvLive = {
   source: "main" | "backup"
   mixing: boolean
   jitterMs: number | null
+  /** network RTT to each program publisher (last sample) and loss % over the last minute */
+  rttMainMs?: number | null
+  rttMainLossPct?: number | null
+  rttBackupMs?: number | null
+  rttBackupLossPct?: number | null
 }
 
 export type AvSample = AvLive & { at: number; iso: string; readingMs: number | null; /** typed: audio marker vs picture at the output, ms (+ = audio late) */ audioOffsetMs?: number | null; note: string }
@@ -54,7 +59,7 @@ export function makeSample(live: AvLive, input: { readingMs?: unknown; audioOffs
   }
 }
 
-export const CSV_COLUMNS = ["iso", "at", "playerLatencyMs", "audioDelayMs", "autoOffsetMs", "avOffsetMs", "programOffsetMs", "source", "mixing", "jitterMs", "readingMs", "audioOffsetMs", "note"] as const
+export const CSV_COLUMNS = ["iso", "at", "playerLatencyMs", "audioDelayMs", "autoOffsetMs", "avOffsetMs", "programOffsetMs", "source", "mixing", "jitterMs", "rttMainMs", "rttMainLossPct", "rttBackupMs", "rttBackupLossPct", "readingMs", "audioOffsetMs", "note"] as const
 
 function cell(v: unknown): string {
   if (v === null || v === undefined) return ""

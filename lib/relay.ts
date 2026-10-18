@@ -433,6 +433,31 @@ function writeConfigIfChanged() {
   if (current.replace(/# resync .*\n$/, "") !== yml) writePrivate(file("mediamtx.yml"), yml)
 }
 
+/**
+ * Read-only: remote host of each program input's publisher (RTMP push: rtmpconns remoteAddr; Backup pull:
+ * the pull URL's host). null = no publisher / relay down. Used for per-source RTT, never changes anything.
+ */
+export async function programPublisherHosts(): Promise<Record<"main" | "backup", { host: string; via: "push" | "pull" } | null>> {
+  const out: Record<"main" | "backup", { host: string; via: "push" | "pull" } | null> = { main: null, backup: null }
+  try {
+    const response = await fetch(`http://127.0.0.1:${relayPorts().api}/v3/rtmpconns/list`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+    if (response.ok) {
+      const body = (await response.json()) as { items?: { path: string; state: string; remoteAddr?: string }[] }
+      for (const conn of body.items ?? []) {
+        if (conn.state !== "publish" || !conn.remoteAddr) continue
+        const host = conn.remoteAddr.replace(/^\[?([^\]]+?)\]?:\d+$/, "$1")
+        if (conn.path === PROGRAM_PATH) out.main = { host, via: "push" }
+        if (conn.path === BACKUP_PATH) out.backup = { host, via: "push" }
+      }
+    }
+  } catch { /* relay down */ }
+  const pull = readSettings().backupPullUrl
+  if (!out.backup && pull) {
+    try { out.backup = { host: new URL(pull).hostname, via: "pull" } } catch { /* bad url */ }
+  }
+  return out
+}
+
 /** Disconnect whoever publishes /program (disarm / new key). */
 async function kickProgramUnlocked(paths: string[] = [PROGRAM_PATH, BACKUP_PATH]) {
   if (!relayRunning()) return

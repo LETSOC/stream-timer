@@ -1,3 +1,4 @@
+import { rttView, startRttMonitor } from "@/lib/rtt-monitor"
 /**
  * Server-side watcher for the two program inputs (Main /program, Backup /program-backup): keeps their
  * health fresh, runs auto-failover, and tells deck sockets when anything visible changed.
@@ -57,7 +58,7 @@ export function programSourcesView(now = Date.now()): ProgramSourcesView | null 
   try { const st = readChannelStatus("capture"); pa = st.running ? ((st.health as { capture?: { programAudio?: PA } }).capture?.programAudio ?? null) : null } catch { pa = null }
   const readout = (source: ProgramSource) => {
     const r = inputReadout(source, now, settings.failover.stallSec * 1000)
-    return { ...r, jitterMs: (() => { const j = pa?.arrivalExcessMs?.[source]; return typeof j === "number" && j >= 0 && j < 5000 ? j : null })(), offsetMs: pa?.offsetMs?.[source] ?? null, audioDelayMs: pa?.source === source ? (pa.delayMs ?? null) : null }
+    return { ...r, jitterMs: (() => { const j = pa?.arrivalExcessMs?.[source]; return typeof j === "number" && j >= 0 && j < 5000 ? j : null })(), offsetMs: pa?.offsetMs?.[source] ?? null, audioDelayMs: pa?.source === source ? (pa.delayMs ?? null) : null, rtt: rttView(source, now) }
   }
   return {
     main: readout("main"),
@@ -166,6 +167,7 @@ export async function programMonitorTick(now = Date.now()) {
 }
 
 export function startProgramMonitor(intervalMs = 500) {
+  startRttMonitor()
   const m = monitor()
   if (m.timer) return
   let busy = false

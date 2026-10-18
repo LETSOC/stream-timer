@@ -78,6 +78,7 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
         <div className={row}><span>Manual A/V offset</span><b>{ms(l?.avOffsetMs)}</b></div>
         <div className={row}><span>Manual program offset ({l?.source ?? "main"})</span><b>{ms(l?.programOffsetMs)}</b></div>
         <div className={row}><span>Jitter</span><b>{ms(l?.jitterMs)}</b></div>
+        <div className={row}><span>RTT Main / Backup</span><b data-testid="av-rtt">{ms(l?.rttMainMs)}{l?.rttMainLossPct ? ` (${l.rttMainLossPct}%)` : ""} / {ms(l?.rttBackupMs)}{l?.rttBackupLossPct ? ` (${l.rttBackupLossPct}%)` : ""}</b></div>
       </div>
 
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-xl border border-black/15 p-3">
@@ -103,10 +104,10 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
           <>
             <div className="hidden overflow-x-auto min-[520px]:block">
               <table data-testid="av-samples-table" className="w-full font-mono text-[11px]">
-                <thead><tr className="text-left text-black/60"><th>Time</th><th>Player</th><th>Delay</th><th>Offs</th><th>Δ TC</th><th>Audio</th><th>Note</th></tr></thead>
+                <thead><tr className="text-left text-black/60"><th>Time</th><th>Player</th><th>Delay</th><th>Offs</th><th>Δ TC</th><th>Audio</th><th>RTT M/B</th><th>Note</th></tr></thead>
                 <tbody>
                   {diag.samples.slice(-8).reverse().map((s) => (
-                    <tr key={s.at}><td>{new Date(s.at).toLocaleTimeString()}</td><td>{s.playerLatencyMs ?? "—"}</td><td>{s.audioDelayMs ?? "—"}</td><td>{s.avOffsetMs + s.programOffsetMs}</td><td>{s.readingMs ?? "—"}</td><td>{s.audioOffsetMs ?? "—"}</td><td className="max-w-[12rem] truncate">{s.note}</td></tr>
+                    <tr key={s.at}><td>{new Date(s.at).toLocaleTimeString()}</td><td>{s.playerLatencyMs ?? "—"}</td><td>{s.audioDelayMs ?? "—"}</td><td>{s.avOffsetMs + s.programOffsetMs}</td><td>{s.readingMs ?? "—"}</td><td>{s.audioOffsetMs ?? "—"}</td><td>{s.rttMainMs ?? "—"}/{s.rttBackupMs ?? "—"}</td><td className="max-w-[12rem] truncate">{s.note}</td></tr>
                   ))}
                 </tbody>
               </table>
@@ -117,7 +118,7 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
                   <div className="flex justify-between gap-2 font-bold"><span>{new Date(s.at).toLocaleTimeString()}</span><span>{s.source}</span></div>
                   <div className="grid grid-cols-3 gap-x-2">
                     <span>player {s.playerLatencyMs ?? "—"}</span><span>delay {s.audioDelayMs ?? "—"}</span><span>offs {s.avOffsetMs + s.programOffsetMs}</span>
-                    <span>ΔTC {s.readingMs ?? "—"}</span><span>audio {s.audioOffsetMs ?? "—"}</span>
+                    <span>ΔTC {s.readingMs ?? "—"}</span><span>audio {s.audioOffsetMs ?? "—"}</span><span>rtt {s.rttMainMs ?? "—"}/{s.rttBackupMs ?? "—"}</span>
                   </div>
                   {s.note ? <div className="break-words text-black/70">{s.note}</div> : null}
                 </li>
