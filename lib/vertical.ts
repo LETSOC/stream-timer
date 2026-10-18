@@ -13,7 +13,7 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { allowedRtmpHost, destinationFingerprint, directChannelDests, ffmpegAvailable, killGroup, pidRunsScript, redact, relayChildEnv, validateRtmpUrl } from "@/lib/encoder"
-import { deriveForwardState, ensureRelayServer, findRelayLoops, mediamtxPathStats, relayForwardFingerprints, relayReadUrl, type ForwardState } from "@/lib/relay"
+import { deriveForwardState, ensureRelayServer, findRelayLoops, mediamtxPathStats, relayForwardFingerprints, relayPublishUrl, relayReadUrl, VERTICAL_PATH, type ForwardState } from "@/lib/relay"
 import { listDestinations, resolveDestination } from "@/lib/rtmp-destinations"
 import { EMPTY_HEALTH, type HealthStats } from "@/lib/stream-health"
 
@@ -26,8 +26,8 @@ export const VERTICAL_MAX_DESTS = 4
 export const VERTICAL_BG_PRESETS = ["#000000", "#0000B6"] as const
 export type VerticalEncoder = "auto" | "libx264" | "videotoolbox"
 export type VerticalAudio = "auto" | "copy" | "aac"
-export type VerticalSettings = { destIds: string[]; bg: string; encoder: VerticalEncoder; audio: VerticalAudio }
-export const DEFAULT_VERTICAL: VerticalSettings = { destIds: [], bg: "#000000", encoder: "auto", audio: "auto" }
+export type VerticalSettings = { destIds: string[]; bg: string; encoder: VerticalEncoder; audio: VerticalAudio; /** also publish to the local relay path /vertical (preview + relay forwards) */ relay: boolean }
+export const DEFAULT_VERTICAL: VerticalSettings = { destIds: [], bg: "#000000", encoder: "auto", audio: "auto", relay: true }
 
 const root = () => process.cwd()
 const dir = () => path.join(process.env.STREAM_DATA_DIR || path.join(root(), "data"), "vertical")
@@ -48,6 +48,7 @@ export function parseVerticalSettings(raw: unknown): VerticalSettings {
     bg: cleanBg(r.bg),
     encoder: r.encoder === "libx264" || r.encoder === "videotoolbox" ? r.encoder : "auto",
     audio: r.audio === "copy" || r.audio === "aac" ? r.audio : "auto",
+    relay: r.relay !== false,
   }
 }
 
@@ -62,10 +63,16 @@ export function teeSafeUrl(url: string): boolean {
   return !/[|[\]\\]/.test(url)
 }
 
-/** One encode, several RTMP outputs. With 2+ outputs one failing ingest must not drop the others. */
-export function teeTarget(urls: string[]): string {
-  const onfail = urls.length > 1 ? "ignore" : "abort"
-  return urls.map((url) => `[f=flv:flvflags=no_duration_filesize:onfail=${onfail}]${url}`).join("|")
+/**
+ * One encode, several RTMP outputs. With 2+ external destinations one failing ingest must not drop the
+ * others (onfail=ignore). A single external destination aborts on failure, so the loop reconnects it.
+ * The local relay output (/vertical) never takes the external ones down with it.
+ */
+export function teeTarget(urls: string[], relayUrl?: string | null): string {
+  const onfail = urls.length > 1 || (urls.length === 0 && !relayUrl) ? "ignore" : "abort"
+  const out = urls.map((url) => `[f=flv:flvflags=no_duration_filesize:onfail=${onfail}]${url}`)
+  if (relayUrl) out.push(`[f=flv:flvflags=no_duration_filesize:onfail=${urls.length ? "ignore" : "abort"}]${relayUrl}`)
+  return out.join("|")
 }
 
 export function videoArgs(encoder: "libx264" | "videotoolbox"): string[] {
@@ -81,14 +88,14 @@ export function audioArgs(copy: boolean): string[] {
 }
 
 /** The vertical ffmpeg argv. Destination URLs (with keys) are argv entries; the loop redacts them in its log. */
-export function verticalCommand(input: { readUrl: string; urls: string[]; bg: string; encoder: "libx264" | "videotoolbox"; audioCopy: boolean; ffmpeg?: string }): string[] {
+export function verticalCommand(input: { readUrl: string; urls: string[]; relayUrl?: string | null; bg: string; encoder: "libx264" | "videotoolbox"; audioCopy: boolean; ffmpeg?: string }): string[] {
   return [input.ffmpeg ?? "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info", "-nostats", "-progress", "pipe:1", "-stats_period", "5",
     "-rw_timeout", "10000000", "-i", input.readUrl,
     "-map", "0:v:0", "-map", "0:a:0?",
     "-vf", verticalFilter(input.bg), "-r", String(VERTICAL_FPS), "-pix_fmt", "yuv420p",
     ...videoArgs(input.encoder),
     ...audioArgs(input.audioCopy),
-    "-f", "tee", teeTarget(input.urls)]
+    "-f", "tee", teeTarget(input.urls, input.relayUrl)]
 }
 
 /** Copy only what MediaMTX reports as AAC (capture sends AAC 48k stereo); anything else is re-encoded. */
@@ -135,7 +142,7 @@ export function verticalConflict(fingerprints: string[], forwards: { path: strin
 
 // ---------- settings + processes ----------
 
-type Pidfile = { pid: number; startedAt: number; tag: string; adopted?: boolean; hosts?: string[]; encoder?: string; audioCopy?: boolean; bg?: string; command?: string }
+type Pidfile = { pid: number; startedAt: number; tag: string; adopted?: boolean; hosts?: string[]; /** fingerprints of the external destinations (relay same-key guard) */ dests?: string[]; relay?: boolean; encoder?: string; audioCopy?: boolean; bg?: string; command?: string }
 type LoopState = { state: "running" | "waiting"; restarts: number; reconnects?: number; updatedAt: number; lastExit: number | null }
 
 function ensureDir() {
@@ -202,7 +209,7 @@ export function saveVerticalSettings(patch: unknown): Promise<VerticalResult> {
       if (!teeSafeUrl(d.url)) return { ok: false, status: 400, error: `${d.name}: its URL contains | [ ] or \\, which the vertical output can't send to.` }
     }
     writePrivate(file("settings.json"), JSON.stringify(next, null, 2))
-    return { ok: true, note: loopAlive() ? "Saved. Stop and start Vertical to apply." : "Saved." }
+    return { ok: true, note: loopAlive() ? "Saved. Applies on the next start (Stop, then Start vertical)." : "Saved." }
   })
 }
 
@@ -213,7 +220,7 @@ export function startVertical(): Promise<VerticalResult> {
     if (await adopt()) return { ok: true, note: "Vertical is already running. Stop it first to change destinations." }
     const settings = readVerticalSettings()
     const dests = settings.destIds.map((id) => resolveDestination(id)).filter((d): d is NonNullable<typeof d> => d !== null)
-    if (dests.length === 0) return { ok: false, status: 400, error: "Tick at least one vertical destination." }
+    if (dests.length === 0 && !settings.relay) return { ok: false, status: 400, error: "Tick at least one vertical destination, or turn on “Also publish to relay /vertical”." }
     for (const d of dests) {
       const checked = validateRtmpUrl(d.url)
       if (!checked.ok) return { ok: false, status: 400, error: `${d.name}: ${checked.error}` }
@@ -229,8 +236,9 @@ export function startVertical(): Promise<VerticalResult> {
     const tracks = (await mediamtxPathStats())?.paths.find((p) => p.name === "capture")?.tracks ?? []
     const audioCopy = decideAudioCopy(settings.audio, tracks)
     const encoder = resolveEncoder(settings.encoder)
-    const command = verticalCommand({ readUrl: relayReadUrl("capture"), urls: dests.map((d) => d.url), bg: settings.bg, encoder, audioCopy, ffmpeg: process.env.FFMPEG_BIN || "ffmpeg" })
-    const tag = `vertical:dest=${combinedFingerprint(dests.map((d) => d.url))}`
+    const relayUrl = settings.relay ? relayPublishUrl(VERTICAL_PATH) : null
+    const command = verticalCommand({ readUrl: relayReadUrl("capture"), urls: dests.map((d) => d.url), relayUrl, bg: settings.bg, encoder, audioCopy, ffmpeg: process.env.FFMPEG_BIN || "ffmpeg" })
+    const tag = `vertical:dest=${combinedFingerprint([...dests.map((d) => d.url), ...(relayUrl ? ["relay:vertical"] : [])])}`
     ensureDir()
     const log = file("vertical.log")
     fs.writeFileSync(log, "", { mode: 0o600 })
@@ -243,8 +251,8 @@ export function startVertical(): Promise<VerticalResult> {
     fs.closeSync(out)
     child.unref()
     if (!child.pid) return { ok: false, status: 500, error: "Could not start the vertical ffmpeg." }
-    writePrivate(file("vertical.json"), JSON.stringify({ pid: child.pid, startedAt: Date.now(), tag, hosts: dests.map((d) => { try { return new URL(d.url).host } catch { return "?" } }), encoder, audioCopy, bg: settings.bg, command: redactCommand(command) } satisfies Pidfile))
-    return { ok: true, note: `Vertical started → ${dests.length} destination${dests.length === 1 ? "" : "s"} (${encoder}, audio ${audioCopy ? "copy" : "AAC"}).` }
+    writePrivate(file("vertical.json"), JSON.stringify({ pid: child.pid, startedAt: Date.now(), tag, hosts: [...dests.map((d) => { try { return new URL(d.url).host } catch { return "?" } }), ...(relayUrl ? ["relay /vertical"] : [])], dests: fps, relay: relayUrl !== null, encoder, audioCopy, bg: settings.bg, command: redactCommand(command) } satisfies Pidfile))
+    return { ok: true, note: `Vertical started → ${dests.length} destination${dests.length === 1 ? "" : "s"}${relayUrl ? " + relay /vertical" : ""} (${encoder}, audio ${audioCopy ? "copy" : "AAC"}).` }
   }).finally(() => { gate.inFlight = null })
 }
 
@@ -281,6 +289,25 @@ function logAgeMs(): number | null {
   try { return Date.now() - fs.statSync(file("vertical.log")).mtimeMs } catch { return null }
 }
 
+/** Why a saved destination can't be a Vertical destination right now (null = usable). Shown inline on the desk. */
+export type DestAvailability = { id: string; reason: string | null }
+export function destAvailability(): DestAvailability[] {
+  const forwards = relayForwardFingerprints()
+  const direct = directChannelDests()
+  return listDestinations().items.map((item) => {
+    const d = resolveDestination(item.id)
+    if (!d) return { id: item.id, reason: "Missing." }
+    if (!teeSafeUrl(d.url)) return { id: item.id, reason: "URL contains | [ ] or \\ (the vertical output can't send to it)." }
+    if (!allowedRtmpHost(d.url)) return { id: item.id, reason: "Host not allowed (RTMP_ALLOWED_HOSTS)." }
+    const fp = destinationFingerprint(d.url)
+    const fwd = forwards.find((f) => f.dest === fp)
+    if (fwd) return { id: item.id, reason: `In use: relay /${fwd.path} forwards to it.` }
+    const ch = direct.find((c) => c.running && !c.relay && c.dest === fp)
+    if (ch) return { id: item.id, reason: `In use: ${ch.channel === "capture" ? "Browser capture" : "Slate"} publishes to it.` }
+    return { id: item.id, reason: null }
+  })
+}
+
 export type VerticalStatus = {
   running: boolean
   state: ForwardState
@@ -293,6 +320,10 @@ export type VerticalStatus = {
   audio: "copy" | "aac" | null
   bg: string | null
   settings: VerticalSettings
+  /** settings differ from what the running process uses: Stop and Start to apply */
+  pending: boolean
+  relay: boolean
+  dests: DestAvailability[]
   health: HealthStats
   error: string | null
   command: string | null
@@ -314,6 +345,9 @@ export async function verticalStatus(): Promise<VerticalStatus> {
     running: meta !== null, state, adopted: meta?.adopted === true, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, sourceReady,
     hosts: meta?.hosts ?? [], encoder: meta?.encoder ?? null, audio: meta ? (meta.audioCopy === undefined ? null : meta.audioCopy ? "copy" : "aac") : null, bg: meta?.bg ?? null,
     settings, health,
+    relay: meta?.relay === true,
+    pending: meta !== null && meta.dests !== undefined && (meta.relay !== settings.relay || JSON.stringify([...meta.dests].sort()) !== JSON.stringify(settings.destIds.map((id) => resolveDestination(id)).filter((d) => d !== null).map((d) => destinationFingerprint(d.url)).sort())),
+    dests: destAvailability(),
     error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null),
     command: meta?.command ?? null,
     logTail: lines.filter((l) => !/^[a-z_]+=/.test(l)).slice(-12).join("\n").slice(-1500),

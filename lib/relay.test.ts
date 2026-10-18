@@ -10,7 +10,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60 }, lanIngest: false, mdnsName: "hyphen-stream" })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [], vertical: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60 }, lanIngest: false, mdnsName: "hyphen-stream" })
 })
 
 test("credentials are random, stable, and stored 0600", () => {
@@ -29,7 +29,7 @@ test("config binds every listener to the given host and restricts users to local
   assert.match(yml, /moq: no/)
   assert.match(yml, /authMethod: internal/)
   assert.equal((yml.match(/ips: \['127\.0\.0\.1\/32', '::1\/128'\]/g) ?? []).length, 2)
-  assert.match(yml, /  slate: \{\}\n  capture: \{\}\n  program: \{ overridePublisher: yes \}/)
+  assert.match(yml, /  slate: \{\}\n  capture: \{\}\n  vertical: \{\}\n  program: \{ overridePublisher: yes \}/)
   // Internal publisher limited to slate/capture; no OBS login while disarmed.
   assert.match(yml, /permissions: \[\{ action: publish, path: slate \}, \{ action: publish, path: capture \}\]/)
   assert.doesNotMatch(yml, /path: program/)

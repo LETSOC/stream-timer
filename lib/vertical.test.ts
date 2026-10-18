@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import test from "node:test"
 import { verticalHealth, verticalProgress, audioArgs, cleanBg, combinedFingerprint, decideAudioCopy, parseVerticalSettings, resolveEncoder, teeSafeUrl, teeTarget, verticalCommand, verticalConflict, verticalFilter, videoArgs } from "@/lib/vertical"
-import { isVerticalTag, parseRelayLoops } from "@/lib/relay"
+import { buildMediamtxConfig, isVerticalTag, parseRelayLoops } from "@/lib/relay"
 
 test("vertical filter fits 16:9 into 1080x1920, centred, configurable bars", () => {
   assert.equal(verticalFilter("#0000b6"), "scale=1080:-2:flags=bicubic,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x0000B6,fps=30,format=yuv420p,setsar=1")
@@ -12,7 +12,7 @@ test("vertical filter fits 16:9 into 1080x1920, centred, configurable bars", () 
 
 test("settings parse: ids deduped/capped, unknown values fall back", () => {
   const s = parseVerticalSettings({ destIds: ["a", "a", "b", 3, "c", "d", "e"], bg: "red", encoder: "x", audio: "aac" })
-  assert.deepEqual(s, { destIds: ["a", "b", "c", "d"], bg: "#000000", encoder: "auto", audio: "aac" })
+  assert.deepEqual(s, { destIds: ["a", "b", "c", "d"], bg: "#000000", encoder: "auto", audio: "aac", relay: true })
   assert.equal(resolveEncoder("auto"), "libx264")
   assert.equal(resolveEncoder("videotoolbox"), "videotoolbox")
 })
@@ -69,4 +69,22 @@ test("progress: fps/speed from the last block; slow encoder warns", () => {
   assert.equal(h.level, "bad")
   assert.equal(h.kbps, 4500)
   assert.equal(verticalHealth(verticalProgress(""), null).level, "idle")
+})
+
+test("relay output: /vertical is one more tee output that never takes the external ones down", () => {
+  const relay = "rtmp://127.0.0.1:19350/vertical?user=vrt_x&pass=y"
+  assert.equal(teeTarget([], relay), `[f=flv:flvflags=no_duration_filesize:onfail=abort]${relay}`)
+  const one = teeTarget(["rtmp://a/x"], relay).split("|")
+  assert.match(one[0], /onfail=abort\]rtmp:\/\/a\/x$/)
+  assert.match(one[1], /onfail=ignore\]rtmp:\/\/127\.0\.0\.1:19350\/vertical/)
+  assert.equal(parseVerticalSettings({}).relay, true)
+  assert.equal(parseVerticalSettings({ relay: false }).relay, false)
+})
+
+test("MediaMTX config: /vertical path with its own localhost-only vrt_ publisher", () => {
+  const yml = buildMediamtxConfig({ host: "127.0.0.1", ports: { rtmp: 19350, hls: 18888, api: 19997 }, creds: { publishUser: "pub_a", publishPass: "p", readUser: "read_a", readPass: "r", verticalUser: "vrt_a", verticalPass: "v" } })
+  assert.match(yml, /^ {2}vertical: \{\}$/m)
+  assert.match(yml, /user: "vrt_a"\n {4}pass: "v"\n {4}ips: \['127\.0\.0\.1\/32', '::1\/128'\]\n {4}permissions: \[\{ action: publish, path: vertical \}\]/)
+  // the channel publisher can't publish /vertical
+  assert.match(yml, /user: "pub_a"[\s\S]*?permissions: \[\{ action: publish, path: slate \}, \{ action: publish, path: capture \}\]/)
 })

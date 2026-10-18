@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { ConfirmButton } from "@/components/confirm-button"
+import { StreamPlayer } from "@/components/stream-player"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { handleUnauthorized } from "@/lib/use-operator"
 
@@ -20,7 +21,10 @@ export type VerticalView = {
   encoder: string | null
   audio: "copy" | "aac" | null
   bg: string | null
-  settings: { destIds: string[]; bg: string; encoder: "auto" | "libx264" | "videotoolbox"; audio: "auto" | "copy" | "aac" }
+  settings: { destIds: string[]; bg: string; encoder: "auto" | "libx264" | "videotoolbox"; audio: "auto" | "copy" | "aac"; relay: boolean }
+  pending?: boolean
+  relay?: boolean
+  dests?: { id: string; reason: string | null }[]
   health: Health
   error: string | null
   command: string | null
@@ -62,6 +66,19 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [form, setForm] = useState<{ open: boolean; name: string; server: string; key: string }>({ open: false, name: "", server: "", key: "" })
+  const [preview, setPreview] = useState(false)
+  const [relayReady, setRelayReady] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!preview) return
+    let stop = false
+    const poll = async () => {
+      const body = (await (await fetch("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: { vertical?: { ready?: boolean } } } | null
+      if (!stop) setRelayReady(body?.paths?.vertical?.ready === true)
+    }
+    void poll()
+    const id = window.setInterval(() => void poll(), 2000)
+    return () => { stop = true; window.clearInterval(id) }
+  }, [preview])
   const live = view?.running === true
   const s = view?.settings
   const run = async (key: string, payload: Record<string, unknown>) => {
@@ -100,13 +117,27 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
       <div className="space-y-1 font-mono text-[12px] text-black/70">
         <p className="font-bold text-black">Vertical destinations</p>
         {dests.length === 0 ? <p>No saved destinations yet. Add one below.</p> : null}
-        {dests.map((d) => (
-          <label key={d.id} className="flex items-center gap-2">
-            <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 accent-black" disabled={live || busy !== null || !s} checked={s?.destIds.includes(d.id) ?? false} onChange={(e) => toggle(d.id, e.target.checked)} />
-            <span className="min-w-0">{d.name} · {d.host}</span>
-          </label>
-        ))}
-        <button type="button" data-testid="vertical-dest-add" className={pillClass("outline", "sm")} disabled={live} onClick={() => setForm({ ...form, open: !form.open })}>+ Add vertical destination</button>
+        {dests.map((d) => {
+          const checked = s?.destIds.includes(d.id) ?? false
+          const reason = view?.dests?.find((x) => x.id === d.id)?.reason ?? null
+          // Only a real reason blocks ticking (an already-ticked one can always be unticked); never just "busy" or "live".
+          const blocked = Boolean(reason) && !checked
+          return (
+            <div key={d.id} data-testid={`vertical-dest-row-${d.id}`} data-blocked={blocked ? "1" : "0"}>
+              <label className={`flex items-center gap-2 ${blocked ? "cursor-not-allowed" : "cursor-pointer text-black"}`}>
+                <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || !s} checked={checked} onChange={(e) => toggle(d.id, e.target.checked)} />
+                <span className="min-w-0"><span className="font-bold">{d.name}</span> · {d.host}</span>
+              </label>
+              {reason ? <p data-testid={`vertical-dest-reason-${d.id}`} className="pl-6 text-[11px] font-bold text-[#8a4b06]">{reason}</p> : null}
+            </div>
+          )
+        })}
+        <label className="flex items-center gap-2 text-black">
+          <input type="checkbox" data-testid="vertical-relay" className="size-4 shrink-0 accent-black" disabled={!s} checked={s?.relay ?? true} onChange={(e) => save({ relay: e.target.checked })} />
+          <span>Also publish to relay <span className="font-bold">/vertical</span> (preview here; fan out with Relay › /vertical forwards)</span>
+        </label>
+        {live && view?.pending ? <p data-testid="vertical-pending" className="text-[11px] font-bold text-[#8a4b06]">Changed while live: applies on the next start (Stop, then Start vertical).</p> : null}
+        <button type="button" data-testid="vertical-dest-add" className={pillClass("outline", "sm")} onClick={() => setForm({ ...form, open: !form.open })}>+ Add vertical destination</button>
         {form.open ? (
           <form data-testid="vertical-dest-form" className="space-y-2 rounded-xl border border-black/10 bg-[#F6F6F3] p-3" onSubmit={(e) => { e.preventDefault(); void addDest() }}>
             <input aria-label="Destination name" data-testid="vertical-dest-name" className="h-9 w-full border px-3 text-sm" placeholder="Name, e.g. TikTok Live" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -156,9 +187,20 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
       {view?.error && live ? <p role="alert" data-testid="vertical-error" className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[12px] font-bold text-[#7a3b06]">{view.error}</p> : null}
       {view?.adopted && live ? <p data-testid="vertical-adopted" className="font-mono text-[12px] text-black/70">Found Vertical already running (started before the server restarted). Stop works on it.</p> : null}
       <div className="flex flex-wrap gap-2">
-        <ConfirmButton data-testid="vertical-start" className={pillClass("solid")} disabled={live || busy !== null || !s?.destIds.length} confirmLabel="Start vertical? · confirm" onConfirm={() => void run("start", { action: "start" })}>{busy === "start" ? "Starting…" : "Start vertical"}</ConfirmButton>
+        <ConfirmButton data-testid="vertical-start" className={pillClass("solid")} disabled={live || busy !== null || !s || (!s.destIds.length && !s.relay)} confirmLabel="Start vertical? · confirm" onConfirm={() => void run("start", { action: "start" })}>{busy === "start" ? "Starting…" : "Start vertical"}</ConfirmButton>
         <ConfirmButton data-testid="vertical-stop" className={pillClass("danger")} disabled={!live || busy !== null} confirmLabel="Stop vertical? · confirm" onConfirm={() => void run("stop", { action: "stop" })}>{busy === "stop" ? "Stopping…" : "Stop"}</ConfirmButton>
       </div>
+      <button type="button" data-testid="vertical-preview" aria-pressed={preview} className={pillClass("outline", "sm")} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview /vertical"}</button>
+      {preview ? (
+        <div data-testid="vertical-preview-box" data-ready={relayReady ? "1" : "0"} className="relative mx-auto aspect-[9/16] w-full max-w-[240px] overflow-hidden rounded-lg bg-black">
+          {relayReady ? <StreamPlayer src="/api/relay/hls/vertical/index.m3u8" /> : (
+            <span data-testid="vertical-preview-off" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center font-mono text-[12px] text-white/70">
+              <span className="font-bold text-white/90">{relayReady === null ? "Loading…" : "Not publishing"}</span>
+              {relayReady === null ? null : s?.relay === false ? "Turn on “Also publish to relay /vertical” and start Vertical." : live ? "Vertical is starting or Browser capture isn't on the relay yet." : "Start Vertical to see /vertical here."}
+            </span>
+          )}
+        </div>
+      ) : null}
       {view?.command ? (
         <details className="font-mono text-[11px] text-black/60">
           <summary>ffmpeg command (keys redacted)</summary>
@@ -198,8 +240,8 @@ export function VerticalDeckTile() {
         <p className="font-mono text-[13px] font-bold tracking-[0.08em] uppercase">Vertical 9:16</p>
         <span data-testid="deck-vertical-status" className={`rounded-full px-2.5 py-1 font-mono text-[12px] font-bold uppercase ${st === "forwarding" ? "bg-[#12b76a] text-black" : st === "connecting" || st === "retrying" || st === "waiting" ? "bg-[#fdb022] text-black" : st === "stalled" || st === "blocked" ? "bg-[#f04438] text-white" : "bg-white/15"}`}>{view ? VERTICAL_STATE_LABEL[view.state] : "…"}</span>
       </div>
-      {live ? <p className="mb-2 truncate font-mono text-[12px] text-white/70">→ {view.hosts.join(", ")}{view.health.fps !== null ? ` · ${view.health.fps.toFixed(0)} fps` : ""}{view.health.kbps !== null ? ` · ${view.health.kbps}k` : ""}{view.restarts ? ` · ${view.restarts} restarts` : ""}</p> : <p className="mb-2 font-mono text-[12px] text-white/60">{view?.settings.destIds.length ? `${view.settings.destIds.length} destination${view.settings.destIds.length === 1 ? "" : "s"} ticked` : "No vertical destination ticked (desk › Encoder)."}</p>}
-      <button type="button" data-testid="deck-vertical-toggle" data-armed={armed ? "1" : undefined} disabled={busy || !view || (!live && !view.settings.destIds.length)} onClick={() => void tap()}
+      {live ? <p className="mb-2 truncate font-mono text-[12px] text-white/70">→ {view.hosts.join(", ")}{view.health.fps !== null ? ` · ${view.health.fps.toFixed(0)} fps` : ""}{view.health.kbps !== null ? ` · ${view.health.kbps}k` : ""}{view.restarts ? ` · ${view.restarts} restarts` : ""}</p> : <p className="mb-2 font-mono text-[12px] text-white/60">{`${view?.settings.destIds.length ?? 0} destination${view?.settings.destIds.length === 1 ? "" : "s"}${view?.settings.relay ? " + relay /vertical" : ""}`}</p>}
+      <button type="button" data-testid="deck-vertical-toggle" data-armed={armed ? "1" : undefined} disabled={busy || !view || (!live && !view.settings.destIds.length && !view.settings.relay)} onClick={() => void tap()}
         className={`min-h-14 w-full touch-manipulation rounded-2xl px-3 py-2 text-[17px] font-bold select-none disabled:opacity-35 ${live ? "border-2 border-[#f97066] text-[#fda29b]" : "bg-white/10 text-white"} ${armed ? "ring-4 ring-[#fdb022] ring-offset-2 ring-offset-[#0b0b0f]" : ""}`}>
         {armed ? "Tap again to confirm" : busy ? "…" : live ? "Stop vertical" : "Start vertical"}
       </button>

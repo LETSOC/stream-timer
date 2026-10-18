@@ -2186,7 +2186,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
   const [relay, setRelay] = useState<RelayView | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
-  const [preview, setPreview] = useState<RtmpChannelId | null>(null)
+  const [preview, setPreview] = useState<RtmpChannelId | "vertical" | null>(null)
   const load = useCallback(async () => {
     const response = await fetch("/api/relay", { cache: "no-store" }).catch(() => null)
     if (!response || !response.ok) return
@@ -2232,14 +2232,14 @@ function RelayCard({ dests }: { dests: Dest[] }) {
         <ConfirmButton data-testid="relay-stop" className={pillClass("danger", "sm")} disabled={busy || !relay?.enabled} confirmLabel="Stop all forwards? Channels keep publishing · confirm" onConfirm={() => void act({ action: "stop" }, "Forwards stopped. Channels keep publishing to the relay.")}>Stop forwards</ConfirmButton>
       </div>
       <ProgramSection relay={relay} busy={busy} act={act} />
-      {(["slate", "capture"] as const).map((name) => {
-        const info = relay?.paths[name]
+      {(["slate", "capture", "vertical"] as const).map((name) => {
+        const info = (relay?.paths as Partial<Record<string, RelayPathView>> | undefined)?.[name]
         const enabled = new Map((info?.forwards ?? []).map((item) => [item.destId, item]))
         return (
           <div key={name} data-testid={`relay-path-${name}`} className="space-y-2 rounded-xl border border-black/10 p-2">
             <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[12px]">
               <span className="font-bold">/{name}</span>
-              <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (set ${name === "slate" ? "Slate" : "Browser capture"} → Relay)`}</span>
+              <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (${name === "vertical" ? "start Vertical 9:16 with “Also publish to relay”" : `set ${name === "slate" ? "Slate" : "Browser capture"} → Relay`})`}</span>
             </div>
             {dests.length === 0 ? <p className="font-mono text-[12px] text-black/60">Add a destination below to forward to.</p> : null}
             <ul className="space-y-1">
@@ -2266,7 +2266,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
             {info && (info.forwards.length > 0 || info.source) && info.ready ? <DiagnosisLine testid={`relay-diagnosis-${name}`} value={info.diagnosis} /> : null}
             <Pill size="sm" tone="outline" data-testid={`relay-preview-${name}`} aria-pressed={preview === name} disabled={!info?.ready} onClick={() => setPreview(preview === name ? null : name)}>{preview === name ? "Hide preview" : "Preview what the relay receives"}</Pill>
             {preview === name && info?.ready ? (
-              <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
+              <div className={`relative overflow-hidden rounded-lg bg-black ${name === "vertical" ? "mx-auto aspect-[9/16] max-w-[240px]" : "aspect-video"}`}>
                 <StreamPlayer src={`/api/relay/hls/${name}/index.m3u8`} />
               </div>
             ) : null}

@@ -19,7 +19,10 @@ import { destinationFingerprint, directChannelDests, readChannelStatus, killGrou
 import { listDestinations, resolveDestination } from "@/lib/rtmp-destinations"
 import { diagnose, EMPTY_HEALTH, healthFromSamples, parseProgressBlocks, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 
-export const RELAY_PATHS = ["slate", "capture"] as const
+export const RELAY_PATHS = ["slate", "capture", "vertical"] as const
+/** Paths an RTMP channel (lib/encoder.ts) publishes; /vertical is published by the Vertical output (lib/vertical.ts). */
+export const CHANNEL_PATHS = ["slate", "capture"] as const
+export const VERTICAL_PATH = "vertical"
 export type RelayPath = (typeof RELAY_PATHS)[number]
 
 const root = () => process.cwd()
@@ -125,7 +128,7 @@ export function validPullUrl(url: string): boolean {
 export function readSettings(): RelaySettings {
   const raw = readJson<Partial<RelaySettings>>(file("settings.json"))
   const list = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [])
-  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture) }, programArmed: raw?.programArmed === true,
+  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture), vertical: list(raw?.forwards?.vertical) }, programArmed: raw?.programArmed === true,
     backupPullUrl: typeof raw?.backupPullUrl === "string" && validPullUrl(raw.backupPullUrl) ? raw.backupPullUrl : "",
     failover: parseFailover(raw?.failover),
     lanIngest: raw?.lanIngest === true,
@@ -136,7 +139,7 @@ function writeSettings(settings: RelaySettings) {
   writePrivate(file("settings.json"), JSON.stringify(settings, null, 2))
 }
 
-type Credentials = { publishUser: string; publishPass: string; readUser: string; readPass: string; /** OBS's own publish login, for /program only. */ programUser?: string; programPass?: string; /** Backup publisher's own login, for /program-backup only. */ backupUser?: string; backupPass?: string }
+type Credentials = { publishUser: string; publishPass: string; readUser: string; readPass: string; /** OBS's own publish login, for /program only. */ programUser?: string; programPass?: string; /** Backup publisher's own login, for /program-backup only. */ backupUser?: string; backupPass?: string; /** Vertical (9:16) output's publish login, for /vertical only, localhost only. */ verticalUser?: string; verticalPass?: string }
 export const PROGRAM_PATH = "program"
 export const BACKUP_PATH = "program-backup"
 function token(bytes = 18) {
@@ -145,12 +148,12 @@ function token(bytes = 18) {
 export function credentials(): Credentials {
   const existing = readJson<Credentials>(file("credentials.json"))
   if (existing?.publishPass && existing.readPass) {
-    if (existing.programUser && existing.programPass && existing.backupUser && existing.backupPass) return existing
-    const upgraded = { ...existing, programUser: existing.programUser || `obs_${token(4)}`, programPass: existing.programPass || token(), backupUser: existing.backupUser || `bak_${token(4)}`, backupPass: existing.backupPass || token() }
+    if (existing.programUser && existing.programPass && existing.backupUser && existing.backupPass && existing.verticalUser && existing.verticalPass) return existing
+    const upgraded = { ...existing, programUser: existing.programUser || `obs_${token(4)}`, programPass: existing.programPass || token(), backupUser: existing.backupUser || `bak_${token(4)}`, backupPass: existing.backupPass || token(), verticalUser: existing.verticalUser || `vrt_${token(4)}`, verticalPass: existing.verticalPass || token() }
     writePrivate(file("credentials.json"), JSON.stringify(upgraded))
     return upgraded
   }
-  const created = { publishUser: `pub_${token(4)}`, publishPass: token(), readUser: `read_${token(4)}`, readPass: token(), programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token() }
+  const created = { publishUser: `pub_${token(4)}`, publishPass: token(), readUser: `read_${token(4)}`, readPass: token(), programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token(), verticalUser: `vrt_${token(4)}`, verticalPass: token() }
   writePrivate(file("credentials.json"), JSON.stringify(created))
   return created
 }
@@ -216,7 +219,13 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     `  - user: ${JSON.stringify(creds.publishUser)}`,
     `    pass: ${JSON.stringify(creds.publishPass)}`,
     `    ips: ${local}`,
-    `    permissions: [${RELAY_PATHS.map((name) => `{ action: publish, path: ${name} }`).join(", ")}]`,
+    `    permissions: [${CHANNEL_PATHS.map((name) => `{ action: publish, path: ${name} }`).join(", ")}]`,
+    ...(creds.verticalUser && creds.verticalPass ? [
+      `  - user: ${JSON.stringify(creds.verticalUser)}`,
+      `    pass: ${JSON.stringify(creds.verticalPass)}`,
+      `    ips: ${local}`,
+      `    permissions: [{ action: publish, path: ${VERTICAL_PATH} }]`,
+    ] : []),
     ...(program ? [
       `  - user: ${JSON.stringify(creds.programUser)}`,
       `    pass: ${JSON.stringify(creds.programPass)}`,
@@ -270,7 +279,8 @@ function mediamtxVersion(bin: string): string | null {
 
 export function relayPublishUrl(name: RelayPath): string {
   const c = credentials()
-  return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(c.publishUser)}&pass=${encodeURIComponent(c.publishPass)}`
+  const [user, pass] = name === VERTICAL_PATH ? [c.verticalUser ?? "", c.verticalPass ?? ""] : [c.publishUser, c.publishPass]
+  return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`
 }
 export function relayReadUrl(name: RelayPath | typeof PROGRAM_PATH | typeof BACKUP_PATH): string {
   const c = credentials()
@@ -357,7 +367,7 @@ function adopt(loops: OwnRelayLoop[]) {
   for (const loop of loops) {
     let key: string | null = null
     if (loop.tag === "mediamtx") key = "mediamtx"
-    const fwd = /^forward:(slate|capture):([^:]+):dest=[0-9a-f]{16}$/.exec(loop.tag)
+    const fwd = /^forward:(slate|capture|vertical):([^:]+):dest=[0-9a-f]{16}$/.exec(loop.tag)
     if (fwd) key = forwardKey(fwd[1] as RelayPath, fwd[2])
     if (!key || loopAlive(key)?.pid === loop.pid) continue
     if (loopAlive(key)) continue // a different live one owns the key; the reconcile pass will clean up
@@ -670,7 +680,19 @@ async function killForwardsUnlocked() {
     if (/^fwd-.*\.json$/.test(name)) fs.rmSync(file(name), { force: true })
   }
 }
-const publishingChannels = () => directChannelDests().filter((item) => item.running && item.relay)
+const publishingChannels = () => [...directChannelDests().filter((item) => item.running && item.relay), ...(verticalPublishing() ? [{ channel: VERTICAL_PATH, running: true, relay: true }] : [])]
+/** The Vertical output's loop is alive (its pidfile names a running relay-loop.sh). Read here, not via lib/vertical (that imports this module). */
+/** Destinations the Vertical output pushes to directly (fingerprints from its pidfile), as "direct" publishers. */
+export function verticalDirectDests(): { channel: string; running: boolean; dest?: string; relay?: boolean }[] {
+  const meta = readJson<{ pid?: number; dests?: unknown }>(path.join(dataDir(), "vertical", "vertical.json"))
+  if (!meta?.pid || !Array.isArray(meta.dests) || !pidRunsScript(meta.pid, LOOP())) return []
+  return meta.dests.filter((d): d is string => typeof d === "string").map((dest) => ({ channel: VERTICAL_PATH, running: true, dest }))
+}
+const allDirectDests = () => [...directChannelDests(), ...verticalDirectDests()]
+export function verticalPublishing(): boolean {
+  const meta = readJson<{ pid?: number; relay?: boolean }>(path.join(dataDir(), "vertical", "vertical.json"))
+  return Boolean(meta?.pid && meta.relay !== false && pidRunsScript(meta.pid, LOOP()))
+}
 
 async function stopServerIfIdleUnlocked() {
   const settings = readSettings()
@@ -740,12 +762,12 @@ export function forwardConflict(target: { path: RelayPath; dest: string }, forwa
   const other = forwards.find((item) => item.dest === target.dest && item.path !== target.path)
   if (other) return `Relay /${other.path} already forwards to this destination. One stream key takes one publisher.`
   const channel = direct.find((item) => item.running && !item.relay && item.dest === target.dest)
-  if (channel) return `The ${channel.channel === "capture" ? "Browser capture" : "Slate"} stream publishes to this destination directly. Stop it or pick another destination.`
+  if (channel) return `The ${channel.channel === "capture" ? "Browser capture" : channel.channel === VERTICAL_PATH ? "Vertical" : "Slate"} stream publishes to this destination directly. Stop it or pick another destination.`
   return null
 }
 
 export function setForward(name: RelayPath, destId: string, on: boolean): Promise<RelayResult> {
-  const direct = directChannelDests()
+  const direct = allDirectDests()
   return withLock(async () => {
     const destination = resolveDestination(destId)
     if (!destination) return { ok: false, status: 404, error: "No such destination." }
@@ -778,7 +800,7 @@ async function reconcileUnlocked() {
         const destination = resolveDestination(destId)
         if (!destination) continue
         // Never become a second publisher on a key a direct channel is already using.
-        if (forwardConflict({ path: name, dest: destinationFingerprint(destination.url) }, [], directChannelDests())) continue
+        if (forwardConflict({ path: name, dest: destinationFingerprint(destination.url) }, [], allDirectDests())) continue
         wanted.set(forwardKey(name, destId), { name, destId, url: destination.url, tag: forwardTag(name, destId, destinationFingerprint(destination.url)) })
       }
     }
@@ -786,7 +808,7 @@ async function reconcileUnlocked() {
   // Stop forwards no longer wanted (or whose destination URL changed), including unknown leftovers.
   for (const loop of findRelayLoops()) {
     if (loop.tag === "mediamtx" || isVerticalTag(loop.tag)) continue
-    const fwd = /^forward:(slate|capture):([^:]+):/.exec(loop.tag)
+    const fwd = /^forward:(slate|capture|vertical):([^:]+):/.exec(loop.tag)
     const key = fwd ? forwardKey(fwd[1] as RelayPath, fwd[2]) : null
     const want = key ? wanted.get(key) : undefined
     if (!want || want.tag !== loop.tag) {
@@ -895,9 +917,9 @@ export async function relayStatus(): Promise<RelayStatus> {
   const paths = {} as Record<RelayPath, RelayPathStatus>
   for (const name of RELAY_PATHS) {
     const info = api?.get(name)
-    const channel = readChannelStatus(name)
-    const source = channel.running && channel.relay ? channel.health : null
-    const expect = { fps: 30, kbps: channel.running && channel.relay && channel.bitrateK ? channel.bitrateK + 128 : null }
+    const channel = name === VERTICAL_PATH ? null : readChannelStatus(name)
+    const source = channel?.running && channel.relay ? channel.health : null
+    const expect = { fps: 30, kbps: name === VERTICAL_PATH ? 4500 + 128 : channel?.running && channel.relay && channel.bitrateK ? channel.bitrateK + 128 : null }
     const forwards = settings.forwards[name].filter((id) => dests.has(id)).map((destId): RelayForwardStatus => {
       const key = forwardKey(name, destId)
       const meta = loopAlive(key)
@@ -908,13 +930,13 @@ export async function relayStatus(): Promise<RelayStatus> {
       const errorLine = [...lines].reverse().find((line) => /error|failed|refused|timed out|denied|not found/i.test(line) && !/^\[relay-loop/.test(line))
       const dest = dests.get(destId)!
       const resolved = resolveDestination(destId)
-      const blocked = !meta && resolved ? forwardConflict({ path: name, dest: destinationFingerprint(resolved.url) }, [], directChannelDests()) : null
+      const blocked = !meta && resolved ? forwardConflict({ path: name, dest: destinationFingerprint(resolved.url) }, [], allDirectDests()) : null
       if (blocked && settings.enabled) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, reconnects: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
       const health = meta && info?.ready ? healthFromSamples(parseProgressBlocks(tailOf(key, 32768)).slice(-13), 5, logAgeMs(key), expect) : EMPTY_HEALTH
       return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true, health }
     })
     const outKbps = forwards.reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
-    const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : "Browser capture", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
+    const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : name === "capture" ? "Browser capture" : "Vertical", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
     paths[name] = { name, ready: info?.ready === true, publisher: info?.source?.type ?? null, tracks: info?.tracks ?? [], readers: info?.readers.length ?? 0, bytesReceived: info?.bytesReceived ?? 0, forwards, source, outKbps, diagnosis }
   }
   const prog = api?.get(PROGRAM_PATH)
@@ -936,7 +958,7 @@ export async function relayStatus(): Promise<RelayStatus> {
   }
   const lastLines = tailOf("mediamtx").split("\n").filter((line) => /ERR|FATAL/.test(line))
   // Upload estimate: every forward plus any channel publishing straight to a destination.
-  const direct = RELAY_PATHS.map((name) => readChannelStatus(name)).filter((item) => item.running && !item.relay).reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
+  const direct = CHANNEL_PATHS.map((name) => readChannelStatus(name)).filter((item) => item.running && !item.relay).reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
   await refreshProgramSources()
   let pullFrom: string | null = null
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
@@ -955,7 +977,7 @@ export async function relayStatus(): Promise<RelayStatus> {
     bin,
     version: bin ? mediamtxVersion(bin) : null,
     enabled: settings.enabled,
-    publishing: RELAY_PATHS.filter((name) => directChannelDests().some((item) => item.channel === name && item.running && item.relay)),
+    publishing: RELAY_PATHS.filter((name) => (name === VERTICAL_PATH ? verticalPublishing() : directChannelDests().some((item) => item.channel === name && item.running && item.relay))),
     running: mtx !== null,
     apiUp: api !== null,
     adopted: mtx?.adopted === true,
