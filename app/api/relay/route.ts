@@ -1,6 +1,6 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
-import { armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, disarmProgram, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, disarmProgram, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -43,6 +43,8 @@ export async function POST(request: Request) {
       return Response.json(programObsUrl(), { headers: NO_STORE })
     case "reveal-backup-srt":
       return Response.json(backupSrtUrl(), { headers: NO_STORE })
+    case "webrtc-preview":
+      return reply(await setWebrtcPreview(body.on === true))
     case "srt-backup":
       return reply(await setSrtBackup({ on: body.on, passphrase: body.passphrase }))
     case "reveal-backup":

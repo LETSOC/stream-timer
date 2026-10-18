@@ -36,6 +36,13 @@ const port = (name: string, fallback: number) => {
   return Number.isInteger(value) && value > 0 && value < 65536 ? value : fallback
 }
 export const relayPorts = () => ({ rtmp: port("RELAY_RTMP_PORT", 19350), hls: port("RELAY_HLS_PORT", 18888), api: port("RELAY_API_PORT", 19997) })
+/** WebRTC (WHEP) preview: signalling HTTP on 127.0.0.1 (proxied), media on UDP/TCP `ice` (one port each). */
+export const webrtcPorts = () => ({ http: port("RELAY_WEBRTC_PORT", 18889), ice: port("RELAY_WEBRTC_ICE_PORT", 8189) })
+/** Where WebRTC media listens: all interfaces when the desk is served to the LAN (BIND_HOST), else loopback. */
+export function webrtcIceHost(env: Record<string, string | undefined> = process.env): string {
+  const b = env.BIND_HOST?.trim()
+  return b && !/^(127\.|localhost$|::1$)/.test(b) ? (b === "::" ? "0.0.0.0" : b) : "127.0.0.1"
+}
 /** Interface MediaMTX binds. Keep 127.0.0.1: the app proxies the preview; publishers are local. */
 const bindHost = () => process.env.RELAY_BIND || "127.0.0.1"
 /** Where the RTMP ingest listens when "Accept program ingest from LAN" is on. */
@@ -125,6 +132,8 @@ export type RelaySettings = {
   srtBackup: boolean
   /** Optional SRT encryption for /program-backup publishers ("" = off; 10–79 chars). */
   srtPassphrase: string
+  /** Fast (WebRTC/WHEP, read-only) operator previews. Default on; off = HLS only and `webrtc: no`. */
+  webrtcPreview: boolean
 }
 export const SRT_LATENCY_US = 300_000
 export function srtPort(): number { return Number(process.env.SRT_PORT) || 8890 }
@@ -149,6 +158,7 @@ export function readSettings(): RelaySettings {
     lanIngest: raw?.lanIngest === true,
     mdnsName: cleanMdnsName(raw?.mdnsName) ?? DEFAULT_MDNS_NAME,
     srtBackup: raw?.srtBackup === true,
+    webrtcPreview: raw?.webrtcPreview !== false,
     srtPassphrase: typeof raw?.srtPassphrase === "string" && srtPassphraseError(raw.srtPassphrase) === null ? raw.srtPassphrase : "",
   }
 }
@@ -195,7 +205,7 @@ export function rotateProgramCredentials(which: "main" | "backup" = "main"): Pro
  * Internal publishers may publish to slate/capture only; OBS's login (only while `programArmed`)
  * may publish to /program only.
  */
-export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string; /** SRT for the Backup publisher (bound like RTMP ingest) */ srt?: { port: number; passphrase: string } }): string {
+export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string; /** SRT for the Backup publisher (bound like RTMP ingest) */ srt?: { port: number; passphrase: string }; /** WHEP read-only previews */ webrtc?: { httpPort: number; iceHost: string; icePort: number; additionalHosts: string[] } }): string {
   const { host, ports, creds } = input
   // LAN ingest: only the RTMP listener moves; HLS and the API stay on `host`. Only the program/backup
   // publish logins may connect from other addresses, and only to publish their own path. Reads,
@@ -217,7 +227,19 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     "rtsp: no",
     `rtspAddress: ${host}:${ports.rtmp + 1}`,
     ...(srt ? ["srt: yes", `srtAddress: ${lan ? input.ingestHost : host}:${srt.port}`] : ["srt: no"]),
-    "webrtc: no",
+    // WebRTC: reads only. Signalling on 127.0.0.1 (the app proxies it behind operator auth); no
+    // publisher login can reach it (OBS logins are RTMP/SRT; internal publishers are local RTMP).
+    ...(input.webrtc ? [
+      "webrtc: yes",
+      `webrtcAddress: ${host}:${input.webrtc.httpPort}`,
+      "webrtcEncryption: no",
+      "webrtcAllowOrigins: ['*']",
+      `webrtcLocalUDPAddress: ${input.webrtc.iceHost}:${input.webrtc.icePort}`,
+      `webrtcLocalTCPAddress: ${input.webrtc.iceHost}:${input.webrtc.icePort}`,
+      "webrtcIPsFromInterfaces: yes",
+      `webrtcAdditionalHosts: [${input.webrtc.additionalHosts.map((h) => JSON.stringify(h)).join(", ")}]`,
+      "webrtcICEServers2: []",
+    ] : ["webrtc: no"]),
     "moq: no",
     "playback: no",
     "metrics: no",
@@ -457,7 +479,23 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
 }
 
 function desiredConfig() {
-  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined, srt: readSettings().srtBackup ? { port: srtPort(), passphrase: readSettings().srtPassphrase } : undefined })
+  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined, srt: readSettings().srtBackup ? { port: srtPort(), passphrase: readSettings().srtPassphrase } : undefined, webrtc: webrtcConfig() })
+}
+function webrtcConfig() {
+  if (!readSettings().webrtcPreview) return undefined
+  const iceHost = webrtcIceHost()
+  const lan = iceHost === "127.0.0.1" ? null : lanIp()
+  return { httpPort: webrtcPorts().http, iceHost, icePort: webrtcPorts().ice, additionalHosts: lan ? [lan] : [] }
+}
+export function relayWebrtcOrigin(): { origin: string; authorization: string } | null {
+  return readSettings().webrtcPreview && relayRunning() ? { origin: `http://127.0.0.1:${webrtcPorts().http}`, authorization: basicAuth() } : null
+}
+export function setWebrtcPreview(on: boolean): Promise<RelayResult> {
+  return withLock(async () => {
+    writeSettings({ ...readSettings(), webrtcPreview: on })
+    if (relayRunning()) writeConfigIfChanged()
+    return { ok: true, note: on ? "Fast previews (WebRTC) on." : "Previews use HLS (~3s)." }
+  })
 }
 function writeConfigIfChanged() {
   const yml = desiredConfig()
@@ -998,7 +1036,7 @@ export function parseIngestLog(log: string): { listen: string | null; lastReject
 }
 
 export type BackupStatus = { srt: { on: boolean; passphraseSet: boolean; port: number }; lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings; audioTrack: ProgramStatus["audioTrack"] }
-export type RelayStatus = { ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
+export type RelayStatus = { webrtc: { on: boolean; icePort: number; iceHost: string }; ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 /** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
 export function programAudioTrack(prog: Pick<ApiPath, "tracks" | "tracks2">): ProgramStatus["audioTrack"] {
@@ -1076,12 +1114,14 @@ export async function relayStatus(): Promise<RelayStatus> {
   let pullFrom: string | null = null
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
   const bk = api?.get(BACKUP_PATH)
+  const webrtcPreview = settings.webrtcPreview
   const backup: BackupStatus = { srt: { on: settings.srtBackup, passphraseSet: settings.srtPassphrase !== "", port: srtPort() }, lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover, audioTrack: bk?.ready ? programAudioTrack(bk) : null }
   const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
   // Live bind from MediaMTX itself (the startup log line scrolls out of the tail on a busy relay).
   const live = api ? await liveGlobalConfig() : null
   const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: (live?.rtmpAddress !== "?" ? live?.rtmpAddress : undefined) ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), mdnsUrl: mdnsServerUrl(), mdns: mdnsStatus(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
   return {
+    webrtc: { on: webrtcPreview, icePort: webrtcPorts().ice, iceHost: webrtcIceHost() },
     ingest,
     backup,
     program,
