@@ -2022,7 +2022,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: { on: boolean; passphraseSet: boolean; port: number }; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -2122,6 +2122,50 @@ function CredRow({ label, value, copyLabel, testid }: { label: string; value: st
 }
 
 /** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
+/** Optional SRT ingest for the Backup computer (UDP): additive, RTMP keeps working. */
+function SrtBackup({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const srt = relay?.backup?.srt
+  const [srtUrl, setSrtUrl] = useState<{ url: string | null; lan: boolean; port: number; note: string } | null>(null)
+  const [pp, setPp] = useState("")
+  useEffect(() => {
+    if (!srtUrl) return
+    const id = window.setTimeout(() => setSrtUrl(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [srtUrl])
+  if (!srt || relay?.backup?.pullFrom) return null
+  async function reveal() {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup-srt" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    setSrtUrl((await response.json().catch(() => null)) as typeof srtUrl)
+  }
+  const ppError = pp.trim() && (pp.trim().length < 10 || pp.trim().length > 79) ? "10 to 79 characters" : null
+  return (
+    <div data-testid="backup-srt" className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" data-testid="backup-srt-on" className="mt-0.5 size-4 shrink-0" checked={srt.on} disabled={busy} onChange={(e) => void act({ action: "srt-backup", on: e.target.checked }, e.target.checked ? `Backup also accepts SRT on UDP ${srt.port}.` : "SRT for Backup is off.")} />
+        <span>Also accept Backup over SRT (UDP {srt.port}) · for OBS 2 on Wi-Fi. RTMP keeps working.</span>
+      </label>
+      {srt.on ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input data-testid="backup-srt-passphrase" type="password" autoComplete="off" placeholder={srt.passphraseSet ? "passphrase set (hidden) · type a new one" : "SRT passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
+            <Pill size="sm" data-testid="backup-srt-passphrase-save" disabled={busy || !pp.trim() || Boolean(ppError)} onClick={() => { void act({ action: "srt-backup", passphrase: pp.trim() }, "SRT passphrase saved: update OBS 2."); setPp(""); setSrtUrl(null) }}>Set</Pill>
+            {srt.passphraseSet ? <Pill size="sm" tone="outline" data-testid="backup-srt-passphrase-clear" disabled={busy} onClick={() => { void act({ action: "srt-backup", passphrase: "" }, "SRT passphrase removed."); setSrtUrl(null) }}>No passphrase</Pill> : null}
+          </div>
+          {ppError ? <p className="text-[#b42318]">Passphrase: {ppError}</p> : null}
+          <Pill size="sm" tone="outline" data-testid="backup-srt-reveal" onClick={() => (srtUrl ? setSrtUrl(null) : void reveal())}>{srtUrl ? "Hide SRT URL" : "SRT URL for OBS 2"}</Pill>
+          {srtUrl?.url ? (
+            <div data-testid="backup-srt-obs" className="space-y-1 rounded-lg bg-black/5 p-2">
+              <CredRow label="SRT" value={srtUrl.url} copyLabel="SRT URL for OBS 2" testid="backup-srt-url" />
+              <p className={srtUrl.lan ? "text-black/70" : "text-[#b45309]"}>{srtUrl.note} latency=300000 is 300 ms (µs in OBS); raise to 500000 on bad Wi-Fi. macOS: allow incoming UDP {srtUrl.port} for mediamtx (System Settings › Network › Firewall). Hides in 30s.</p>
+            </div>
+          ) : srtUrl ? <p className="text-black/70">{srtUrl.note}</p> : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
   const backup = relay?.backup
   const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null; mdnsServer?: string | null } | null>(null)
@@ -2160,6 +2204,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
           <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
         </div>
       ) : null}
+      <SrtBackup relay={relay} busy={busy} act={act} />
       <div className="flex flex-wrap items-center gap-2">
         <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
         <Pill size="sm" data-testid="backup-pull-save" disabled={busy || !pull.trim() || pullUrlError(pull.trim()) !== null} onClick={() => { void act({ action: "backup-pull", url: pull.trim() }, "Backup pulls from the URL."); setPull("") }}>Pull</Pill>

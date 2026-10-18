@@ -2,10 +2,12 @@
  * Per-source network RTT to each program publisher (pure parts). Samples every ~5s, 60s window.
  * ok / high (amber: >50ms or any loss) / bad (red: >150ms or loss >10%) / lost (no replies).
  */
-export type RttMethod = "icmp" | "tcp"
+export type RttMethod = "icmp" | "tcp" | "srt"
 export type RttSample = { at: number; ms: number | null; method: RttMethod | null }
 export type RttLevel = "ok" | "high" | "bad" | "lost"
-export type RttView = { host: string | null; via: "push" | "pull" | null; method: RttMethod | null; lastMs: number | null; avgMs: number | null; maxMs: number | null; lossPct: number; samples: number; level: RttLevel | null }
+export type RttView = { host: string | null; via: "push" | "pull" | null; method: RttMethod | null; lastMs: number | null; avgMs: number | null; maxMs: number | null; lossPct: number; samples: number; level: RttLevel | null; /** publisher protocol (null = unknown/pull) */ protocol?: "rtmp" | "srt" | null; /** SRT link stats from MediaMTX (SRT publishers only) */ srt?: SrtLink | null }
+/** SRT link stats of one publisher, from MediaMTX /v3/srtconns. Loss and retransmits are cumulative for the connection. */
+export type SrtLink = { rttMs: number | null; lossPct: number; lost: number; retrans: number; mbps: number | null }
 
 export const RTT_WINDOW_MS = 60_000
 export const RTT_INTERVAL_MS = 5_000
@@ -46,9 +48,22 @@ export function rttLevel(lastMs: number | null, avgMs: number | null, lossPct: n
 /** Card label: "ping 7ms · 0%" / "tcp 23ms · 8% loss" / "—". */
 export function rttLabel(v: RttView | null | undefined): string {
   if (!v || !v.host || !v.samples) return "—"
-  if (v.level === "lost") return `lost · ${v.lossPct}%`
+  const proto = v.protocol ? `${v.protocol.toUpperCase()} · ` : ""
+  if (v.srt) {
+    const ms = v.srt.rttMs
+    return `${proto}${ms === null ? "–" : ms < 10 ? ms.toFixed(1) : Math.round(ms)}ms · ${v.srt.lossPct}% loss · ${v.srt.retrans} retx`
+  }
+  if (v.level === "lost") return `${proto}lost · ${v.lossPct}%`
   const ms = v.lastMs ?? v.avgMs
-  return `${v.method === "tcp" ? "tcp" : "ping"} ${ms === null ? "–" : ms < 10 ? ms.toFixed(1) : Math.round(ms)}ms${v.lossPct ? ` · ${v.lossPct}% loss` : ""}`
+  return `${proto}${v.method === "tcp" ? "tcp" : "ping"} ${ms === null ? "–" : ms < 10 ? ms.toFixed(1) : Math.round(ms)}ms${v.lossPct ? ` · ${v.lossPct}% loss` : ""}`
+}
+
+/** Level for an SRT link: its own RTT and packet loss (no ping involved). */
+export function srtLevel(s: SrtLink): RttLevel {
+  if (s.rttMs === null) return "lost"
+  if (s.rttMs > 150 || s.lossPct > 10) return "bad"
+  if (s.rttMs > 50 || s.lossPct > 1) return "high"
+  return "ok"
 }
 
 /** Log state names: ok / high / lost (high covers amber and red). */

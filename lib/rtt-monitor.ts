@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process"
 import net from "node:net"
 import { programPublisherHosts } from "@/lib/relay"
-import { logState, parsePingMs, pingArgs, rttLevel, rttStats, RTT_INTERVAL_MS, type RttMethod, type RttSample, type RttView } from "@/lib/rtt"
+import { srtLevel, logState, parsePingMs, pingArgs, rttLevel, rttStats, RTT_INTERVAL_MS, type RttMethod, type RttSample, type RttView } from "@/lib/rtt"
 
 type Src = "main" | "backup"
-type State = { host: string | null; via: "push" | "pull" | null; samples: RttSample[]; logged: string | null; icmpFails: number }
+type State = { protocol: "rtmp" | "srt" | null; srt: import("@/lib/rtt").SrtLink | null; host: string | null; via: "push" | "pull" | null; samples: RttSample[]; logged: string | null; icmpFails: number }
 const KEY = Symbol.for("stream-timer.rtt-monitor")
 type Holder = { [KEY]?: { timer: NodeJS.Timeout | null; summaryAt: number; src: Record<Src, State> } }
-const fresh = (): State => ({ host: null, via: null, samples: [], logged: null, icmpFails: 0 })
+const fresh = (): State => ({ protocol: null, srt: null, host: null, via: null, samples: [], logged: null, icmpFails: 0 })
 function mon() {
   const h = globalThis as Holder
   h[KEY] ??= { timer: null, summaryAt: Date.now(), src: { main: fresh(), backup: fresh() } }
@@ -53,7 +53,10 @@ async function measure(st: State, host: string): Promise<{ ms: number | null; me
 export function rttView(src: Src, now = Date.now()): RttView {
   const st = mon().src[src]
   const s = rttStats(st.samples, now)
-  return { host: st.host, via: st.via, method: s.method, lastMs: s.lastMs, avgMs: s.avgMs, maxMs: s.maxMs, lossPct: s.lossPct, samples: s.recent.length, level: st.host ? rttLevel(s.lastMs, s.avgMs, s.lossPct, s.recent.length) : null }
+  const base = { host: st.host, via: st.via, method: s.method, lastMs: s.lastMs, avgMs: s.avgMs, maxMs: s.maxMs, lossPct: s.lossPct, samples: s.recent.length, protocol: st.protocol, srt: st.srt }
+  // SRT: MediaMTX's own link stats (RTT, packet loss) instead of ping.
+  if (st.srt) return { ...base, lossPct: st.srt.lossPct, level: st.host ? srtLevel(st.srt) : null }
+  return { ...base, level: st.host ? rttLevel(s.lastMs, s.avgMs, s.lossPct, s.recent.length) : null }
 }
 
 async function tick() {
@@ -69,10 +72,12 @@ async function tick() {
       return
     }
     if (pub.host !== st.host) {
-      log(`${LABEL[src]}: publisher ${pub.host} (${pub.via})`)
+      log(`${LABEL[src]}: publisher ${pub.host} (${pub.via}${pub.protocol ? `, ${pub.protocol.toUpperCase()}` : ""})`)
       Object.assign(st, fresh(), { host: pub.host, via: pub.via })
     }
-    const r = await measure(st, pub.host)
+    st.protocol = pub.protocol ?? null
+    st.srt = pub.srt ?? null
+    const r = pub.srt ? { ms: pub.srt.rttMs, method: "srt" as const } : await measure(st, pub.host)
     st.samples.push({ at: Date.now(), ...r })
     st.samples = st.samples.filter((x) => now - x.at <= 65_000)
     const v = rttView(src)

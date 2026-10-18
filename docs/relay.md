@@ -189,3 +189,23 @@ Relay card shows the backup's audio format and warns if it isn't 48 kHz.
 Switching Main ↔ Backup never shows "Waiting for OBS": the input on air stays up while the incoming one
 plays hidden for the **switch buffer** (Transport › Program source, default 1s, 0–5s), then it
 crossfades. If the input on air is already gone, the incoming one is taken at its first frame.
+
+## Backup over SRT (OBS 2 on Wi-Fi) — optional
+
+SRT (UDP) retransmits lost packets inside its latency window, so short Wi-Fi hiccups don't stall the
+stream the way RTMP (TCP) does. It is **additive**: RTMP for Main and Backup is unchanged, and with
+the box unticked the MediaMTX config is byte-identical to before (`srt: no`).
+
+1. Desk › Relay › /program-backup: tick **Also accept Backup over SRT (UDP 8890)**. Tick **LAN ingest**
+   too (SRT binds like RTMP ingest: loopback without it). Optional: set an SRT passphrase (10–79 chars).
+2. **SRT URL for OBS 2** → Copy. It looks like
+   `srt://<lan-ip>:8890?streamid=publish:program-backup:<user>:<pass>&latency=300000&pkt_size=1316[&passphrase=…]`.
+3. OBS 2 › Settings › Stream: Service **Custom**, Server = that URL, Stream Key **blank**.
+   Output: CBR, keyframe interval 2 s, audio 48 kHz AAC. `latency` is in **µs** (300000 = 300 ms);
+   use ~3–4× the Wi-Fi RTT, up to 500000 on bad Wi-Fi.
+4. macOS firewall on the relay Mac: allow incoming connections for `mediamtx` (System Settings ›
+   Network › Firewall › Options), or SRT's **UDP 8890** is silently dropped. `SRT_PORT` overrides the port.
+
+Disarm, New key, auto-failover and auto re-arm kick SRT publishers too (`/v3/srtconns/kick`). The
+Backup card shows `SRT · 12ms · 0.3% loss · 5 retx` from MediaMTX's own SRT stats (no ping).
+New key changes the SRT URL as well — copy it again into OBS 2.
