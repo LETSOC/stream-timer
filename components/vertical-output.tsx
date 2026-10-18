@@ -30,7 +30,7 @@ export type VerticalView = {
   note?: string | null
 }
 
-type Forward = { destId: string; name: string; host: string; state: VerticalView["state"]; restarts: number; reconnects: number; error: string | null; health: Health }
+type Forward = { rawError?: string | null; destId: string; name: string; host: string; state: VerticalView["state"]; restarts: number; reconnects: number; error: string | null; health: Health }
 type VerticalPath = { ready: boolean; forwards: Forward[]; available?: { destId: string; reason: string | null }[] }
 export const FORWARD_STATE_LABEL: Record<Forward["state"], string> = { blocked: "Blocked", off: "Off", waiting: "Waiting", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 
@@ -151,12 +151,12 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
                 {fwd ? <span data-testid={`vertical-fwd-state-${d.id}`} className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${tone(fwd.state)}`}>{FORWARD_STATE_LABEL[fwd.state]}{fwd.reconnects ? ` · ${fwd.reconnects}↻` : ""}</span> : null}
               </label>
               {fwd && fwd.state === "forwarding" && fwd.health.kbps !== null ? <p className="pl-6 text-[11px] text-[#0f6b31]">{fwd.health.fps !== null ? `${fwd.health.fps.toFixed(1)} fps · ` : ""}{fwd.health.kbps}k{fwd.health.speed ? ` · ${fwd.health.speed.toFixed(2)}x` : ""}</p> : null}
-              {fwd?.error && fwd.state !== "forwarding" ? <p data-testid={`vertical-fwd-error-${d.id}`} className={`pl-6 text-[11px] font-bold ${fwd.state === "waiting" ? "text-black/60" : "text-[#8a1c13]"}`}>{fwd.error}</p> : null}
+              {fwd?.error && fwd.state !== "forwarding" ? <p title={fwd.rawError ?? undefined} data-testid={`vertical-fwd-error-${d.id}`} className={`pl-6 text-[11px] font-bold ${fwd.state === "waiting" ? "text-black/60" : "text-[#8a1c13]"}`}>{fwd.error}</p> : null}
               {blocked ? <p data-testid={`vertical-dest-reason-${d.id}`} className="pl-6 text-[11px] font-bold text-[#8a4b06]">{reason}</p> : null}
             </div>
           )
         })}
-        <p className="text-[11px] text-black/60">Each ticked destination is its own relay forward from /vertical (ffmpeg -c copy): tick or untick while live, the encoder keeps running. Same list as Relay › /vertical.</p>
+        <p className="text-[11px] text-black/60">Each ticked destination is its own relay forward from /vertical (ffmpeg -c copy): tick or untick while live, the encoder keeps running. A rejected key backs off (up to 30s between tries).</p>
         <button type="button" data-testid="vertical-dest-add" className={pillClass("outline", "sm")} onClick={() => setForm({ ...form, open: !form.open })}>+ Add vertical destination</button>
         {form.open ? (
           <form data-testid="vertical-dest-form" className="space-y-2 rounded-xl border border-black/10 bg-[#F6F6F3] p-3" onSubmit={(e) => { e.preventDefault(); void addDest() }}>

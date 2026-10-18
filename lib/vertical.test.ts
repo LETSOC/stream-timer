@@ -1,8 +1,11 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import test from "node:test"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { verticalHealth, verticalProgress, audioArgs, cleanBg, decideAudioCopy, legacyDestIds, parseVerticalSettings, resolveEncoder, verticalCommand, verticalFilter, videoArgs, VERTICAL_TAG_RE } from "@/lib/vertical"
-import { buildMediamtxConfig, forwardConflict, isVerticalTag, parseRelayLoops } from "@/lib/relay"
+import { buildMediamtxConfig, forwardConflict, friendlyForwardError, isVerticalTag, parseRelayLoops } from "@/lib/relay"
 
 test("vertical filter fits 16:9 into 1080x1920, centred, configurable bars", () => {
   assert.equal(verticalFilter("#0000b6"), "scale=1080:-2:flags=bicubic,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x0000B6,fps=30,format=yuv420p,setsar=1")
@@ -74,4 +77,23 @@ test("same-key guard: /vertical forward refused where another path forwards or a
   assert.match(forwardConflict({ path: "vertical", dest: "f1" }, [{ path: "capture", dest: "f1" }], []) ?? "", /Relay \/capture already forwards/)
   assert.match(forwardConflict({ path: "vertical", dest: "f1" }, [], [{ channel: "slate", running: true, dest: "f1" }]) ?? "", /Slate/)
   assert.equal(forwardConflict({ path: "vertical", dest: "f1" }, [{ path: "vertical", dest: "f1" }], []), null)
+})
+
+test("forward errors become operator hints (EOF = platform hung up: key/URL/rtmps)", () => {
+  const eof = friendlyForwardError("[out#0/flv] Error opening output rtmp://live.tiktok.com/[redacted]: End of file", "rtmp://live.tiktok.com/x/y")
+  assert.match(eof, /Platform closed the connection — check the stream URL\/key/)
+  assert.match(eof, /TikTok\/Instagram keys expire each session/)
+  assert.match(eof, /rtmps:\/\//)
+  assert.doesNotMatch(friendlyForwardError("Error opening output files: End of file", "rtmps://a/b"), /use that/)
+  assert.match(friendlyForwardError("Error opening output files: Connection refused"), /Connection refused — wrong server/)
+  assert.equal(friendlyForwardError("something odd"), "something odd")
+})
+
+test("relay-loop backs off past LOOP_MAX_DELAY after LOOP_SLOW_AFTER quick failures", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loop-"))
+  const state = path.join(dir, "s.json")
+  const r = spawnSync("bash", ["-c", `LOOP_STATE_FILE=${state} LOOP_MAX_DELAY=1 LOOP_SLOW_AFTER=2 LOOP_SLOW_MAX=4 timeout 5 bash scripts/relay-loop.sh t -- false`], { encoding: "utf8" })
+  const delays = [...r.stdout.matchAll(/restarting in (\d+)s/g)].map((m) => Number(m[1]))
+  assert.deepEqual(delays.slice(0, 3), [1, 1, 2])
+  assert.ok(fs.readFileSync(state, "utf8").includes('"nextDelay":'))
 })

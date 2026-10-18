@@ -53,7 +53,7 @@ watch_progress() {
 
 write_state() {
   [[ -z "$STATE_FILE" ]] && return
-  printf '{"tag":"%s","state":"%s","restarts":%s,"reconnects":%s,"lastExit":%s,"updatedAt":%s}\n' "$TAG" "$1" "$restarts" "$reconnects" "${2:-null}" "$(date +%s)" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+  printf '{"tag":"%s","state":"%s","restarts":%s,"reconnects":%s,"lastExit":%s,"nextDelay":%s,"updatedAt":%s}\n' "$TAG" "$1" "$restarts" "$reconnects" "${2:-null}" "${NEXT_DELAY:-null}" "$(date +%s)" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
 }
 stop() {
   echo "[relay-loop $(date '+%H:%M:%S')] stop requested"
@@ -89,8 +89,13 @@ while true; do
   restarts=$(( restarts + 1 ))
   if (( ran >= 10 )); then reconnects=$(( reconnects + 1 )); fi
   if (( ran >= 30 )); then delay=$(( MAX_DELAY < 2 ? MAX_DELAY : 2 )); fi
+  # LOOP_SLOW_AFTER quick failures (<10s) in a row (e.g. an ingest rejecting the key with EOF): stop
+  # hammering it; the wait may grow to LOOP_SLOW_MAX instead of MAX_DELAY. A run of 10s+ resets it.
+  if (( ran < 10 )); then fast=$(( ${fast:-0} + 1 )); else fast=0; fi
+  cap=$MAX_DELAY
+  if [[ -n "${LOOP_SLOW_AFTER:-}" ]] && (( fast >= LOOP_SLOW_AFTER )); then cap=${LOOP_SLOW_MAX:-60}; fi
   echo "[relay-loop $(date '+%H:%M:%S')] exited (code $code after ${ran}s); restarting in ${delay}s"
-  write_state waiting "$code"
+  NEXT_DELAY=$delay write_state waiting "$code"
   sleep "$delay" & wait $!
-  if (( delay * 2 > MAX_DELAY )); then delay=$MAX_DELAY; else delay=$(( delay * 2 )); fi
+  if (( delay * 2 > cap )); then delay=$cap; else delay=$(( delay * 2 )); fi
 done

@@ -297,7 +297,7 @@ export function isRelayUrl(url: string): boolean {
 // ---------- processes ----------
 
 type Pidfile = { pid: number; startedAt: number; tag: string; adopted?: boolean }
-type LoopState = { state: "running" | "waiting"; restarts: number; reconnects?: number; updatedAt: number; lastExit: number | null }
+type LoopState = { state: "running" | "waiting"; restarts: number; reconnects?: number; updatedAt: number; lastExit: number | null; nextDelay?: number | null }
 
 const forwardKey = (name: RelayPath, destId: string) => `fwd-${name}-${destId.replace(/[^a-zA-Z0-9-]/g, "")}`
 function forwardTag(name: RelayPath, destId: string, fingerprint: string) {
@@ -326,7 +326,8 @@ function spawnLoop(key: string, tag: string, command: string[], opts: { redact?:
       LOOP_REDACT: opts.redact ? "1" : "",
       // Forwards: retry within 5s (a capture relaunch shouldn't leave YouTube dark for 30s), and a
       // watchdog restarts a forward whose bytes-sent stops growing for 25s. MediaMTX keeps 30s.
-      ...(opts.forward ? { LOOP_MAX_DELAY: "5", LOOP_WATCH_LOG: log, LOOP_STALL_SECS: "25", LOOP_STALL_GRACE: "30" } : {}),
+      // After 4 quick failures in a row (ingest rejecting the key), back off up to 30s instead of every 5s.
+      ...(opts.forward ? { LOOP_SLOW_AFTER: "4", LOOP_SLOW_MAX: "30", LOOP_MAX_DELAY: "5", LOOP_WATCH_LOG: log, LOOP_STALL_SECS: "25", LOOP_STALL_GRACE: "30" } : {}),
     }),
   })
   fs.closeSync(out)
@@ -860,6 +861,22 @@ function logAgeMs(key: string): number | null {
   }
 }
 
+/**
+ * Pure: an operator hint for a forward's last ffmpeg error line. "End of file" while opening the output
+ * means the ingest accepted TCP and then hung up: almost always a wrong/expired stream key, a wrong app
+ * path, or rtmp:// where the platform wants rtmps://.
+ */
+export function friendlyForwardError(line: string, url?: string): string {
+  const scheme = url?.startsWith("rtmps:") ? "rtmps" : url?.startsWith("rtmp:") ? "rtmp" : null
+  if (/End of file/i.test(line)) return `Platform closed the connection — check the stream URL/key (TikTok/Instagram keys expire each session; get a fresh one)${scheme === "rtmp" ? ". If the platform gives an rtmps:// URL, use that" : ""}.`
+  if (/Connection refused/i.test(line)) return "Connection refused — wrong server/port, or the ingest is down."
+  if (/(Connection timed out|Operation timed out|timed out)/i.test(line)) return "Timed out reaching the ingest — check the server address and your network."
+  if (/(Failed to resolve|Name or service not known|nodename nor servname)/i.test(line)) return "Can't resolve the server name — check the URL."
+  if (/(403|Forbidden|denied|Unauthorized|401)/i.test(line)) return "The platform refused the stream key (not authorised)."
+  if (/(Broken pipe|Connection reset)/i.test(line)) return "The platform dropped the connection — reconnecting."
+  return line.slice(0, 200)
+}
+
 export type ForwardState = "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"
 /** Pure: one forward's state from its loop state, path readiness and log freshness. */
 export function deriveForwardState(input: { running: boolean; loop: LoopState | null; sourceReady: boolean; logAgeMs: number | null; lastLine: string; runAgeMs: number | null }): ForwardState {
@@ -874,7 +891,7 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
 }
 
 /** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
-export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
+export type RelayForwardStatus = { /** the ffmpeg line behind `error` */ rawError?: string | null; destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 export type RelayPathStatus = { /** per saved destination: why it can't be ticked on this path (null = fine) */ available: { destId: string; reason: string | null }[]; name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 export type IngestDiag = { resyncs: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl: string | null; mdns: MdnsState; lastReject: { at: string; text: string } | null; logFile: string }
 /**
@@ -945,7 +962,7 @@ export async function relayStatus(): Promise<RelayStatus> {
       }
       if (blocked && (settings.enabled || name === VERTICAL_PATH)) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, reconnects: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
       const health = meta && info?.ready ? healthFromSamples(parseProgressBlocks(tailOf(key, 32768)).slice(-13), 5, logAgeMs(key), expect) : EMPTY_HEALTH
-      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true, health }
+      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: state === "forwarding" || state === "off" || !errorLine ? null : `${friendlyForwardError(errorLine, resolved?.url)}${state === "retrying" && loop?.nextDelay ? ` Next try in ${loop.nextDelay}s.` : ""}`, rawError: errorLine?.slice(0, 200) ?? null, adopted: meta?.adopted === true, health }
     })
     const outKbps = forwards.reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
     const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : name === "capture" ? "Browser capture" : "Vertical", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
