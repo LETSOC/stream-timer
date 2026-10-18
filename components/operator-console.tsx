@@ -1399,7 +1399,7 @@ export function OperatorConsole() {
             <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} social={socialLook(draftStage)} countdownStrokePx={visuals.countdownStrokePx} countdownStrokeColor={visuals.countdownStrokeColor} />
             )}
             {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
-            {previewScreen === "program" ? <ProgramPlayer key={programSource} scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
+            {previewScreen === "program" ? <ProgramPlayer scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
           </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 [&>*:first-child]:basis-full xl:[&>*:first-child]:basis-0 xl:[&>*:first-child]:grow">

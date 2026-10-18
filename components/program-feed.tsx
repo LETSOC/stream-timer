@@ -1,11 +1,12 @@
 "use client"
 
+import { AudioBar, usePreviewAudio } from "@/components/preview-audio"
 import { isViewerMuted } from "@/components/stream-audio-overlay"
 import { stallBackoffMs, useResumeGeneration } from "@/lib/use-resume"
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useRef, useState, type RefObject } from "react"
 import type Hls from "hls.js"
 import { PreviewBadge } from "@/components/preview-badge"
-import { controlsClass, useAutoHide } from "@/components/auto-hide"
+import { useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
@@ -250,15 +251,6 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   )
 }
 
-type AudioPref = { muted: boolean; volume: number }
-function readPref(scope: string): AudioPref {
-  try {
-    const raw = JSON.parse(window.localStorage.getItem(`program-audio:${scope}`) ?? "null") as Partial<AudioPref> | null
-    if (raw && typeof raw.muted === "boolean" && typeof raw.volume === "number") return { muted: raw.muted, volume: Math.min(1, Math.max(0, raw.volume)) }
-  } catch { /* default */ }
-  return { muted: true, volume: 0.8 }
-}
-
 /**
  * Operator preview of the OBS feed (desk hero, deck, Relay card): muted by default, with a sound toggle,
  * volume and a live level meter (WebAudio analyser on the player), remembered per device and per place.
@@ -273,17 +265,9 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const { notReadySince, readyAt } = useReadiness(isReady, now)
   const activeSince = useActiveSince(true, now)
   const load = keepLoaded(isReady, notReadySince, now)
-  const [pref, setPrefState] = useState<AudioPref>(() => (typeof window === "undefined" ? { muted: true, volume: 0.8 } : readPref(scope)))
-  const prefRef = useRef(pref)
-  const setPref = (next: AudioPref) => {
-    prefRef.current = next
-    setPrefState(next)
-    try { window.localStorage.setItem(`program-audio:${scope}`, JSON.stringify(next)) } catch { /* private mode */ }
-  }
-  const graph = useRef<{ ctx: AudioContext; gain: GainNode; analyser: AnalyserNode } | null>(null)
-  const [audioOn, setAudioOn] = useState(false)
-  const [level, setLevel] = useState<number | null>(null)
-  const audioOnRef = useRef(false)
+  // One user-owned mute state per player (scope); never reset by Main↔Backup, remounts or the WebRTC→HLS swap.
+  const audio = usePreviewAudio(videoRef, scope)
+  const { pref, audioOn, db } = audio
   // Fast preview: WebRTC (picture only) in its own element on top while muted. Sound on → HLS loads
   // underneath (this element carries the WebAudio graph), and WebRTC closes once HLS has a frame.
   // Sticky: muting again stays on HLS for this player (no swap back mid-session).
@@ -294,7 +278,7 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const wantHls = stickyHls || !pref.muted
   const [rtcFailedSeen, setRtcFailedSeen] = useState(false)
   const hlsLoad = load && (whepPath === null || wantHls || rtcFailedSeen)
-  const { lastFrameAt: hlsFrameAt, latency } = useProgramHls(videoRef, src, hlsLoad, () => audioOnRef.current)
+  const { lastFrameAt: hlsFrameAt, latency } = useProgramHls(videoRef, src, hlsLoad, audio.wantSound)
   const hlsPlaying = hlsFrameAt !== null && now - hlsFrameAt < 1000
   const rtc = useWhep(rtcRef, whepPath, load && whepPath !== null && !(wantHls && hlsPlaying))
   if (rtc.failed !== rtcFailedSeen) setRtcFailedSeen(rtc.failed)
@@ -304,104 +288,9 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt })
   const chrome = useAutoHide()
 
-  /** element → analyser → gain → speakers, gain 0 until sound is on (the gain node is the real mute). */
-  const buildGraph = useCallback(() => {
-    const video = videoRef.current
-    if (!video || graph.current) return
-    try {
-      {
-        const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        const ctx = new Ctx()
-        const source = ctx.createMediaElementSource(video)
-        const analyser = ctx.createAnalyser()
-        analyser.fftSize = 1024
-        const gain = ctx.createGain()
-        gain.gain.value = 0
-        source.connect(analyser)
-        analyser.connect(gain)
-        gain.connect(ctx.destination)
-        graph.current = { ctx, gain, analyser }
-      }
-    } catch { /* no WebAudio: element mute only */ }
-  }, [])
-  // After the page has had a tap the context starts running at once (gain 0 until the saved choice says otherwise).
-  // Before that, wait for the gesture: a suspended context can stall the element in WebKit.
-  useEffect(() => {
-    if ((navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation?.hasBeenActive) buildGraph()
-  }, [buildGraph])
-
-  /** Must run inside a user gesture: resumes the context, applies mute/volume and unmutes the element. */
-  const enableAudio = useCallback(() => {
-    const video = videoRef.current
-    if (!video) return false
-    buildGraph()
-    try {
-      if (!graph.current) return false
-      const { ctx, gain } = graph.current
-      void ctx.resume()
-      gain.gain.value = prefRef.current.muted ? 0 : prefRef.current.volume
-      // The element itself plays unmuted into the graph; the gain node is the real mute/volume.
-      video.muted = false
-      video.volume = 1
-      void video.play().catch(() => undefined)
-      audioOnRef.current = true
-      setAudioOn(true)
-      return true
-    } catch {
-      return false
-    }
-  }, [buildGraph])
-
-  // Saved "unmuted": turn sound on at the first tap/key anywhere (browsers need a gesture).
-  useEffect(() => {
-    if (pref.muted || audioOn) return
-    const once = () => enableAudio()
-    document.addEventListener("pointerdown", once, { once: true, capture: true })
-    document.addEventListener("keydown", once, { once: true, capture: true })
-    return () => {
-      document.removeEventListener("pointerdown", once, { capture: true })
-      document.removeEventListener("keydown", once, { capture: true })
-    }
-  }, [pref.muted, audioOn, enableAudio])
-
-  useEffect(() => {
-    const g = graph.current
-    if (g) g.gain.gain.value = audioOn && !pref.muted ? pref.volume : 0
-  }, [pref, audioOn])
-
-  // Meter: peak of the program audio (before the volume, so it moves while muted too), ~10 updates/s.
-  useEffect(() => {
-    if (!audioOn) return
-    const g = graph.current
-    if (!g) return
-    const data = new Float32Array(g.analyser.fftSize)
-    let raf = 0
-    let lastSet = 0
-    const tick = (t: number) => {
-      raf = window.requestAnimationFrame(tick)
-      if (t - lastSet < 100) return
-      lastSet = t
-      g.analyser.getFloatTimeDomainData(data)
-      let peak = 0
-      for (const v of data) peak = Math.max(peak, Math.abs(v))
-      setLevel(peak > 0.00001 ? 20 * Math.log10(peak) : -100)
-    }
-    raf = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(raf)
-  }, [audioOn])
-
-  useEffect(() => () => { void graph.current?.ctx.close().catch(() => undefined) }, [])
-
-  const toggle = () => {
-    const next = { ...pref, muted: !pref.muted }
-    setPref(next)
-    prefRef.current = next
-    enableAudio()
-  }
-  const db = level === null ? null : Math.max(-60, Math.round(level))
-  const pct = db === null ? 0 : Math.max(0, Math.min(100, ((db + 60) / 60) * 100))
+  // The WebRTC element never carries sound: keep it muted whatever happens.
+  useEffect(() => { if (rtcRef.current) rtcRef.current.muted = true })
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
-  const needsTap = !pref.muted && !audioOn
   return (
     <div data-testid={`program-player-${scope}`} data-display={shown} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-audio={audioOn ? (pref.muted ? "muted" : "on") : "off"} data-level-db={db ?? ""} {...chrome.bind} className={`absolute inset-0 ${className}`}>
       <div className="absolute inset-0 bg-black">
@@ -410,23 +299,7 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
         {shown === "standby" ? <Standby small /> : <PreviewBadge idle={chrome.idle} mode={whepPath === null ? null : showRtc ? "webrtc" : hlsPlaying ? "hls" : null} />}
         {shown === "reconnecting" || (shown === "connecting" && lastFrameAt === null && load) ? <span data-testid={`program-reconnecting-${scope}`} className="pointer-events-none absolute top-1.5 right-1.5 z-10 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white/80">{shown === "connecting" ? "connecting…" : "reconnecting…"}</span> : null}
       </div>
-      <div
-        data-autohide-control
-        data-testid={`program-controls-${scope}`}
-        className={`absolute right-1.5 bottom-1.5 left-1.5 z-10 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1 font-mono text-[11px] text-white ${controlsClass(chrome.shown || needsTap)}`}
-        onClick={(event) => event.stopPropagation()}
-        onPointerDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => event.stopPropagation()}
-      >
-        <button type="button" data-testid={`program-audio-toggle-${scope}`} aria-pressed={!pref.muted} onClick={toggle} className={`min-h-7 shrink-0 rounded-md px-2 font-bold ${needsTap ? "animate-pulse bg-[#D9FF43] text-black" : pref.muted ? "bg-white/15" : "bg-[#128a3e]"}`}>
-          {needsTap ? "Tap for sound" : pref.muted ? "🔇 Unmute" : "🔊 Mute"}
-        </button>
-        <input type="range" aria-label="Program preview volume" data-testid={`program-audio-volume-${scope}`} min={0} max={1} step={0.05} value={pref.volume} onChange={(event) => { const next = { ...pref, volume: Number(event.target.value) }; setPref(next); prefRef.current = next; enableAudio() }} className="h-1 w-16 min-w-0 shrink accent-[#D9FF43]" />
-        <span className="relative h-2 min-w-6 flex-1 overflow-hidden rounded-full bg-white/15" title="Program audio level (before volume)">
-          <span data-testid={`program-audio-meter-${scope}`} className={`absolute inset-y-0 left-0 rounded-full ${db !== null && db > -6 ? "bg-[#ff3c00]" : "bg-[#D9FF43]"}`} style={{ width: `${pct}%` }} />
-        </span>
-        <span className="w-14 shrink-0 text-right tabular-nums text-white/80">{audioOn ? (db === null || db <= -60 ? "silent" : `${db} dB`) : "meter off"}</span>
-      </div>
+      <AudioBar audio={audio} scope={scope} shown={chrome.shown} label="Program preview" />
     </div>
   )
 }
