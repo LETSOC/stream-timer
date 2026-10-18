@@ -5,6 +5,7 @@ import { stallBackoffMs, useResumeGeneration } from "@/lib/use-resume"
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type Hls from "hls.js"
 import { PreviewBadge } from "@/components/preview-badge"
+import { controlsClass, useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
@@ -301,6 +302,7 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const lastFrameAt = Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) >= 0 ? Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) : null
   void activeSince; void readyAt
   const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt })
+  const chrome = useAutoHide()
 
   /** element → analyser → gain → speakers, gain 0 until sound is on (the gain node is the real mute). */
   const buildGraph = useCallback(() => {
@@ -401,15 +403,17 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
   const needsTap = !pref.muted && !audioOn
   return (
-    <div data-testid={`program-player-${scope}`} data-display={shown} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-audio={audioOn ? (pref.muted ? "muted" : "on") : "off"} data-level-db={db ?? ""} className={`absolute inset-0 ${className}`}>
+    <div data-testid={`program-player-${scope}`} data-display={shown} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-audio={audioOn ? (pref.muted ? "muted" : "on") : "off"} data-level-db={db ?? ""} {...chrome.bind} className={`absolute inset-0 ${className}`}>
       <div className="absolute inset-0 bg-black">
         <video ref={videoRef} data-active={showRtc ? undefined : "1"} className="pointer-events-none absolute inset-0 h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture {...{ "webkit-playsinline": "true" }} />
         {whepPath !== null ? <video ref={rtcRef} data-active={showRtc ? "1" : undefined} data-testid={`program-rtc-${scope}`} className={`pointer-events-none absolute inset-0 h-full w-full object-contain ${showRtc ? "" : "invisible"}`} autoPlay playsInline muted disablePictureInPicture {...{ "webkit-playsinline": "true" }} /> : null}
-        {shown === "standby" ? <Standby small /> : <PreviewBadge mode={whepPath === null ? null : showRtc ? "webrtc" : hlsPlaying ? "hls" : null} />}
+        {shown === "standby" ? <Standby small /> : <PreviewBadge idle={chrome.idle} mode={whepPath === null ? null : showRtc ? "webrtc" : hlsPlaying ? "hls" : null} />}
         {shown === "reconnecting" || (shown === "connecting" && lastFrameAt === null && load) ? <span data-testid={`program-reconnecting-${scope}`} className="pointer-events-none absolute top-1.5 right-1.5 z-10 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white/80">{shown === "connecting" ? "connecting…" : "reconnecting…"}</span> : null}
       </div>
       <div
-        className="absolute right-1.5 bottom-1.5 left-1.5 z-10 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1 font-mono text-[11px] text-white"
+        data-autohide-control
+        data-testid={`program-controls-${scope}`}
+        className={`absolute right-1.5 bottom-1.5 left-1.5 z-10 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1 font-mono text-[11px] text-white ${controlsClass(chrome.shown || needsTap)}`}
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}

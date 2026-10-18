@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PreviewBadge } from "@/components/preview-badge";
+import { useAutoHide } from "@/components/auto-hide";
 import { whepPathFromHls } from "@/lib/whep-client";
 import { useWhep } from "@/lib/use-whep";
 import type Hls from "hls.js";
@@ -29,6 +30,8 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
   const needHls = whepPath === null || wantHls || rtc.failed;
   const showRtc = whepPath !== null && !rtc.failed && !(needHls && hlsPlaying);
   const desiredMuted = useRef(true);
+  // Same chrome behaviour as every preview: native controls show on hover/focus/tap; the badge fades when idle.
+  const chrome = useAutoHide();
 
   useEffect(() => {
     const rtcVideo = rtcRef.current;
@@ -115,7 +118,7 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
   const vClass = `absolute inset-0 h-full w-full bg-[#111111] object-contain ${inline ? "pointer-events-none" : ""}`;
   const inlineProps = inline ? { "webkit-playsinline": "true", "x-webkit-airplay": "deny" } : {};
   return (
-    <>
+    <div className="absolute inset-0 outline-none" data-testid="stream-player" tabIndex={inline ? undefined : 0} aria-label="Preview player (focus to show controls)" {...chrome.bind}>
       <video
         ref={videoRef}
         data-active={showRtc ? undefined : "1"}
@@ -123,7 +126,7 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
         autoPlay
         muted
         playsInline
-        controls={!inline && !showRtc}
+        controls={!inline && !showRtc && chrome.shown}
         disablePictureInPicture={inline || undefined}
         disableRemotePlayback={inline || undefined}
         {...inlineProps}
@@ -136,13 +139,13 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
           autoPlay
           muted
           playsInline
-          controls={!inline && showRtc}
+          controls={!inline && showRtc && chrome.shown}
           disablePictureInPicture={inline || undefined}
           disableRemotePlayback={inline || undefined}
           {...inlineProps}
         />
       ) : null}
-      <PreviewBadge mode={whepPath === null ? null : showRtc ? (rtc.lastFrameAt !== null ? "webrtc" : null) : "hls"} />
-    </>
+      <PreviewBadge idle={chrome.idle} mode={whepPath === null ? null : showRtc ? (rtc.lastFrameAt !== null ? "webrtc" : null) : "hls"} />
+    </div>
   );
 }

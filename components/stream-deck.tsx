@@ -6,6 +6,7 @@ import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
 import { useResumeGeneration } from "@/lib/use-resume"
+import { controlsClass, useAutoHide } from "@/components/auto-hide"
 import { StatusToast, TOAST_MS, TOAST_UNDO_MS } from "@/components/status-toast"
 import { LocalAccessPill } from "@/components/local-access-pill"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
@@ -64,6 +65,7 @@ export function StreamDeck() {
   if (soundFor !== preview) { setSoundFor(preview); setPreviewSound(false) }
   const [collapsed, setCollapsed] = useStoredPref<"0" | "1">("deck-preview-collapsed", "0", ["0", "1"])
   const [big, setBig] = useState(false)
+  const chrome = useAutoHide()
   const [relayReady, setRelayReady] = useState<{ slate: boolean; capture: boolean; vertical: boolean }>({ slate: false, capture: false, vertical: false })
 
   useEffect(() => {
@@ -188,6 +190,7 @@ export function StreamDeck() {
               }
             }}
             data-testid="deck-preview-box"
+            {...chrome.bind}
             data-big={big ? "1" : "0"}
             aria-label={big ? "Make preview smaller" : "Make preview bigger"}
             onClick={() => setBig(!big)}
@@ -202,7 +205,7 @@ export function StreamDeck() {
                   const on = !previewSound
                   if (video) { video.muted = !on; if (on) void video.play().catch(() => { video.muted = true; setPreviewSound(false) }) }
                   setPreviewSound(on)
-                }} className={`absolute right-2 bottom-2 z-10 min-h-8 rounded-md px-2 font-mono text-[12px] font-bold ${previewSound ? "bg-[#128a3e] text-white" : "bg-black/70 text-white"}`}>{previewSound ? "🔊 Mute" : "🔇 Unmute"}</button>
+                }} data-autohide-control className={`${controlsClass(chrome.shown)} absolute right-2 bottom-2 z-10 min-h-8 rounded-md px-2 font-mono text-[12px] font-bold ${previewSound ? "bg-[#128a3e] text-white" : "bg-black/70 text-white"}`}>{previewSound ? "🔊 Mute" : "🔇 Unmute"}</button>
               </span>
             ) : (
               <span data-testid="deck-preview-placeholder" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono text-[12px] text-white/60">
