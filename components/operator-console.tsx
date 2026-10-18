@@ -2242,6 +2242,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
               <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (${name === "vertical" ? "start Vertical 9:16 with “Also publish to relay”" : `set ${name === "slate" ? "Slate" : "Browser capture"} → Relay`})`}</span>
             </div>
             {dests.length === 0 ? <p className="font-mono text-[12px] text-black/60">Add a destination below to forward to.</p> : null}
+            {name === "vertical" ? <p className="font-mono text-[11px] text-black/60">/vertical forwards follow the Vertical 9:16 output (its card in this section), not Start/Stop forwards: they run whenever ticked and Vertical is on, and apply live.</p> : null}
             <ul className="space-y-1">
               {dests.map((dest) => {
                 const fwd = enabled.get(dest.id)
@@ -2257,7 +2258,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
                     {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}</span> : null}
                     {fwd && fwd.reconnects > 0 ? <span data-testid={`relay-fwd-reconnects-${name}-${dest.name}`} title={`A working connection to ${dest.name} dropped and was re-made ${fwd.reconnects}×. Total relaunches incl. quick retries: ${fwd.restarts}.`} className="font-mono text-[11px] text-[#8a4b06]">{fwd.reconnects} {fwd.reconnects === 1 ? "reconnect" : "reconnects"}</span> : fwd && fwd.restarts > 0 && fwd.state !== "forwarding" ? <span title="Quick retries: the forward could not connect (or the source was not publishing) and was started again." className="font-mono text-[11px] text-black/60">{fwd.restarts} {fwd.restarts === 1 ? "retry" : "retries"}</span> : null}
                     {fwd && fwd.state === "forwarding" ? <HealthChip testid={`relay-fwd-health-${name}-${dest.name}`} health={fwd.health} /> : null}
-                    {fwd?.error && fwd.state !== "waiting" ? <span className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
+                    {fwd?.error && (fwd.state !== "waiting" || name === "vertical") ? <span data-testid={`relay-fwd-error-${name}-${dest.name}`} className={`basis-full break-words text-[11px] ${fwd.state === "waiting" ? "text-black/60" : "text-[#8a1c13]"}`}>{fwd.error}</span> : null}
                     </div> : null}
                   </li>
                 )

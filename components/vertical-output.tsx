@@ -17,19 +17,44 @@ export type VerticalView = {
   restarts: number
   reconnects: number
   sourceReady: boolean
-  hosts: string[]
   encoder: string | null
   audio: "copy" | "aac" | null
   bg: string | null
-  settings: { destIds: string[]; bg: string; encoder: "auto" | "libx264" | "videotoolbox"; audio: "auto" | "copy" | "aac"; relay: boolean }
-  pending?: boolean
-  relay?: boolean
-  dests?: { id: string; reason: string | null }[]
+  settings: { bg: string; encoder: "auto" | "libx264" | "videotoolbox"; audio: "auto" | "copy" | "aac" }
+  publishing?: boolean
+  autoEncoder?: "libx264" | "videotoolbox"
   health: Health
   error: string | null
   command: string | null
   logTail: string
   note?: string | null
+}
+
+type Forward = { destId: string; name: string; host: string; state: VerticalView["state"]; restarts: number; reconnects: number; error: string | null; health: Health }
+type VerticalPath = { ready: boolean; forwards: Forward[]; available?: { destId: string; reason: string | null }[] }
+export const FORWARD_STATE_LABEL: Record<Forward["state"], string> = { blocked: "Blocked", off: "Off", waiting: "Waiting", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
+
+/** Relay /vertical: publisher + forwards (same data the Relay card shows), polled every 2s. */
+export function useVerticalPath() {
+  const [path, setPath] = useState<VerticalPath | null>(null)
+  const load = useCallback(async () => {
+    const body = (await (await fetch("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: { vertical?: VerticalPath } } | null
+    if (body?.paths?.vertical) setPath(body.paths.vertical)
+  }, [])
+  useEffect(() => {
+    const first = window.setTimeout(() => void load(), 0)
+    const id = window.setInterval(() => void load(), 2000)
+    return () => { window.clearTimeout(first); window.clearInterval(id) }
+  }, [load])
+  const setForward = useCallback(async (destinationId: string, on: boolean): Promise<string | null> => {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "forward", path: "vertical", destinationId, on }) }).catch(() => null)
+    if (!response) return "Could not reach the server."
+    if (handleUnauthorized(response)) return null
+    const body = (await response.json().catch(() => null)) as { paths?: { vertical?: VerticalPath }; error?: string } | null
+    if (body?.paths?.vertical) setPath(body.paths.vertical)
+    return response.ok ? null : (body?.error ?? `Server returned ${response.status}.`)
+  }, [])
+  return { path, setForward }
 }
 
 export const VERTICAL_STATE_LABEL: Record<VerticalView["state"], string> = { blocked: "Blocked", off: "Off", waiting: "Waiting for capture", connecting: "Connecting…", forwarding: "Live", retrying: "Retrying", stalled: "Stalled" }
@@ -67,18 +92,8 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [form, setForm] = useState<{ open: boolean; name: string; server: string; key: string }>({ open: false, name: "", server: "", key: "" })
   const [preview, setPreview] = useState(false)
-  const [relayReady, setRelayReady] = useState<boolean | null>(null)
-  useEffect(() => {
-    if (!preview) return
-    let stop = false
-    const poll = async () => {
-      const body = (await (await fetch("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: { vertical?: { ready?: boolean } } } | null
-      if (!stop) setRelayReady(body?.paths?.vertical?.ready === true)
-    }
-    void poll()
-    const id = window.setInterval(() => void poll(), 2000)
-    return () => { stop = true; window.clearInterval(id) }
-  }, [preview])
+  const { path, setForward } = useVerticalPath()
+  const relayReady = path ? path.ready : null
   const live = view?.running === true
   const s = view?.settings
   const run = async (key: string, payload: Record<string, unknown>) => {
@@ -89,7 +104,12 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
     return r.error === null
   }
   const save = (patch: Partial<VerticalView["settings"]>) => void run("settings", { action: "settings", settings: patch })
-  const toggle = (id: string, on: boolean) => s && save({ destIds: on ? [...s.destIds, id] : s.destIds.filter((x) => x !== id) })
+  const toggle = async (id: string, on: boolean) => {
+    setBusy(`fwd-${id}`)
+    const error = await setForward(id, on)
+    setBusy(null)
+    setMessage(error ? { tone: "error", text: error } : null)
+  }
   async function addDest() {
     setBusy("add")
     const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add", name: form.name, url: joinRtmpServerAndKey(form.server, form.key) }) }).catch(() => null)
@@ -100,7 +120,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
     if (!response.ok || !body?.item) return setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` })
     onDestsChanged?.()
     setForm({ open: false, name: "", server: "", key: "" })
-    if (s) save({ destIds: [...s.destIds, body.item.id] })
+    void toggle(body.item.id, true)
   }
   const h = view?.health
   return (
@@ -113,30 +133,30 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
           {view && view.restarts > 0 ? <span title="Times the loop relaunched ffmpeg"> · {view.restarts} {view.restarts === 1 ? "restart" : "restarts"}</span> : null}
         </span>
       </div>
-      <p className="font-mono text-[12px] text-black/70">Reads Browser capture from the relay (/capture) and re-encodes it to 1080×1920: the whole 16:9 picture, centred, bars top and bottom. Needs Browser capture publishing to the relay. H.264 {4500}k CBR, 30 fps, keyframe 2s.</p>
+      <p className="font-mono text-[12px] text-black/70">Reads Browser capture from the relay (/capture), re-encodes it to 1080×1920 (whole 16:9 picture centred, bars top and bottom) and publishes it to the relay as /vertical. Destinations below are forwards from /vertical, like the HD relay. Needs Browser capture publishing to the relay. H.264 4500k, 30 fps, keyframe 2s.</p>
       <div className="space-y-1 font-mono text-[12px] text-black/70">
         <p className="font-bold text-black">Vertical destinations</p>
         {dests.length === 0 ? <p>No saved destinations yet. Add one below.</p> : null}
         {dests.map((d) => {
-          const checked = s?.destIds.includes(d.id) ?? false
-          const reason = view?.dests?.find((x) => x.id === d.id)?.reason ?? null
-          // Only a real reason blocks ticking (an already-ticked one can always be unticked); never just "busy" or "live".
+          const fwd = path?.forwards.find((f) => f.destId === d.id)
+          const checked = Boolean(fwd)
+          const reason = path?.available?.find((x) => x.destId === d.id)?.reason ?? null
+          // Only a real conflict blocks ticking (a ticked one can always be unticked). Ticks apply live.
           const blocked = Boolean(reason) && !checked
           return (
-            <div key={d.id} data-testid={`vertical-dest-row-${d.id}`} data-blocked={blocked ? "1" : "0"}>
+            <div key={d.id} data-testid={`vertical-dest-row-${d.id}`} data-blocked={blocked ? "1" : "0"} data-state={fwd?.state ?? "off"} className="space-y-0.5">
               <label className={`flex items-center gap-2 ${blocked ? "cursor-not-allowed" : "cursor-pointer text-black"}`}>
-                <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || !s} checked={checked} onChange={(e) => toggle(d.id, e.target.checked)} />
+                <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || busy === `fwd-${d.id}` || !path} checked={checked} onChange={(e) => void toggle(d.id, e.target.checked)} />
                 <span className="min-w-0"><span className="font-bold">{d.name}</span> · {d.host}</span>
+                {fwd ? <span data-testid={`vertical-fwd-state-${d.id}`} className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${tone(fwd.state)}`}>{FORWARD_STATE_LABEL[fwd.state]}{fwd.reconnects ? ` · ${fwd.reconnects}↻` : ""}</span> : null}
               </label>
-              {reason ? <p data-testid={`vertical-dest-reason-${d.id}`} className="pl-6 text-[11px] font-bold text-[#8a4b06]">{reason}</p> : null}
+              {fwd && fwd.state === "forwarding" && fwd.health.kbps !== null ? <p className="pl-6 text-[11px] text-[#0f6b31]">{fwd.health.fps !== null ? `${fwd.health.fps.toFixed(1)} fps · ` : ""}{fwd.health.kbps}k{fwd.health.speed ? ` · ${fwd.health.speed.toFixed(2)}x` : ""}</p> : null}
+              {fwd?.error && fwd.state !== "forwarding" ? <p data-testid={`vertical-fwd-error-${d.id}`} className={`pl-6 text-[11px] font-bold ${fwd.state === "waiting" ? "text-black/60" : "text-[#8a1c13]"}`}>{fwd.error}</p> : null}
+              {blocked ? <p data-testid={`vertical-dest-reason-${d.id}`} className="pl-6 text-[11px] font-bold text-[#8a4b06]">{reason}</p> : null}
             </div>
           )
         })}
-        <label className="flex items-center gap-2 text-black">
-          <input type="checkbox" data-testid="vertical-relay" className="size-4 shrink-0 accent-black" disabled={!s} checked={s?.relay ?? true} onChange={(e) => save({ relay: e.target.checked })} />
-          <span>Also publish to relay <span className="font-bold">/vertical</span> (preview here; fan out with Relay › /vertical forwards)</span>
-        </label>
-        {live && view?.pending ? <p data-testid="vertical-pending" className="text-[11px] font-bold text-[#8a4b06]">Changed while live: applies on the next start (Stop, then Start vertical).</p> : null}
+        <p className="text-[11px] text-black/60">Each ticked destination is its own relay forward from /vertical (ffmpeg -c copy): tick or untick while live, the encoder keeps running. Same list as Relay › /vertical.</p>
         <button type="button" data-testid="vertical-dest-add" className={pillClass("outline", "sm")} onClick={() => setForm({ ...form, open: !form.open })}>+ Add vertical destination</button>
         {form.open ? (
           <form data-testid="vertical-dest-form" className="space-y-2 rounded-xl border border-black/10 bg-[#F6F6F3] p-3" onSubmit={(e) => { e.preventDefault(); void addDest() }}>
@@ -165,8 +185,8 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
         <input type="color" aria-label="Custom bar colour" data-testid="vertical-bg-custom" disabled={live || !s} value={s?.bg.toLowerCase() ?? "#000000"} onChange={(e) => save({ bg: e.target.value })} className="h-8 w-10 border" />
         <label htmlFor="vertical-encoder">Encoder</label>
         <select id="vertical-encoder" data-testid="vertical-encoder" disabled={live || !s} value={s?.encoder ?? "auto"} onChange={(e) => save({ encoder: e.target.value as VerticalView["settings"]["encoder"] })} className="h-8 border px-2">
-          <option value="auto">Auto (libx264, strict CBR)</option>
-          <option value="libx264">libx264 (CPU)</option>
+          <option value="auto">Auto ({view?.autoEncoder === "videotoolbox" ? "VideoToolbox on this Mac" : "libx264 here; VideoToolbox on a Mac"})</option>
+          <option value="libx264">libx264 (CPU, strict CBR)</option>
           <option value="videotoolbox">VideoToolbox (Mac GPU, lighter)</option>
         </select>
         <label htmlFor="vertical-audio">Audio</label>
@@ -178,7 +198,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
       </div>
       {live ? (
         <p data-testid="vertical-health" className="font-mono text-[12px] text-black/70">
-          → {view.hosts.join(", ") || "destinations"} · {view.encoder} · audio {view.audio}
+          → relay /vertical{view.publishing ? " ● publishing" : " (not publishing yet)"} · {view.encoder} · audio {view.audio}
           {h && h.fps !== null ? ` · ${h.fps.toFixed(1)} fps` : ""}{h && h.kbps !== null ? ` · ${h.kbps}k` : ""}{h?.speed ? ` · ${h.speed.toFixed(2)}x` : ""}
           {!view.sourceReady ? <span className="block font-bold text-[#8a4b06]">Browser capture isn&apos;t publishing to the relay (/capture). Start it with destination “Relay”.</span> : null}
           {h?.warnings?.length ? <span className="block font-bold text-[#8a4b06]">{h.warnings.join(" · ")}</span> : null}
@@ -187,7 +207,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
       {view?.error && live ? <p role="alert" data-testid="vertical-error" className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[12px] font-bold text-[#7a3b06]">{view.error}</p> : null}
       {view?.adopted && live ? <p data-testid="vertical-adopted" className="font-mono text-[12px] text-black/70">Found Vertical already running (started before the server restarted). Stop works on it.</p> : null}
       <div className="flex flex-wrap gap-2">
-        <ConfirmButton data-testid="vertical-start" className={pillClass("solid")} disabled={live || busy !== null || !s || (!s.destIds.length && !s.relay)} confirmLabel="Start vertical? · confirm" onConfirm={() => void run("start", { action: "start" })}>{busy === "start" ? "Starting…" : "Start vertical"}</ConfirmButton>
+        <ConfirmButton data-testid="vertical-start" className={pillClass("solid")} disabled={live || busy !== null || !s} confirmLabel="Start vertical? · confirm" onConfirm={() => void run("start", { action: "start" })}>{busy === "start" ? "Starting…" : "Start vertical"}</ConfirmButton>
         <ConfirmButton data-testid="vertical-stop" className={pillClass("danger")} disabled={!live || busy !== null} confirmLabel="Stop vertical? · confirm" onConfirm={() => void run("stop", { action: "stop" })}>{busy === "stop" ? "Stopping…" : "Stop"}</ConfirmButton>
       </div>
       <button type="button" data-testid="vertical-preview" aria-pressed={preview} className={pillClass("outline", "sm")} onClick={() => setPreview(!preview)}>{preview ? "Hide preview" : "Preview /vertical"}</button>
@@ -196,7 +216,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
           {relayReady ? <StreamPlayer src="/api/relay/hls/vertical/index.m3u8" /> : (
             <span data-testid="vertical-preview-off" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center font-mono text-[12px] text-white/70">
               <span className="font-bold text-white/90">{relayReady === null ? "Loading…" : "Not publishing"}</span>
-              {relayReady === null ? null : s?.relay === false ? "Turn on “Also publish to relay /vertical” and start Vertical." : live ? "Vertical is starting or Browser capture isn't on the relay yet." : "Start Vertical to see /vertical here."}
+              {relayReady === null ? null : live ? "Vertical is starting or Browser capture isn't on the relay yet." : "Start Vertical to see /vertical here."}
             </span>
           )}
         </div>
@@ -240,8 +260,8 @@ export function VerticalDeckTile() {
         <p className="font-mono text-[13px] font-bold tracking-[0.08em] uppercase">Vertical 9:16</p>
         <span data-testid="deck-vertical-status" className={`rounded-full px-2.5 py-1 font-mono text-[12px] font-bold uppercase ${st === "forwarding" ? "bg-[#12b76a] text-black" : st === "connecting" || st === "retrying" || st === "waiting" ? "bg-[#fdb022] text-black" : st === "stalled" || st === "blocked" ? "bg-[#f04438] text-white" : "bg-white/15"}`}>{view ? VERTICAL_STATE_LABEL[view.state] : "…"}</span>
       </div>
-      {live ? <p className="mb-2 truncate font-mono text-[12px] text-white/70">→ {view.hosts.join(", ")}{view.health.fps !== null ? ` · ${view.health.fps.toFixed(0)} fps` : ""}{view.health.kbps !== null ? ` · ${view.health.kbps}k` : ""}{view.restarts ? ` · ${view.restarts} restarts` : ""}</p> : <p className="mb-2 font-mono text-[12px] text-white/60">{`${view?.settings.destIds.length ?? 0} destination${view?.settings.destIds.length === 1 ? "" : "s"}${view?.settings.relay ? " + relay /vertical" : ""}`}</p>}
-      <button type="button" data-testid="deck-vertical-toggle" data-armed={armed ? "1" : undefined} disabled={busy || !view || (!live && !view.settings.destIds.length && !view.settings.relay)} onClick={() => void tap()}
+      {live ? <p className="mb-2 truncate font-mono text-[12px] text-white/70">→ /vertical{view.publishing ? "" : " (waiting)"}{view.health.fps !== null ? ` · ${view.health.fps.toFixed(0)} fps` : ""}{view.health.kbps !== null ? ` · ${view.health.kbps}k` : ""}{view.restarts ? ` · ${view.restarts} restarts` : ""}</p> : <p className="mb-2 font-mono text-[12px] text-white/60">Off · destinations are /vertical forwards (desk › Encoder)</p>}
+      <button type="button" data-testid="deck-vertical-toggle" data-armed={armed ? "1" : undefined} disabled={busy || !view} onClick={() => void tap()}
         className={`min-h-14 w-full touch-manipulation rounded-2xl px-3 py-2 text-[17px] font-bold select-none disabled:opacity-35 ${live ? "border-2 border-[#f97066] text-[#fda29b]" : "bg-white/10 text-white"} ${armed ? "ring-4 ring-[#fdb022] ring-offset-2 ring-offset-[#0b0b0f]" : ""}`}>
         {armed ? "Tap again to confirm" : busy ? "…" : live ? "Stop vertical" : "Start vertical"}
       </button>

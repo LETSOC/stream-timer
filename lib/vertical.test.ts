@@ -1,20 +1,13 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import test from "node:test"
-import { verticalHealth, verticalProgress, audioArgs, cleanBg, combinedFingerprint, decideAudioCopy, parseVerticalSettings, resolveEncoder, teeSafeUrl, teeTarget, verticalCommand, verticalConflict, verticalFilter, videoArgs } from "@/lib/vertical"
-import { buildMediamtxConfig, isVerticalTag, parseRelayLoops } from "@/lib/relay"
+import { verticalHealth, verticalProgress, audioArgs, cleanBg, decideAudioCopy, legacyDestIds, parseVerticalSettings, resolveEncoder, verticalCommand, verticalFilter, videoArgs, VERTICAL_TAG_RE } from "@/lib/vertical"
+import { buildMediamtxConfig, forwardConflict, isVerticalTag, parseRelayLoops } from "@/lib/relay"
 
 test("vertical filter fits 16:9 into 1080x1920, centred, configurable bars", () => {
   assert.equal(verticalFilter("#0000b6"), "scale=1080:-2:flags=bicubic,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x0000B6,fps=30,format=yuv420p,setsar=1")
   assert.match(verticalFilter("nope"), /color=0x000000/)
   assert.equal(cleanBg(" #0000b6 "), "#0000B6")
-})
-
-test("settings parse: ids deduped/capped, unknown values fall back", () => {
-  const s = parseVerticalSettings({ destIds: ["a", "a", "b", 3, "c", "d", "e"], bg: "red", encoder: "x", audio: "aac" })
-  assert.deepEqual(s, { destIds: ["a", "b", "c", "d"], bg: "#000000", encoder: "auto", audio: "aac", relay: true })
-  assert.equal(resolveEncoder("auto"), "libx264")
-  assert.equal(resolveEncoder("videotoolbox"), "videotoolbox")
 })
 
 test("video: CBR 4500k, 30fps, keyframe every 2s; audio copy or AAC 48k", () => {
@@ -29,30 +22,6 @@ test("video: CBR 4500k, 30fps, keyframe every 2s; audio copy or AAC 48k", () => 
   assert.equal(decideAudioCopy("auto", ["H264", "Opus"]), false)
   assert.equal(decideAudioCopy("aac", ["MPEG-4 Audio"]), false)
   assert.equal(decideAudioCopy("auto", []), true) // capture not up yet: it always sends AAC 48k
-})
-
-test("tee target: one encode, N outputs; one bad ingest can't drop the others", () => {
-  assert.equal(teeTarget(["rtmp://a/x"]), "[f=flv:flvflags=no_duration_filesize:onfail=abort]rtmp://a/x")
-  assert.equal(teeTarget(["rtmp://a/x", "rtmp://b/y"]).split("|").length, 2)
-  assert.match(teeTarget(["rtmp://a/x", "rtmp://b/y"]), /onfail=ignore/)
-  assert.equal(teeSafeUrl("rtmp://a/live/key?x=1"), true)
-  assert.equal(teeSafeUrl("rtmp://a/live/k|y"), false)
-  const cmd = verticalCommand({ readUrl: "rtmp://127.0.0.1:19350/capture?user=r&pass=p", urls: ["rtmp://a/x"], bg: "#000000", encoder: "libx264", audioCopy: true })
-  assert.equal(cmd[cmd.indexOf("-i") + 1], "rtmp://127.0.0.1:19350/capture?user=r&pass=p")
-  assert.deepEqual(cmd.slice(-3), ["-f", "tee", "[f=flv:flvflags=no_duration_filesize:onfail=abort]rtmp://a/x"])
-  // Not a "-f flv" publisher, and its relay-loop group is ours: never flagged as a stray.
-  assert.ok(!cmd.join(" ").includes(" -f flv "))
-})
-
-test("conflicts and tags", () => {
-  assert.match(verticalConflict(["f1"], [{ path: "capture", dest: "f1" }], []) ?? "", /Relay \/capture/)
-  assert.match(verticalConflict(["f1"], [], [{ channel: "slate", running: true, dest: "f1" }]) ?? "", /Slate/)
-  assert.equal(verticalConflict(["f1"], [], [{ channel: "capture", running: true, dest: "f1", relay: true }]), null)
-  assert.equal(combinedFingerprint(["rtmp://a/x", "rtmp://b/y"]), combinedFingerprint(["rtmp://b/y", "rtmp://a/x"]))
-  assert.ok(isVerticalTag("vertical:dest=0123456789abcdef"))
-  assert.ok(!isVerticalTag("forward:capture:id:dest=0123456789abcdef"))
-  const loops = parseRelayLoops("  42 42 bash /x/scripts/relay-loop.sh vertical:dest=0123456789abcdef -- ffmpeg\n", "/x/scripts/relay-loop.sh")
-  assert.deepEqual(loops, [{ pid: 42, tag: "vertical:dest=0123456789abcdef" }])
 })
 
 test("ffmpeg accepts the filter: 1920x1080 in → 1080x1920 out with the picture at y=656", { skip: spawnSync("ffmpeg", ["-version"]).status !== 0 }, () => {
@@ -71,20 +40,38 @@ test("progress: fps/speed from the last block; slow encoder warns", () => {
   assert.equal(verticalHealth(verticalProgress(""), null).level, "idle")
 })
 
-test("relay output: /vertical is one more tee output that never takes the external ones down", () => {
-  const relay = "rtmp://127.0.0.1:19350/vertical?user=vrt_x&pass=y"
-  assert.equal(teeTarget([], relay), `[f=flv:flvflags=no_duration_filesize:onfail=abort]${relay}`)
-  const one = teeTarget(["rtmp://a/x"], relay).split("|")
-  assert.match(one[0], /onfail=abort\]rtmp:\/\/a\/x$/)
-  assert.match(one[1], /onfail=ignore\]rtmp:\/\/127\.0\.0\.1:19350\/vertical/)
-  assert.equal(parseVerticalSettings({}).relay, true)
-  assert.equal(parseVerticalSettings({ relay: false }).relay, false)
-})
-
 test("MediaMTX config: /vertical path with its own localhost-only vrt_ publisher", () => {
   const yml = buildMediamtxConfig({ host: "127.0.0.1", ports: { rtmp: 19350, hls: 18888, api: 19997 }, creds: { publishUser: "pub_a", publishPass: "p", readUser: "read_a", readPass: "r", verticalUser: "vrt_a", verticalPass: "v" } })
   assert.match(yml, /^ {2}vertical: \{\}$/m)
   assert.match(yml, /user: "vrt_a"\n {4}pass: "v"\n {4}ips: \['127\.0\.0\.1\/32', '::1\/128'\]\n {4}permissions: \[\{ action: publish, path: vertical \}\]/)
   // the channel publisher can't publish /vertical
   assert.match(yml, /user: "pub_a"[\s\S]*?permissions: \[\{ action: publish, path: slate \}, \{ action: publish, path: capture \}\]/)
+})
+
+test("settings parse; legacy direct ticks are read for migration; Auto = VideoToolbox on macOS only", () => {
+  assert.deepEqual(parseVerticalSettings({ destIds: ["a"], bg: "red", encoder: "x", audio: "aac", relay: false }), { bg: "#000000", encoder: "auto", audio: "aac" })
+  assert.deepEqual(legacyDestIds({ destIds: ["a", "a", "b", 3, "bad id!"] }), ["a", "b"])
+  assert.deepEqual(legacyDestIds({}), [])
+  assert.equal(resolveEncoder("auto", "darwin"), "videotoolbox")
+  assert.equal(resolveEncoder("auto", "linux"), "libx264")
+  assert.equal(resolveEncoder("libx264", "darwin"), "libx264")
+})
+
+test("encoder publishes ONLY to relay /vertical (one flv output, no tee)", () => {
+  const cmd = verticalCommand({ readUrl: "rtmp://127.0.0.1:19350/capture?user=r&pass=p", publishUrl: "rtmp://127.0.0.1:19350/vertical?user=vrt_a&pass=v", bg: "#000000", encoder: "videotoolbox", audioCopy: true })
+  assert.equal(cmd[cmd.indexOf("-i") + 1], "rtmp://127.0.0.1:19350/capture?user=r&pass=p")
+  assert.equal(cmd.at(-1), "rtmp://127.0.0.1:19350/vertical?user=vrt_a&pass=v")
+  assert.ok(!cmd.includes("tee"))
+  assert.equal(cmd.filter((a) => a === "-f").length, 1)
+  assert.ok(cmd.includes("h264_videotoolbox"))
+  assert.ok(VERTICAL_TAG_RE.test("vertical:dest=relay"))
+  assert.ok(isVerticalTag("vertical:dest=relay"))
+  assert.ok(!isVerticalTag("forward:vertical:id:dest=0123456789abcdef"))
+  assert.deepEqual(parseRelayLoops("  42 42 bash /x/scripts/relay-loop.sh vertical:dest=relay -- ffmpeg\n", "/x/scripts/relay-loop.sh"), [{ pid: 42, tag: "vertical:dest=relay" }])
+})
+
+test("same-key guard: /vertical forward refused where another path forwards or a channel publishes", () => {
+  assert.match(forwardConflict({ path: "vertical", dest: "f1" }, [{ path: "capture", dest: "f1" }], []) ?? "", /Relay \/capture already forwards/)
+  assert.match(forwardConflict({ path: "vertical", dest: "f1" }, [], [{ channel: "slate", running: true, dest: "f1" }]) ?? "", /Slate/)
+  assert.equal(forwardConflict({ path: "vertical", dest: "f1" }, [{ path: "vertical", dest: "f1" }], []), null)
 })

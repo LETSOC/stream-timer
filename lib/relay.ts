@@ -675,20 +675,15 @@ export function startRelay(): Promise<RelayResult> {
 }
 
 async function killForwardsUnlocked() {
-  for (const loop of findRelayLoops()) if (loop.tag !== "mediamtx" && !isVerticalTag(loop.tag)) await killGroup(loop.pid)
+  // "Stop forwards" is the HD fan-out switch: the Vertical encoder and its /vertical forwards have their own.
+  for (const loop of findRelayLoops()) if (loop.tag !== "mediamtx" && !isVerticalTag(loop.tag) && !loop.tag.startsWith(`forward:${VERTICAL_PATH}:`)) await killGroup(loop.pid)
   for (const name of fs.existsSync(relayDir()) ? fs.readdirSync(relayDir()) : []) {
-    if (/^fwd-.*\.json$/.test(name)) fs.rmSync(file(name), { force: true })
+    if (/^fwd-.*\.json$/.test(name) && !name.startsWith(`fwd-${VERTICAL_PATH}-`)) fs.rmSync(file(name), { force: true })
   }
 }
 const publishingChannels = () => [...directChannelDests().filter((item) => item.running && item.relay), ...(verticalPublishing() ? [{ channel: VERTICAL_PATH, running: true, relay: true }] : [])]
 /** The Vertical output's loop is alive (its pidfile names a running relay-loop.sh). Read here, not via lib/vertical (that imports this module). */
-/** Destinations the Vertical output pushes to directly (fingerprints from its pidfile), as "direct" publishers. */
-export function verticalDirectDests(): { channel: string; running: boolean; dest?: string; relay?: boolean }[] {
-  const meta = readJson<{ pid?: number; dests?: unknown }>(path.join(dataDir(), "vertical", "vertical.json"))
-  if (!meta?.pid || !Array.isArray(meta.dests) || !pidRunsScript(meta.pid, LOOP())) return []
-  return meta.dests.filter((d): d is string => typeof d === "string").map((dest) => ({ channel: VERTICAL_PATH, running: true, dest }))
-}
-const allDirectDests = () => [...directChannelDests(), ...verticalDirectDests()]
+const allDirectDests = () => directChannelDests()
 export function verticalPublishing(): boolean {
   const meta = readJson<{ pid?: number; relay?: boolean }>(path.join(dataDir(), "vertical", "vertical.json"))
   return Boolean(meta?.pid && meta.relay !== false && pidRunsScript(meta.pid, LOOP()))
@@ -743,9 +738,9 @@ function relayRunning() {
 /** Fingerprints of destinations the relay forwards to (enabled forwards, while the relay is on). */
 export function relayForwardFingerprints(): { path: RelayPath; dest: string; destId: string }[] {
   const settings = readSettings()
-  if (!settings.enabled) return []
   const out: { path: RelayPath; dest: string; destId: string }[] = []
-  for (const name of RELAY_PATHS) {
+  // HD paths count while forwards are on; /vertical forwards whenever ticked (they follow the Vertical encoder).
+  for (const name of settings.enabled ? RELAY_PATHS : [VERTICAL_PATH] as const) {
     for (const destId of settings.forwards[name]) {
       const destination = resolveDestination(destId)
       if (destination) out.push({ path: name, dest: destinationFingerprint(destination.url), destId })
@@ -792,10 +787,12 @@ async function reconcileUnlocked() {
   const settings = readSettings()
   // The server must run while a channel publishes into it or forwards are on (e.g. pidfile lost).
   if (!relayRunning() && (settings.enabled || settings.programArmed || publishingChannels().length > 0) && findMediamtxBin()) await ensureServerUnlocked()
-  const on = settings.enabled && relayRunning()
+  // HD paths: while "Start forwards" is on. /vertical: whenever ticked AND the Vertical encoder runs
+  // (its own switch), so ticks apply live and a stopped Vertical leaves them "waiting", not retrying.
+  const pathOn = (name: RelayPath) => relayRunning() && (name === VERTICAL_PATH ? verticalPublishing() : settings.enabled)
   const wanted = new Map<string, { name: RelayPath; destId: string; url: string; tag: string }>()
-  if (on) {
-    for (const name of RELAY_PATHS) {
+  {
+    for (const name of RELAY_PATHS.filter(pathOn)) {
       for (const destId of settings.forwards[name]) {
         const destination = resolveDestination(destId)
         if (!destination) continue
@@ -829,8 +826,15 @@ export function forwardCommand(name: RelayPath, destinationUrl: string): string[
 }
 
 let reconcileAt = 0
-export async function reconcileRelay() {
-  if (Date.now() - reconcileAt < 2000) return
+/** Ticked /vertical forwards (migration from the old direct "vertical destinations"); no process change here. */
+export function addVerticalForwards(ids: string[]) {
+  if (!ids.length) return
+  const settings = readSettings()
+  writeSettings({ ...settings, forwards: { ...settings.forwards, vertical: [...new Set([...settings.forwards.vertical, ...ids])] } })
+}
+
+export async function reconcileRelay(force = false) {
+  if (!force && Date.now() - reconcileAt < 2000) return
   reconcileAt = Date.now()
   await withLock(reconcileUnlocked)
 }
@@ -871,7 +875,7 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
 
 /** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
 export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
-export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
+export type RelayPathStatus = { /** per saved destination: why it can't be ticked on this path (null = fine) */ available: { destId: string; reason: string | null }[]; name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 export type IngestDiag = { resyncs: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl: string | null; mdns: MdnsState; lastReject: { at: string; text: string } | null; logFile: string }
 /**
  * Pure: from MediaMTX's log, where the RTMP ingest last started listening and the last refused /
@@ -931,13 +935,24 @@ export async function relayStatus(): Promise<RelayStatus> {
       const dest = dests.get(destId)!
       const resolved = resolveDestination(destId)
       const blocked = !meta && resolved ? forwardConflict({ path: name, dest: destinationFingerprint(resolved.url) }, [], allDirectDests()) : null
-      if (blocked && settings.enabled) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, reconnects: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
+      if (name === VERTICAL_PATH && !meta && !blocked) {
+        // Not running because nothing publishes /vertical: say so (it starts by itself once Vertical runs).
+        const why = !verticalPublishing() ? "Waiting for /vertical (start Vertical 9:16)." : !relayRunning() ? "Relay server is starting…" : "Starting…"
+        return { destId, name: dest.name, host: dest.host, state: "waiting", restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: why, adopted: false, health: EMPTY_HEALTH }
+      }
+      if (name === VERTICAL_PATH && meta && info?.ready !== true) {
+        return { destId, name: dest.name, host: dest.host, state: "waiting", restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: "Waiting for /vertical to publish (Vertical starting, or Browser capture not on the relay).", adopted: meta.adopted === true, health: EMPTY_HEALTH }
+      }
+      if (blocked && (settings.enabled || name === VERTICAL_PATH)) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, reconnects: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
       const health = meta && info?.ready ? healthFromSamples(parseProgressBlocks(tailOf(key, 32768)).slice(-13), 5, logAgeMs(key), expect) : EMPTY_HEALTH
       return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true, health }
     })
     const outKbps = forwards.reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
     const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : name === "capture" ? "Browser capture" : "Vertical", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
-    paths[name] = { name, ready: info?.ready === true, publisher: info?.source?.type ?? null, tracks: info?.tracks ?? [], readers: info?.readers.length ?? 0, bytesReceived: info?.bytesReceived ?? 0, forwards, source, outKbps, diagnosis }
+    const allFwd = RELAY_PATHS.flatMap((p) => settings.forwards[p].map((id) => { const d = resolveDestination(id); return { path: p, dest: d ? destinationFingerprint(d.url) : "" } }))
+    const direct = allDirectDests()
+    const available = [...dests.values()].map((d) => { const r = resolveDestination(d.id); return { destId: d.id, reason: r ? forwardConflict({ path: name, dest: destinationFingerprint(r.url) }, allFwd, direct) : "Missing." } })
+    paths[name] = { available, name, ready: info?.ready === true, publisher: info?.source?.type ?? null, tracks: info?.tracks ?? [], readers: info?.readers.length ?? 0, bytesReceived: info?.bytesReceived ?? 0, forwards, source, outKbps, diagnosis }
   }
   const prog = api?.get(PROGRAM_PATH)
   if (prog?.ready) {
