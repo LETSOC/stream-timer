@@ -99,8 +99,9 @@ export function StreamDeck() {
   }, [preview])
 
   useFailoverEvents(state?.programSources?.last, (e) => {
-    setToast({ tone: e.auto ? "error" : "ok", text: failoverText(e) })
-    if (e.auto && navigator.vibrate) navigator.vibrate([60, 60, 60])
+    const alarm = e.auto && e.from !== e.to // a re-arm/note is informational, a switch is an alarm
+    setToast({ tone: alarm ? "error" : "ok", text: failoverText(e) })
+    if (alarm && navigator.vibrate) navigator.vibrate([60, 60, 60])
   })
   async function saveFailover(patch: Partial<FailoverSettings>) {
     const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)

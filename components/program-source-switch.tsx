@@ -135,6 +135,10 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
             <input type="checkbox" data-testid="failover-auto" checked={f.auto} disabled={disabled} onChange={(e) => onFailover({ auto: e.target.checked })} />
             Auto-failover
           </label>
+          <label className="flex items-center gap-1.5" title="After a Wi-Fi drop: when the on-air input comes back READY (3s stable), disarm and re-arm it once so audio and video resync. At most once per 20s.">
+            <input type="checkbox" data-testid="failover-auto-rearm" checked={f.autoRearm} disabled={disabled} onChange={(e) => onFailover({ autoRearm: e.target.checked })} />
+            Auto re-arm after reconnect
+          </label>
           <label className="flex items-center gap-1">after
             <input type="number" min={1} max={60} data-testid="failover-stall" disabled={disabled} value={stall ?? String(f.stallSec)} onChange={(e) => setStall(e.target.value)} onBlur={() => { if (stall !== null && Number(stall) > 0) onFailover({ stallSec: Number(stall) }); setStall(null) }} className={`w-12 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s stall
           </label>

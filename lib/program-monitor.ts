@@ -10,7 +10,8 @@ import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type Fail
 import fs from "node:fs"
 import path from "node:path"
 import { syncMdns } from "@/lib/mdns"
-import { programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
+import { FRESH_REARM, rearmStep, type RearmMemory } from "@/lib/program-rearm"
+import { armProgram, disarmProgram, programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
 import { inputState, nextBaseline, readiness, type InputReadout } from "@/lib/input-state"
@@ -23,7 +24,7 @@ let verboseAt = 0
 import type { ProgramSource, ReturnStatus, SourceHealth } from "@/lib/program-source"
 
 const KEY = Symbol.for("stream-timer.program-monitor")
-type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string; baseline: Record<ProgramSource, number | null>; status: ReturnStatus | null }
+type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string; baseline: Record<ProgramSource, number | null>; status: ReturnStatus | null; rearm?: RearmMemory; rearming?: boolean }
 function monitor(): Monitor {
   const holder = globalThis as { [KEY]?: Monitor }
   if (!holder[KEY]) {
@@ -127,6 +128,7 @@ export async function programMonitorTick(now = Date.now()) {
     }
     const state = readServerState()
     const active = state.stage.programSource
+    autoRearmTick(m, active, now, settings.failover.stallSec * 1000, settings.failover.autoRearm)
     const step = failoverStep({ active, main: programSourceHealth("main", now), backup: programSourceHealth("backup", now), settings: settings.failover, memory: m.memory, now, mainReady: inputReadout("main", now, settings.failover.stallSec * 1000).readyOk })
     m.memory = step.memory
     m.status = step.status ?? null
@@ -156,7 +158,7 @@ export async function programMonitorTick(now = Date.now()) {
         }
       }
     }
-  } else { m.memory = FRESH_MEMORY; m.status = null }
+  } else if (!m.rearming) { m.memory = FRESH_MEMORY; m.status = null }
   // Push when something a person would see changed (ages in whole seconds, bitrate in 100k steps).
   const view = programSourcesView(now)
   const sig = JSON.stringify(view && [view.main.ready, view.backup.ready, Math.round((view.main.kbps ?? -1) / 100), Math.round((view.backup.kbps ?? -1) / 100), Math.floor((view.main.dataAgeMs ?? -1000) / 1000), Math.floor((view.backup.dataAgeMs ?? -1000) / 1000), view.last?.at, view.failover, view.main.state, view.backup.state, view.main.readyOk, view.backup.readyOk, view.returnStatus, view.main.stats?.fps, view.backup.stats?.fps])
@@ -164,6 +166,30 @@ export async function programMonitorTick(now = Date.now()) {
     m.sig = sig
     eventBus().emit("program-sources")
   }
+}
+
+/**
+ * After a Wi-Fi drop the on-air input comes back with A/V out of sync; disarm + re-arm (the operator's
+ * manual fix, same code path as the desk buttons) resyncs it. Once READY has been stable 3s, at most once per 20s.
+ */
+function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: number, enabled: boolean) {
+  if (m.rearming) return
+  const r = inputReadout(active, now, stallMs)
+  const step = rearmStep(m.rearm ?? FRESH_REARM, { down: !r.ready || r.state === "failed", ready: r.ready && r.readyOk && r.state !== "failed", now, enabled })
+  m.rearm = step.mem
+  if (!step.fire) return
+  const label = SOURCE_LABEL[active]
+  plog(`${label} reconnected → auto re-arm`)
+  m.rearming = true
+  void (async () => {
+    try {
+      await disarmProgram()
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const armed = await armProgram()
+      if (!armed.ok) plog(`auto re-arm: arm failed: ${armed.error ?? "unknown"}`)
+      noteSourceSwitch({ at: Date.now(), from: active, to: active, reason: `${label} reconnected → auto re-arm (A/V resync)`, auto: true })
+    } finally { m.rearming = false }
+  })()
 }
 
 export function startProgramMonitor(intervalMs = 500) {

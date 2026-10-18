@@ -20,11 +20,13 @@ test("video: CBR 4500k, 30fps, keyframe every 2s; audio copy or AAC 48k", () => 
   assert.match(x, /-g 60 -keyint_min 60 -sc_threshold 0/)
   assert.match(videoArgs("videotoolbox").join(" "), /h264_videotoolbox .*-g 60/)
   assert.deepEqual(audioArgs(true), ["-c:a", "copy"])
-  assert.deepEqual(audioArgs(false), ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"])
-  assert.equal(decideAudioCopy("auto", ["H264", "MPEG-4 Audio"]), true)
+  assert.deepEqual(audioArgs(false), ["-af", "aresample=async=1:first_pts=0", "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"])
+  assert.equal(decideAudioCopy("auto", ["H264", "MPEG-4 Audio"]), false) // re-encode so gaps realign
+  assert.equal(decideAudioCopy("copy", ["H264", "MPEG-4 Audio"]), true)
   assert.equal(decideAudioCopy("auto", ["H264", "Opus"]), false)
   assert.equal(decideAudioCopy("aac", ["MPEG-4 Audio"]), false)
-  assert.equal(decideAudioCopy("auto", []), true) // capture not up yet: it always sends AAC 48k
+  assert.equal(decideAudioCopy("auto", []), false)
+  for (const enc of ["libx264", "videotoolbox"] as const) assert.ok(videoArgs(enc).join(" ").includes("-force_key_frames expr:gte(t,n_forced*2)"), enc)
 })
 
 test("ffmpeg accepts the filter: 1920x1080 in → 1080x1920 out with the picture at y=656", { skip: spawnSync("ffmpeg", ["-version"]).status !== 0 }, () => {

@@ -65,12 +65,14 @@ export function videoArgs(encoder: "libx264" | "videotoolbox"): string[] {
   const gop = String(VERTICAL_FPS * VERTICAL_GOP_SEC)
   const cbr = ["-b:v", k, "-minrate", k, "-maxrate", k, "-bufsize", `${VERTICAL_KBPS * 2}k`]
   // VideoToolbox: hardware encode on the Mac (a fraction of libx264's CPU). maxrate/bufsize cap the rate; -realtime keeps up.
-  if (encoder === "videotoolbox") return ["-c:v", "h264_videotoolbox", "-realtime", "1", "-allow_sw", "1", "-prio_speed", "1", "-profile:v", "high", ...cbr, "-g", gop, "-force_key_frames", `expr:gte(t,n_forced*${VERTICAL_GOP_SEC})`]
-  return ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "high", ...cbr, "-x264-params", "nal-hrd=cbr:force-cfr=1", "-g", gop, "-keyint_min", gop, "-sc_threshold", "0"]
+  if (encoder === "videotoolbox") return ["-c:v", "h264_videotoolbox", "-realtime", "1", "-allow_sw", "1", "-prio_speed", "1", "-profile:v", "high", ...cbr, "-bf", "0", "-g", gop, "-force_key_frames", `expr:gte(t,n_forced*${VERTICAL_GOP_SEC})`]
+  return ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "high", ...cbr, "-x264-params", "nal-hrd=cbr:force-cfr=1", "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-force_key_frames", `expr:gte(t,n_forced*${VERTICAL_GOP_SEC})`]
 }
 
 export function audioArgs(copy: boolean): string[] {
-  return copy ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
+  // Re-encode: aresample=async=1 stretches/pads audio back onto the video clock after an input gap
+  // (Wi-Fi drop), first_pts=0 starts it at 0 with the video. Copy can't be filtered, so it skips this.
+  return copy ? ["-c:a", "copy"] : ["-af", "aresample=async=1:first_pts=0", "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
 }
 
 /** The vertical ffmpeg argv: capture in, 9:16 out to the relay path /vertical only (its read/publish logins are argv; the loop redacts them). */
@@ -87,10 +89,9 @@ export function verticalCommand(input: { readUrl: string; publishUrl: string; bg
 /** Copy only what MediaMTX reports as AAC (capture sends AAC 48k stereo); anything else is re-encoded. */
 export function decideAudioCopy(mode: VerticalAudio, tracks: string[]): boolean {
   if (mode === "copy") return true
-  if (mode === "aac") return false
-  // Capture not publishing yet: it always sends AAC 48k stereo, so copy.
-  if (tracks.length === 0) return true
-  return tracks.some((t) => /^(MPEG-4 Audio|AAC)$/i.test(t))
+  // auto/aac: re-encode, so audio can be realigned after gaps (see audioArgs). Copy only when asked.
+  void tracks
+  return false
 }
 
 /** Pure: fps / speed / frames from the last -progress block (kbps shown is the CBR target). */
