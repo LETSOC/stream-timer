@@ -1,5 +1,6 @@
 "use client"
 
+import { VerticalDeckTile } from "@/components/vertical-output"
 import { failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
 import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
@@ -279,6 +280,9 @@ export function StreamDeck() {
         {state?.programSources ? <LanIngestInfo /> : null}
         {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
       </div>
+
+      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Outputs</h2>
+      <div className="grid grid-cols-2 gap-2"><VerticalDeckTile /></div>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Desk mode</h2>
       <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-2 gap-2">

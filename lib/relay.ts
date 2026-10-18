@@ -326,6 +326,8 @@ function spawnLoop(key: string, tag: string, command: string[], opts: { redact?:
   return child.pid
 }
 
+/** The Vertical (9:16) output (lib/vertical.ts) runs under relay-loop.sh too; forward reconcile/"Stop forwards" leave it alone. */
+export const isVerticalTag = (tag: string) => tag.startsWith("vertical:")
 export type OwnRelayLoop = { pid: number; tag: string }
 /** Pure: our relay-loop.sh group leaders (this checkout's absolute script path) and their tags. */
 export function parseRelayLoops(psOutput: string, loopPath: string): OwnRelayLoop[] {
@@ -663,7 +665,7 @@ export function startRelay(): Promise<RelayResult> {
 }
 
 async function killForwardsUnlocked() {
-  for (const loop of findRelayLoops()) if (loop.tag !== "mediamtx") await killGroup(loop.pid)
+  for (const loop of findRelayLoops()) if (loop.tag !== "mediamtx" && !isVerticalTag(loop.tag)) await killGroup(loop.pid)
   for (const name of fs.existsSync(relayDir()) ? fs.readdirSync(relayDir()) : []) {
     if (/^fwd-.*\.json$/.test(name)) fs.rmSync(file(name), { force: true })
   }
@@ -783,7 +785,7 @@ async function reconcileUnlocked() {
   }
   // Stop forwards no longer wanted (or whose destination URL changed), including unknown leftovers.
   for (const loop of findRelayLoops()) {
-    if (loop.tag === "mediamtx") continue
+    if (loop.tag === "mediamtx" || isVerticalTag(loop.tag)) continue
     const fwd = /^forward:(slate|capture):([^:]+):/.exec(loop.tag)
     const key = fwd ? forwardKey(fwd[1] as RelayPath, fwd[2]) : null
     const want = key ? wanted.get(key) : undefined

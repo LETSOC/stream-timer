@@ -47,6 +47,7 @@ import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
 import { VisualsDeskSection } from "@/components/visuals-desk"
+import { VerticalCard } from "@/components/vertical-output"
 import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import {
@@ -1173,7 +1174,7 @@ export function OperatorConsole() {
           </Panel>
 
           <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
-            <p className="font-mono text-[12px] text-black/70">Slate and Browser capture are separate outputs. Run either, or both at once to different destinations.</p>
+            <p className="font-mono text-[12px] text-black/70">Slate, Browser capture and Vertical (9:16) are separate outputs. Run any of them at once, to different destinations.</p>
             <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
               {(["slate", "capture"] as const).map((ch) => {
                 const other = ch === "slate" ? "capture" : "slate"
@@ -1187,6 +1188,7 @@ export function OperatorConsole() {
                 )
               })}
               <RelayCard dests={dests.items} />
+              <VerticalCard dests={dests.items} pillClass={pillClass} onDestsChanged={() => void loadDests()} />
               <AudioCard routing={streamAudio} onRouting={(patch) => void saveStreamAudio(patch)} />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">

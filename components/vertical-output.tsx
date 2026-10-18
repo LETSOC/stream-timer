@@ -1,0 +1,209 @@
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
+import { ConfirmButton } from "@/components/confirm-button"
+import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
+import { handleUnauthorized } from "@/lib/use-operator"
+
+type Tone = "solid" | "outline" | "danger" | "live"
+type PillClass = (tone?: Tone, size?: "sm" | "md") => string
+type Dest = { id: string; name: string; host: string }
+type Health = { fps: number | null; kbps: number | null; speed?: number | null; level?: string; warnings?: string[] }
+export type VerticalView = {
+  running: boolean
+  state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"
+  adopted: boolean
+  restarts: number
+  reconnects: number
+  sourceReady: boolean
+  hosts: string[]
+  encoder: string | null
+  audio: "copy" | "aac" | null
+  bg: string | null
+  settings: { destIds: string[]; bg: string; encoder: "auto" | "libx264" | "videotoolbox"; audio: "auto" | "copy" | "aac" }
+  health: Health
+  error: string | null
+  command: string | null
+  logTail: string
+  note?: string | null
+}
+
+export const VERTICAL_STATE_LABEL: Record<VerticalView["state"], string> = { blocked: "Blocked", off: "Off", waiting: "Waiting for capture", connecting: "Connecting…", forwarding: "Live", retrying: "Retrying", stalled: "Stalled" }
+const tone = (s: VerticalView["state"] | undefined) => (s === "forwarding" ? "bg-[#128a3e] text-white" : s === "connecting" || s === "retrying" || s === "waiting" ? "bg-[#b45309] text-white" : s === "stalled" || s === "blocked" ? "bg-[#d93200] text-white" : "bg-black/5 text-black/70")
+
+/** Polls /api/vertical every 2s; act() posts an action and returns the error text (or null). */
+export function useVertical() {
+  const [view, setView] = useState<VerticalView | null>(null)
+  const load = useCallback(async () => {
+    const response = await fetch("/api/vertical", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return
+    const body = (await response.json().catch(() => null)) as VerticalView | null
+    if (body && typeof body.running === "boolean") setView(body)
+  }, [])
+  useEffect(() => {
+    const first = window.setTimeout(() => void load(), 0)
+    const id = window.setInterval(() => void load(), 2000)
+    return () => { window.clearTimeout(first); window.clearInterval(id) }
+  }, [load])
+  const act = useCallback(async (payload: Record<string, unknown>): Promise<{ error: string | null; note: string | null }> => {
+    const response = await fetch("/api/vertical", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
+    if (!response) return { error: "Could not reach the server.", note: null }
+    if (handleUnauthorized(response)) return { error: null, note: null }
+    const body = (await response.json().catch(() => null)) as (VerticalView & { error?: string }) | null
+    if (body && typeof body.running === "boolean") setView(body)
+    return { error: response.ok ? null : (body?.error ?? `Server returned ${response.status}.`), note: body?.note ?? null }
+  }, [])
+  return { view, act, reload: load }
+}
+
+/** Desk › Encoder: the Vertical (9:16) output card. */
+export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest[]; pillClass: PillClass; onDestsChanged?: () => void }) {
+  const { view, act } = useVertical()
+  const [busy, setBusy] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
+  const [form, setForm] = useState<{ open: boolean; name: string; server: string; key: string }>({ open: false, name: "", server: "", key: "" })
+  const live = view?.running === true
+  const s = view?.settings
+  const run = async (key: string, payload: Record<string, unknown>) => {
+    setBusy(key)
+    const r = await act(payload)
+    setBusy(null)
+    setMessage(r.error ? { tone: "error", text: r.error } : r.note ? { tone: "info", text: r.note } : null)
+    return r.error === null
+  }
+  const save = (patch: Partial<VerticalView["settings"]>) => void run("settings", { action: "settings", settings: patch })
+  const toggle = (id: string, on: boolean) => s && save({ destIds: on ? [...s.destIds, id] : s.destIds.filter((x) => x !== id) })
+  async function addDest() {
+    setBusy("add")
+    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add", name: form.name, url: joinRtmpServerAndKey(form.server, form.key) }) }).catch(() => null)
+    setBusy(null)
+    if (!response) return setMessage({ tone: "error", text: "Could not reach the server." })
+    if (handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as { item?: { id: string }; error?: string } | null
+    if (!response.ok || !body?.item) return setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` })
+    onDestsChanged?.()
+    setForm({ open: false, name: "", server: "", key: "" })
+    if (s) save({ destIds: [...s.destIds, body.item.id] })
+  }
+  const h = view?.health
+  return (
+    <div data-testid="vertical-card" className="min-w-0 space-y-3 rounded-2xl border border-black/10 bg-white p-3 break-words [overflow-wrap:anywhere]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-mono text-[13px] font-bold tracking-[0.04em]">/vertical 9:16</p>
+        <span data-testid="vertical-status" data-state={view?.state ?? "loading"} className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-[12px] font-bold tracking-[0.14em] uppercase ${tone(view?.state)}`}>
+          <span className={`size-1.5 rounded-full ${live ? "animate-pulse bg-white" : "bg-black/30"}`} />
+          {view ? VERTICAL_STATE_LABEL[view.state] : "…"}
+          {view && view.restarts > 0 ? <span title="Times the loop relaunched ffmpeg"> · {view.restarts} {view.restarts === 1 ? "restart" : "restarts"}</span> : null}
+        </span>
+      </div>
+      <p className="font-mono text-[12px] text-black/70">Reads Browser capture from the relay (/capture) and re-encodes it to 1080×1920: the whole 16:9 picture, centred, bars top and bottom. Needs Browser capture publishing to the relay. H.264 {4500}k CBR, 30 fps, keyframe 2s.</p>
+      <div className="space-y-1 font-mono text-[12px] text-black/70">
+        <p className="font-bold text-black">Vertical destinations</p>
+        {dests.length === 0 ? <p>No saved destinations yet. Add one below.</p> : null}
+        {dests.map((d) => (
+          <label key={d.id} className="flex items-center gap-2">
+            <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 accent-black" disabled={live || busy !== null || !s} checked={s?.destIds.includes(d.id) ?? false} onChange={(e) => toggle(d.id, e.target.checked)} />
+            <span className="min-w-0">{d.name} · {d.host}</span>
+          </label>
+        ))}
+        <button type="button" data-testid="vertical-dest-add" className={pillClass("outline", "sm")} disabled={live} onClick={() => setForm({ ...form, open: !form.open })}>+ Add vertical destination</button>
+        {form.open ? (
+          <form data-testid="vertical-dest-form" className="space-y-2 rounded-xl border border-black/10 bg-[#F6F6F3] p-3" onSubmit={(e) => { e.preventDefault(); void addDest() }}>
+            <input aria-label="Destination name" data-testid="vertical-dest-name" className="h-9 w-full border px-3 text-sm" placeholder="Name, e.g. TikTok Live" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <label className="block text-[11px] text-black/60">Server
+              <input aria-label="Server" data-testid="vertical-dest-url" autoComplete="off" spellCheck={false} className="h-9 w-full border px-3 text-sm" placeholder="rtmp://push.example.com/live" value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value })} />
+            </label>
+            <label className="block text-[11px] text-black/60">Stream key
+              <input aria-label="Stream key" data-testid="vertical-dest-key" type="password" autoComplete="off" spellCheck={false} className="h-9 w-full border px-3 text-sm" placeholder="xxxx-xxxx (leave empty if Server has the full URL)" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
+            </label>
+            <p className="text-[11px] text-black/60">Saved with the other destinations (same allow-list: RTMP_ALLOWED_HOSTS, or LAN + YouTube/Restream/Castr/Twitch/Facebook) and ticked for Vertical.</p>
+            <div className="flex gap-2">
+              <button type="submit" data-testid="vertical-dest-save" disabled={busy !== null} className={pillClass("live", "sm")}>Save destination</button>
+              <button type="button" className={pillClass("outline", "sm")} onClick={() => setForm({ open: false, name: "", server: "", key: "" })}>Cancel</button>
+            </div>
+          </form>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 font-mono text-[12px] text-black/70">
+        <label htmlFor="vertical-bg">Bars</label>
+        <select id="vertical-bg" data-testid="vertical-bg" disabled={live || !s} value={s && ["#000000", "#0000B6"].includes(s.bg) ? s.bg : "custom"} onChange={(e) => e.target.value !== "custom" && save({ bg: e.target.value })} className="h-8 border px-2">
+          <option value="#000000">Black</option>
+          <option value="#0000B6">Hyphen blue #0000B6</option>
+          {s && !["#000000", "#0000B6"].includes(s.bg) ? <option value="custom">{s.bg}</option> : null}
+        </select>
+        <input type="color" aria-label="Custom bar colour" data-testid="vertical-bg-custom" disabled={live || !s} value={s?.bg.toLowerCase() ?? "#000000"} onChange={(e) => save({ bg: e.target.value })} className="h-8 w-10 border" />
+        <label htmlFor="vertical-encoder">Encoder</label>
+        <select id="vertical-encoder" data-testid="vertical-encoder" disabled={live || !s} value={s?.encoder ?? "auto"} onChange={(e) => save({ encoder: e.target.value as VerticalView["settings"]["encoder"] })} className="h-8 border px-2">
+          <option value="auto">Auto (libx264, strict CBR)</option>
+          <option value="libx264">libx264 (CPU)</option>
+          <option value="videotoolbox">VideoToolbox (Mac GPU, lighter)</option>
+        </select>
+        <label htmlFor="vertical-audio">Audio</label>
+        <select id="vertical-audio" data-testid="vertical-audio" disabled={live || !s} value={s?.audio ?? "auto"} onChange={(e) => save({ audio: e.target.value as VerticalView["settings"]["audio"] })} className="h-8 border px-2">
+          <option value="auto">Auto (copy AAC, else re-encode)</option>
+          <option value="copy">Copy</option>
+          <option value="aac">AAC 128k 48 kHz</option>
+        </select>
+      </div>
+      {live ? (
+        <p data-testid="vertical-health" className="font-mono text-[12px] text-black/70">
+          → {view.hosts.join(", ") || "destinations"} · {view.encoder} · audio {view.audio}
+          {h && h.fps !== null ? ` · ${h.fps.toFixed(1)} fps` : ""}{h && h.kbps !== null ? ` · ${h.kbps}k` : ""}{h?.speed ? ` · ${h.speed.toFixed(2)}x` : ""}
+          {!view.sourceReady ? <span className="block font-bold text-[#8a4b06]">Browser capture isn&apos;t publishing to the relay (/capture). Start it with destination “Relay”.</span> : null}
+          {h?.warnings?.length ? <span className="block font-bold text-[#8a4b06]">{h.warnings.join(" · ")}</span> : null}
+        </p>
+      ) : null}
+      {view?.error && live ? <p role="alert" data-testid="vertical-error" className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[12px] font-bold text-[#7a3b06]">{view.error}</p> : null}
+      {view?.adopted && live ? <p data-testid="vertical-adopted" className="font-mono text-[12px] text-black/70">Found Vertical already running (started before the server restarted). Stop works on it.</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <ConfirmButton data-testid="vertical-start" className={pillClass("solid")} disabled={live || busy !== null || !s?.destIds.length} confirmLabel="Start vertical? · confirm" onConfirm={() => void run("start", { action: "start" })}>{busy === "start" ? "Starting…" : "Start vertical"}</ConfirmButton>
+        <ConfirmButton data-testid="vertical-stop" className={pillClass("danger")} disabled={!live || busy !== null} confirmLabel="Stop vertical? · confirm" onConfirm={() => void run("stop", { action: "stop" })}>{busy === "stop" ? "Stopping…" : "Stop"}</ConfirmButton>
+      </div>
+      {view?.command ? (
+        <details className="font-mono text-[11px] text-black/60">
+          <summary>ffmpeg command (keys redacted)</summary>
+          <p data-testid="vertical-command" className="mt-1 break-all">{view.command}</p>
+        </details>
+      ) : null}
+      {message ? <p role="status" data-testid="vertical-message" className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
+    </div>
+  )
+}
+
+/** Deck tile: status + two-tap Start/Stop. */
+export function VerticalDeckTile() {
+  const { view, act } = useVertical()
+  const [armed, setArmed] = useState<"start" | "stop" | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!armed) return
+    const id = window.setTimeout(() => setArmed(null), 3000)
+    return () => window.clearTimeout(id)
+  }, [armed])
+  const live = view?.running === true
+  const kind = live ? "stop" : "start"
+  const tap = async () => {
+    if (armed !== kind) return setArmed(kind)
+    setArmed(null)
+    setBusy(true)
+    const r = await act({ action: kind })
+    setBusy(false)
+    setError(r.error)
+  }
+  const st = view?.state
+  return (
+    <div data-testid="deck-vertical" data-state={st ?? "loading"} className="col-span-2 rounded-2xl bg-white/5 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="font-mono text-[13px] font-bold tracking-[0.08em] uppercase">Vertical 9:16</p>
+        <span data-testid="deck-vertical-status" className={`rounded-full px-2.5 py-1 font-mono text-[12px] font-bold uppercase ${st === "forwarding" ? "bg-[#12b76a] text-black" : st === "connecting" || st === "retrying" || st === "waiting" ? "bg-[#fdb022] text-black" : st === "stalled" || st === "blocked" ? "bg-[#f04438] text-white" : "bg-white/15"}`}>{view ? VERTICAL_STATE_LABEL[view.state] : "…"}</span>
+      </div>
+      {live ? <p className="mb-2 truncate font-mono text-[12px] text-white/70">→ {view.hosts.join(", ")}{view.health.fps !== null ? ` · ${view.health.fps.toFixed(0)} fps` : ""}{view.health.kbps !== null ? ` · ${view.health.kbps}k` : ""}{view.restarts ? ` · ${view.restarts} restarts` : ""}</p> : <p className="mb-2 font-mono text-[12px] text-white/60">{view?.settings.destIds.length ? `${view.settings.destIds.length} destination${view.settings.destIds.length === 1 ? "" : "s"} ticked` : "No vertical destination ticked (desk › Encoder)."}</p>}
+      <button type="button" data-testid="deck-vertical-toggle" data-armed={armed ? "1" : undefined} disabled={busy || !view || (!live && !view.settings.destIds.length)} onClick={() => void tap()}
+        className={`min-h-14 w-full touch-manipulation rounded-2xl px-3 py-2 text-[17px] font-bold select-none disabled:opacity-35 ${live ? "border-2 border-[#f97066] text-[#fda29b]" : "bg-white/10 text-white"} ${armed ? "ring-4 ring-[#fdb022] ring-offset-2 ring-offset-[#0b0b0f]" : ""}`}>
+        {armed ? "Tap again to confirm" : busy ? "…" : live ? "Stop vertical" : "Start vertical"}
+      </button>
+      {error ? <p role="alert" className="mt-2 font-mono text-[12px] text-[#fda29b]">{error}</p> : null}
+    </div>
+  )
+}

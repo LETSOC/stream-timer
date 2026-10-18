@@ -14,6 +14,7 @@ import {
 import { getCaptureKey } from "@/lib/capture-key"
 import { CAPTURE_BITRATES } from "@/lib/capture-options"
 import { RELAY_TARGET, resolveDestination } from "@/lib/rtmp-destinations"
+import { stopVertical } from "@/lib/vertical"
 import { ensureRelayServer, relayPublishUrl, stopRelayEverything, stopRelayServerIfIdle } from "@/lib/relay"
 
 export async function GET(request: Request) {
@@ -97,6 +98,7 @@ export async function DELETE(request: Request) {
   const channel = params.get("source") === "capture" || params.get("mode") === "capture" ? "capture" : "slate"
   if (target === "rtmp-all") {
     const result = await stopAllRtmp()
+    await stopVertical() // the Vertical (9:16) output is an outgoing stream too
     await stopRelayEverything() // forwards + MediaMTX too; forward ticks are kept
     return Response.json({ ...readStatus(), note: `Stopped ${result.stopped.length} stream supervisor(s), the relay, and ${result.strays.length} stray ffmpeg publisher(s).` })
   }

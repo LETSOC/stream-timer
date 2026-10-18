@@ -10,7 +10,7 @@
 # host in rtmp(s) URLs in the output (ffmpeg prints its output URL).
 #      LOOP_WATCH_LOG=<log> (forwards): stall watchdog. ffmpeg's -progress output in that log must
 #      show total_size growing; if it doesn't for LOOP_STALL_SECS (25) after LOOP_STALL_GRACE (30)
-#      the child is killed and restarted (e.g. a Castr connection that hangs without ffmpeg exiting).
+#      the child is killed and restarted (LOOP_WATCH_KEY picks another counter, e.g. out_time_us for the tee muxer, which reports total_size=N/A); (e.g. a Castr connection that hangs without ffmpeg exiting).
 # Stop: SIGTERM the process group. Bash 3.2 compatible (macOS).
 
 umask 077
@@ -36,7 +36,7 @@ watch_progress() {
   sleep "${LOOP_STALL_GRACE:-30}"
   since=$(date +%s)
   while kill -0 "$pid" 2>/dev/null; do
-    cur=$(tail -c 4096 "$LOOP_WATCH_LOG" 2>/dev/null | grep -a 'total_size=' | tail -n 1)
+    cur=$(tail -c 4096 "$LOOP_WATCH_LOG" 2>/dev/null | grep -a "${LOOP_WATCH_KEY:-total_size}=" | tail -n 1)
     now=$(date +%s)
     if [[ -n "$cur" && "$cur" != "$last" ]]; then
       last="$cur"; since=$now
