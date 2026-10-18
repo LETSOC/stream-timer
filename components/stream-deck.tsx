@@ -6,6 +6,7 @@ import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
 import { useResumeGeneration } from "@/lib/use-resume"
+import { LocalAccessPill } from "@/components/local-access-pill"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
@@ -18,7 +19,7 @@ const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "B
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling (no WebSocket)", offline: "Offline" }
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
-type Preview = "off" | "stream" | "slate" | "capture"
+type Preview = "off" | "stream" | "slate" | "capture" | "vertical"
 
 function endCardLabel(state: DeckState, now: number): { when: string; remaining: string; testClock: boolean } {
   const hhmm = state.endAt || state.endTime
@@ -55,14 +56,14 @@ export function StreamDeck() {
   const [busy, setBusy] = useState<string | null>(null)
   const [armed, setArmed] = useState<string | null>(null)
   const [toast, setToast] = useState<{ tone: "error" | "ok"; text: string; undo?: TransportAction } | null>(null)
-  const [preview, setPreview] = useStoredPref<Preview>("deck-preview-mode", "off", ["off", "stream", "slate", "capture"])
+  const [preview, setPreview] = useStoredPref<Preview>("deck-preview-mode", "off", ["off", "stream", "slate", "capture", "vertical"])
   // Capture/Slate out preview sound: off by default, and back off whenever the tab changes (/stream preview stays muted).
   const [previewSound, setPreviewSound] = useState(false)
   const [soundFor, setSoundFor] = useState(preview)
   if (soundFor !== preview) { setSoundFor(preview); setPreviewSound(false) }
   const [collapsed, setCollapsed] = useStoredPref<"0" | "1">("deck-preview-collapsed", "0", ["0", "1"])
   const [big, setBig] = useState(false)
-  const [relayReady, setRelayReady] = useState<{ slate: boolean; capture: boolean }>({ slate: false, capture: false })
+  const [relayReady, setRelayReady] = useState<{ slate: boolean; capture: boolean; vertical: boolean }>({ slate: false, capture: false, vertical: false })
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250)
@@ -79,7 +80,7 @@ export function StreamDeck() {
   }, [armed])
   useEffect(() => {
     if (!toast) return
-    const id = window.setTimeout(() => setToast(null), toast.undo ? 8000 : 4000)
+    const id = window.setTimeout(() => setToast(null), toast.undo ? 6000 : 2500)
     return () => window.clearTimeout(id)
   }, [toast])
   useEffect(() => {
@@ -87,7 +88,7 @@ export function StreamDeck() {
     let cancelled = false
     const load = async () => {
       const body = (await (await fetch("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: Record<string, { ready?: boolean }> } | null
-      if (!cancelled && body?.paths) setRelayReady({ slate: body.paths.slate?.ready === true, capture: body.paths.capture?.ready === true })
+      if (!cancelled && body?.paths) setRelayReady({ slate: body.paths.slate?.ready === true, capture: body.paths.capture?.ready === true, vertical: body.paths.vertical?.ready === true })
     }
     void load()
     const id = window.setInterval(() => void load(), 2000)
@@ -188,7 +189,7 @@ export function StreamDeck() {
             data-big={big ? "1" : "0"}
             aria-label={big ? "Make preview smaller" : "Make preview bigger"}
             onClick={() => setBig(!big)}
-            className={`relative mx-auto mt-2 block aspect-video touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}
+            className={`relative mx-auto mt-2 block touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${preview === "vertical" ? `aspect-[9/16] ${big ? "w-[70%] max-w-[calc(62dvh*9/16)]" : "w-[34%] max-w-[calc(30dvh*9/16)]"}` : `aspect-video ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}`}
           >
             {preview === "stream" && screen === "program" ? <ProgramPlayer key={state?.programSource ?? "main"} scope="deck" src={programOperatorSrc(state?.programSource === "backup" ? "program-backup" : "program")} ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
               <span data-testid="deck-preview-hls"><StreamPlayer key={preview} inline src={`/api/relay/hls/${preview}/index.m3u8`} />
@@ -203,14 +204,15 @@ export function StreamDeck() {
               </span>
             ) : (
               <span data-testid="deck-preview-placeholder" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono text-[12px] text-white/60">
-                <span className="text-[13px] font-bold text-white/80">No signal on {preview === "slate" ? "Slate" : "Capture"} out</span>
-                Start the {preview === "slate" ? "Slate" : "Browser capture"} channel with the relay on.
+                <span className="text-[13px] font-bold text-white/80">{preview === "vertical" ? "Vertical not publishing" : `No signal on ${preview === "slate" ? "Slate" : "Capture"} out`}</span>
+                {preview === "vertical" ? "Start Vertical 9:16 (Outputs below)." : `Start the ${preview === "slate" ? "Slate" : "Browser capture"} channel with the relay on.`}
               </span>
             )}
           </div>
         )}
       </div>
 
+      <LocalAccessPill dark className="mb-3" />
       <section aria-label="Current state" data-testid="deck-state" data-screen={screen ?? ""} data-rev={state?.rev ?? ""} className="mb-3 rounded-2xl bg-white/5 p-4">
         <p className="truncate font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">{state?.name ?? "Loading…"}</p>
         <div className="mt-1 flex items-end justify-between gap-2">
@@ -292,22 +294,23 @@ export function StreamDeck() {
       {live ? <p className="mt-2 font-mono text-[12px] text-white/60">Live: test clocks, pause, reset and restore are locked.</p> : null}
 
       {toast ? (
-        <p role="status" data-testid="deck-toast" className={`fixed inset-x-3 bottom-[max(16px,env(safe-area-inset-bottom))] rounded-xl px-4 py-3 text-center font-bold shadow-lg ${toast.tone === "error" ? "bg-[#b42318]" : "bg-[#12b76a]"}`}>
-          {toast.text}
-          {toast.undo ? <> · <button type="button" data-testid="deck-toast-undo" className="underline underline-offset-4" onClick={() => { const undo = toast.undo!; setToast(null); void act("undo-end", undo) }}>Undo</button></> : null}
+        <p role="status" data-testid="deck-toast" data-tone={toast.tone} className={`pointer-events-none fixed bottom-[max(12px,env(safe-area-inset-bottom))] left-[max(12px,env(safe-area-inset-left))] z-30 inline-flex max-w-[calc(100vw-24px)] items-center gap-1.5 rounded-full bg-black/80 px-2.5 py-1 font-mono text-[12px] text-white/85 backdrop-blur ${toast.tone === "error" ? "ring-1 ring-[#f04438]/50" : "ring-1 ring-white/10"}`}>
+          <span aria-hidden className={`size-2 shrink-0 rounded-full ${toast.tone === "error" ? "bg-[#f04438]" : "bg-[#12b76a]"}`} />
+          <span className="truncate">{toast.text}</span>
+          {toast.undo ? <> · <button type="button" data-testid="deck-toast-undo" className="pointer-events-auto underline underline-offset-4" onClick={() => { const undo = toast.undo!; setToast(null); void act("undo-end", undo) }}>Undo</button></> : null}
         </p>
       ) : null}
     </main>
   )
 }
 
-const PREVIEW_LABEL: Record<Preview, string> = { off: "Off", stream: "/stream", slate: "Slate", capture: "Capture" }
+const PREVIEW_LABEL: Record<Preview, string> = { off: "Off", stream: "/stream", slate: "Slate", capture: "Capture", vertical: "9:16" }
 
 function PreviewBar({ preview, setPreview, collapsed, toggle }: { preview: Preview; setPreview: (value: Preview) => void; collapsed: boolean; toggle: () => void }) {
   return (
     <div className="flex items-center gap-1">
-      <div role="radiogroup" aria-label="Preview" className="grid flex-1 grid-cols-4 gap-1 rounded-xl bg-white/5 p-0.5">
-        {(["off", "stream", "slate", "capture"] as const).map((name) => (
+      <div role="radiogroup" aria-label="Preview" className="grid flex-1 grid-cols-5 gap-1 rounded-xl bg-white/5 p-0.5">
+        {(["off", "stream", "slate", "capture", "vertical"] as const).map((name) => (
           <button key={name} type="button" role="radio" aria-checked={preview === name} data-testid={`deck-preview-${name}`} onClick={() => setPreview(name)} className={`min-h-9 rounded-lg font-mono text-[12px] ${preview === name ? "bg-white text-black" : "text-white/80"}`}>
             {PREVIEW_LABEL[name]}
           </button>
