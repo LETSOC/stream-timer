@@ -1,4 +1,5 @@
 "use client"
+import { StatusToast, TOAST_MS, TOAST_UNDO_MS } from "@/components/status-toast"
 import { LocalAccessPill } from "@/components/local-access-pill"
 
 import { pullUrlError } from "@/lib/program-source"
@@ -168,7 +169,7 @@ export function OperatorConsole() {
     setToastState(null)
   }, [])
   const showToast = useCallback((kind: Toast["kind"], text: string, undo?: () => void) => {
-    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000, extend: 8000, failover: 8000 }[kind]
+    const ms = undo ? TOAST_UNDO_MS : { copy: TOAST_MS, "copy-failed": 6000, sync: TOAST_MS, conflict: 5000, error: 4000, extend: TOAST_MS, failover: 5000 }[kind]
     const id = ++toastSeq.current
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
     setToastState({ id, kind, text, undo })
@@ -1550,25 +1551,9 @@ export function OperatorConsole() {
         <a href="#top" className="font-bold text-black underline underline-offset-4" onClick={(event) => { event.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }) }}>↑ Back to top</a>
       </footer>
       {toast ? (
-        <button
-          type="button"
-          key={toast.id}
-          role="status"
-          aria-live="polite"
-          data-testid="toast"
-          data-kind={toast.kind}
-          title={toast.undo ? "Tap to undo" : "Tap to dismiss"}
-          onClick={toast.kind === "copy-failed" ? undefined : () => { dismissToast(); toast.undo?.() }}
-          onTouchMove={toast.kind === "copy-failed" ? undefined : dismissToast}
-          className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-left text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]"
-        >
-          <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" || toast.kind === "failover" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
-          <span className="min-w-0">
-            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up", extend: "End time", failover: "Program source" }[toast.kind]}</span>
-            <span className={`block font-mono text-[12px] text-white/75 ${toast.kind === "copy-failed" ? "break-all select-all" : "truncate"}`}>{toast.text}</span>
-          </span>
-          {toast.undo ? <span data-testid="toast-undo" className="shrink-0 rounded-full bg-[#D9FF43] px-3 py-1 font-mono text-[12px] font-bold text-black">Undo</span> : null}
-        </button>
+        <StatusToast key={toast.id} kind={toast.kind} tone={toast.kind === "error" || toast.kind === "conflict" ? "error" : toast.kind === "failover" ? "warn" : "ok"}
+          text={toast.kind === "copy" ? `Copied · ${toast.text}` : toast.kind === "copy-failed" ? `Copy this: ${toast.text}` : toast.kind === "sync" ? "Synced from another device" : toast.text}
+          selectable={toast.kind === "copy-failed"} undoTestid="toast-undo" onUndo={toast.undo ? () => { const undo = toast.undo!; dismissToast(); undo() } : undefined} />
       ) : null}
       {showHelp ? (
         <div role="dialog" aria-modal="false" aria-label="Keyboard shortcuts" className="fixed left-4 bottom-4 z-50 w-72 rounded-2xl border border-black/10 bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.2)]">

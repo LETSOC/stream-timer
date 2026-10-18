@@ -64,3 +64,18 @@ export function handoverDone(input: { screenIsProgram: boolean; pendingSince: nu
   if (airGone && (incomingVideoSince !== null || now - pendingSince > 4000)) return true
   return now - pendingSince > 30_000
 }
+
+/**
+ * Operator previews (desk/deck players, not /stream): "Waiting for OBS" only once the path has had no
+ * publisher for NOT_READY_MS — never for a player stall, a reload or a WebRTC→HLS swap. Short gaps
+ * keep the last frame with a small "reconnecting" badge.
+ */
+export type PreviewDisplay = "video" | "connecting" | "reconnecting" | "standby"
+export const PREVIEW_GAP_MS = 1500
+export function previewDisplay(input: { now: number; ready: boolean; notReadySince: number | null; lastFrameAt: number | null }): PreviewDisplay {
+  const { now, ready, notReadySince, lastFrameAt } = input
+  const gone = !ready && notReadySince !== null && now - notReadySince > NOT_READY_MS
+  if (gone) return "standby"
+  if (lastFrameAt === null) return "connecting"
+  return now - lastFrameAt > PREVIEW_GAP_MS ? "reconnecting" : "video"
+}

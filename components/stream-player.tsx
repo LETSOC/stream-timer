@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PreviewBadge } from "@/components/preview-badge";
-import { playWhep, whepPathFromHls, type WhepSession } from "@/lib/whep-client";
+import { whepPathFromHls } from "@/lib/whep-client";
+import { useWhep } from "@/lib/use-whep";
 import type Hls from "hls.js";
 import { useResumeGeneration } from "@/lib/use-resume";
 
@@ -13,39 +14,47 @@ import { useResumeGeneration } from "@/lib/use-resume";
  */
 export function StreamPlayer({ src, inline = false }: { src: string; inline?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const rtcRef = useRef<HTMLVideoElement>(null);
   const resume = useResumeGeneration(); // rebuild after the background (iOS suspends media)
-  // Relay previews try WebRTC (<1s, video only) first; sound or any failure → HLS.
+  // Relay previews: WebRTC (<1s, picture only) in its own element on top. Sound (unmute) or a WebRTC
+  // failure starts HLS underneath; the WebRTC picture stays until HLS has a frame, then it's closed.
+  // Sticky for this player: muting again stays on HLS (no swap back mid-session).
   const whepPath = whepPathFromHls(src);
-  const [hlsOnly, setHlsOnly] = useState(false);
-  const [mode, setMode] = useState<"webrtc" | "hls" | null>(null);
-  const [srcSeen, setSrcSeen] = useState(src);
-  if (srcSeen !== src) { setSrcSeen(src); setHlsOnly(false); setMode(null); }
-  const tryFast = whepPath !== null && !hlsOnly;
+  const [wantHls, setWantHls] = useState(false);
+  const [hlsPlaying, setHlsPlaying] = useState(false);
+  const [seen, setSeen] = useState(src);
+  if (seen !== src) { setSeen(src); setWantHls(false); setHlsPlaying(false); }
+  const swapped = whepPath !== null && hlsPlaying && wantHls;
+  const rtc = useWhep(rtcRef, whepPath, whepPath !== null && !swapped);
+  const needHls = whepPath === null || wantHls || rtc.failed;
+  const showRtc = whepPath !== null && !rtc.failed && !(needHls && hlsPlaying);
+  const desiredMuted = useRef(true);
+
+  useEffect(() => {
+    const rtcVideo = rtcRef.current;
+    if (!rtcVideo) return;
+    const onVolume = () => { if (!rtcVideo.muted) { desiredMuted.current = false; rtcVideo.muted = true; setWantHls(true); } };
+    rtcVideo.addEventListener("volumechange", onVolume);
+    return () => rtcVideo.removeEventListener("volumechange", onVolume);
+  }, []);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !swapped) return;
+    // Swap done: HLS is visible; carry over the sound choice made on the WebRTC element.
+    if (!desiredMuted.current) { video.muted = false; void video.play().catch(() => { video.muted = true; void video.play().catch(() => undefined); }); }
+  }, [swapped]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !needHls) return;
+    const onPlaying = () => { if (video.readyState >= 2) setHlsPlaying(true); };
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("timeupdate", onPlaying);
 
     let hls: Hls | null = null;
     let cancelled = false;
-    let whep: WhepSession | null = null;
-    // Unmuting a WebRTC preview (no AAC in WebRTC) switches it to HLS, which has the sound.
-    const onVolume = () => { if (whep && !video.muted) setHlsOnly(true); };
-    video.addEventListener("volumechange", onVolume);
 
     const start = async () => {
-      if (tryFast && whepPath) {
-        try {
-          whep = await playWhep(video, whepPath, { timeoutMs: 3000, onFail: () => { if (!cancelled) setHlsOnly(true); } });
-          if (cancelled) { whep.stop(); return; }
-          setMode("webrtc");
-          return;
-        } catch {
-          whep = null;
-          if (cancelled) return;
-        }
-      }
-      setMode(whepPath ? "hls" : null);
       const { default: HlsLib } = await import("hls.js");
       if (cancelled || !videoRef.current) return;
       const node = videoRef.current;
@@ -94,29 +103,46 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
 
     return () => {
       cancelled = true;
-      video.removeEventListener("volumechange", onVolume);
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("timeupdate", onPlaying);
       if (inline) node.removeEventListener("webkitbeginfullscreen", exitNative);
-      whep?.stop();
       hls?.destroy();
       video.removeAttribute("src");
       video.load();
     };
-  }, [src, inline, resume, tryFast, whepPath]);
+  }, [src, inline, resume, needHls]);
 
+  const vClass = `absolute inset-0 h-full w-full bg-[#111111] object-contain ${inline ? "pointer-events-none" : ""}`;
+  const inlineProps = inline ? { "webkit-playsinline": "true", "x-webkit-airplay": "deny" } : {};
   return (
     <>
-    <PreviewBadge mode={mode} />
-    <video
-      ref={videoRef}
-      className={`absolute inset-0 h-full w-full bg-[#111111] object-contain ${inline ? "pointer-events-none" : ""}`}
-      autoPlay
-      muted
-      playsInline
-      controls={!inline}
-      disablePictureInPicture={inline || undefined}
-      disableRemotePlayback={inline || undefined}
-      {...(inline ? { "webkit-playsinline": "true", "x-webkit-airplay": "deny" } : {})}
-    />
+      <video
+        ref={videoRef}
+        data-active={showRtc ? undefined : "1"}
+        className={vClass}
+        autoPlay
+        muted
+        playsInline
+        controls={!inline && !showRtc}
+        disablePictureInPicture={inline || undefined}
+        disableRemotePlayback={inline || undefined}
+        {...inlineProps}
+      />
+      {whepPath !== null ? (
+        <video
+          ref={rtcRef}
+          data-active={showRtc ? "1" : undefined}
+          className={`${vClass} ${showRtc ? "" : "invisible"}`}
+          autoPlay
+          muted
+          playsInline
+          controls={!inline && showRtc}
+          disablePictureInPicture={inline || undefined}
+          disableRemotePlayback={inline || undefined}
+          {...inlineProps}
+        />
+      ) : null}
+      <PreviewBadge mode={whepPath === null ? null : showRtc ? (rtc.lastFrameAt !== null ? "webrtc" : null) : "hls"} />
     </>
   );
 }

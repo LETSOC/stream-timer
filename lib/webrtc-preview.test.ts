@@ -45,3 +45,14 @@ test("WHEP proxy: read paths only, session ids validated, Location rewritten", (
   assert.equal(whepPathFromHls("/api/relay/hls/program-backup/index.m3u8"), "program-backup")
   assert.equal(whepPathFromHls("/media/stream.m3u8"), null)
 })
+
+import { previewDisplay } from "@/lib/program-display"
+test("preview: 'Waiting for OBS' only after 3s with no publisher; stalls/swaps show reconnecting, never standby", () => {
+  const now = 100_000
+  assert.equal(previewDisplay({ now, ready: true, notReadySince: null, lastFrameAt: now - 100 }), "video")
+  assert.equal(previewDisplay({ now, ready: true, notReadySince: null, lastFrameAt: now - 8000 }), "reconnecting") // long player stall, OBS still there
+  assert.equal(previewDisplay({ now, ready: true, notReadySince: null, lastFrameAt: null }), "connecting") // (re)loading / swapping
+  assert.equal(previewDisplay({ now, ready: false, notReadySince: now - 2000, lastFrameAt: now - 2000 }), "reconnecting") // brief publisher gap
+  assert.equal(previewDisplay({ now, ready: false, notReadySince: now - 3500, lastFrameAt: now - 3500 }), "standby")
+  assert.equal(previewDisplay({ now, ready: false, notReadySince: now - 3500, lastFrameAt: null }), "standby")
+})

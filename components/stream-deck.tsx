@@ -6,6 +6,7 @@ import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
 import { useResumeGeneration } from "@/lib/use-resume"
+import { StatusToast, TOAST_MS, TOAST_UNDO_MS } from "@/components/status-toast"
 import { LocalAccessPill } from "@/components/local-access-pill"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
@@ -80,7 +81,7 @@ export function StreamDeck() {
   }, [armed])
   useEffect(() => {
     if (!toast) return
-    const id = window.setTimeout(() => setToast(null), toast.undo ? 6000 : 2500)
+    const id = window.setTimeout(() => setToast(null), toast.undo ? TOAST_UNDO_MS : TOAST_MS)
     return () => window.clearTimeout(id)
   }, [toast])
   useEffect(() => {
@@ -197,7 +198,7 @@ export function StreamDeck() {
                 <button type="button" data-testid="deck-preview-sound" aria-pressed={previewSound} onClick={(e) => {
                   // Inside the tap (iOS only unmutes from a gesture); never let the tap reach the preview.
                   e.stopPropagation()
-                  const video = document.querySelector<HTMLVideoElement>("[data-testid=deck-preview-hls] video")
+                  const video = document.querySelector<HTMLVideoElement>("[data-testid=deck-preview-hls] video[data-active=\"1\"]")
                   const on = !previewSound
                   if (video) { video.muted = !on; if (on) void video.play().catch(() => { video.muted = true; setPreviewSound(false) }) }
                   setPreviewSound(on)
@@ -295,11 +296,7 @@ export function StreamDeck() {
       {live ? <p className="mt-2 font-mono text-[12px] text-white/60">Live: test clocks, pause, reset and restore are locked.</p> : null}
 
       {toast ? (
-        <p role="status" data-testid="deck-toast" data-tone={toast.tone} className={`pointer-events-none fixed bottom-[max(12px,env(safe-area-inset-bottom))] left-[max(12px,env(safe-area-inset-left))] z-30 inline-flex max-w-[calc(100vw-24px)] items-center gap-1.5 rounded-full bg-black/80 px-2.5 py-1 font-mono text-[12px] text-white/85 backdrop-blur ${toast.tone === "error" ? "ring-1 ring-[#f04438]/50" : "ring-1 ring-white/10"}`}>
-          <span aria-hidden className={`size-2 shrink-0 rounded-full ${toast.tone === "error" ? "bg-[#f04438]" : "bg-[#12b76a]"}`} />
-          <span className="truncate">{toast.text}</span>
-          {toast.undo ? <> · <button type="button" data-testid="deck-toast-undo" className="pointer-events-auto underline underline-offset-4" onClick={() => { const undo = toast.undo!; setToast(null); void act("undo-end", undo) }}>Undo</button></> : null}
-        </p>
+        <StatusToast tone={toast.tone} text={toast.text} testid="deck-toast" undoTestid="deck-toast-undo" onUndo={toast.undo ? () => { const undo = toast.undo!; setToast(null); void act("undo-end", undo) } : undefined} />
       ) : null}
     </main>
   )

@@ -5,8 +5,9 @@ import { stallBackoffMs, useResumeGeneration } from "@/lib/use-resume"
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type Hls from "hls.js"
 import { PreviewBadge } from "@/components/preview-badge"
-import { playWhep, whepPathFromHls, type WhepSession } from "@/lib/whep-client"
-import { keepLoaded, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { whepPathFromHls } from "@/lib/whep-client"
+import { useWhep } from "@/lib/use-whep"
+import { keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -41,15 +42,8 @@ function useActiveSince(active: boolean, now: number) {
  * Loads LL-HLS into the <video> while `load`, and reports when the picture last advanced.
  * The element is the same for the player's whole life (WebAudio can attach to it once).
  */
-/** `fast`: operator previews only (never the on-air /stream feed) — try WebRTC first, HLS on failure. */
-function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, fast = false) {
+function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean) {
   const hlsRef = useRef<Hls | null>(null)
-  const whepPath = fast ? whepPathFromHls(src) : null
-  const [hlsOnly, setHlsOnly] = useState(false)
-  const [mode, setMode] = useState<"webrtc" | "hls" | null>(null)
-  const [srcSeen, setSrcSeen] = useState(src)
-  if (srcSeen !== src) { setSrcSeen(src); setHlsOnly(false) }
-  const tryFast = whepPath !== null && !hlsOnly
   const [lastFrameAt, setLastFrameAt] = useState<number | null>(null)
   const [latency, setLatency] = useState<number | null>(null)
   const wantSoundRef = useRef(wantSound)
@@ -76,20 +70,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         void video.play().catch(() => undefined)
       })
     }
-    let whep: WhepSession | null = null
     void (async () => {
-      if (tryFast && whepPath) {
-        try {
-          whep = await playWhep(video, whepPath, { timeoutMs: 3000, onFail: () => { if (!cancelled) setHlsOnly(true) } })
-          if (cancelled) { whep.stop(); return }
-          setMode("webrtc")
-          return
-        } catch {
-          whep = null
-          if (cancelled) return
-        }
-      }
-      setMode(fast ? "hls" : null)
       const { default: HlsLib } = await import("hls.js")
       if (cancelled) return
       if (HlsLib.isSupported()) {
@@ -112,12 +93,11 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     return () => {
       cancelled = true
       hlsRef.current = null
-      whep?.stop()
       hls?.destroy()
       video.removeAttribute("src")
       video.load()
     }
-  }, [videoRef, src, load, resumeGen, kick, tryFast, whepPath, fast])
+  }, [videoRef, src, load, resumeGen, kick])
   // Only a real unload (other source, OBS gone) forgets the last frame; a rebuild keeps it so the
   // picture holds instead of flashing "Waiting for OBS".
   useEffect(() => () => {
@@ -171,7 +151,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       video.removeEventListener("error", onStall)
     }
   }, [videoRef, load])
-  return { lastFrameAt, latency, mode }
+  return { lastFrameAt, latency }
 }
 
 function Standby({ small = false }: { small?: boolean }) {
@@ -303,9 +283,24 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const [audioOn, setAudioOn] = useState(false)
   const [level, setLevel] = useState<number | null>(null)
   const audioOnRef = useRef(false)
-  // Fast (WebRTC, video only) while the preview is muted; sound on → HLS (WebRTC can't carry AAC).
-  const { lastFrameAt, latency, mode } = useProgramHls(videoRef, src, load, () => audioOnRef.current, pref.muted)
-  const shown = programDisplay({ now, activeSince, ready: isReady, readyAt, notReadySince, lastFrameAt })
+  // Fast preview: WebRTC (picture only) in its own element on top while muted. Sound on → HLS loads
+  // underneath (this element carries the WebAudio graph), and WebRTC closes once HLS has a frame.
+  // Sticky: muting again stays on HLS for this player (no swap back mid-session).
+  const whepPath = whepPathFromHls(src)
+  const rtcRef = useRef<HTMLVideoElement>(null)
+  const [stickyHls, setStickyHls] = useState(false)
+  if (!pref.muted && !stickyHls) setStickyHls(true)
+  const wantHls = stickyHls || !pref.muted
+  const [rtcFailedSeen, setRtcFailedSeen] = useState(false)
+  const hlsLoad = load && (whepPath === null || wantHls || rtcFailedSeen)
+  const { lastFrameAt: hlsFrameAt, latency } = useProgramHls(videoRef, src, hlsLoad, () => audioOnRef.current)
+  const hlsPlaying = hlsFrameAt !== null && now - hlsFrameAt < 1000
+  const rtc = useWhep(rtcRef, whepPath, load && whepPath !== null && !(wantHls && hlsPlaying))
+  if (rtc.failed !== rtcFailedSeen) setRtcFailedSeen(rtc.failed)
+  const showRtc = whepPath !== null && !rtc.failed && rtc.lastFrameAt !== null && !(hlsLoad && hlsPlaying)
+  const lastFrameAt = Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) >= 0 ? Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) : null
+  void activeSince; void readyAt
+  const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt })
 
   /** element → analyser → gain → speakers, gain 0 until sound is on (the gain node is the real mute). */
   const buildGraph = useCallback(() => {
@@ -407,9 +402,11 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const needsTap = !pref.muted && !audioOn
   return (
     <div data-testid={`program-player-${scope}`} data-display={shown} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-audio={audioOn ? (pref.muted ? "muted" : "on") : "off"} data-level-db={db ?? ""} className={`absolute inset-0 ${className}`}>
-      <div className={`absolute inset-0 bg-black transition-opacity duration-300 ${shown === "under" ? "opacity-0" : "opacity-100"}`}>
-        <video ref={videoRef} className="pointer-events-none h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture {...{ "webkit-playsinline": "true" }} />
-        {shown === "standby" ? <Standby small /> : <PreviewBadge mode={mode} />}
+      <div className="absolute inset-0 bg-black">
+        <video ref={videoRef} data-active={showRtc ? undefined : "1"} className="pointer-events-none absolute inset-0 h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture {...{ "webkit-playsinline": "true" }} />
+        {whepPath !== null ? <video ref={rtcRef} data-active={showRtc ? "1" : undefined} data-testid={`program-rtc-${scope}`} className={`pointer-events-none absolute inset-0 h-full w-full object-contain ${showRtc ? "" : "invisible"}`} autoPlay playsInline muted disablePictureInPicture {...{ "webkit-playsinline": "true" }} /> : null}
+        {shown === "standby" ? <Standby small /> : <PreviewBadge mode={whepPath === null ? null : showRtc ? "webrtc" : hlsPlaying ? "hls" : null} />}
+        {shown === "reconnecting" || (shown === "connecting" && lastFrameAt === null && load) ? <span data-testid={`program-reconnecting-${scope}`} className="pointer-events-none absolute top-1.5 right-1.5 z-10 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white/80">{shown === "connecting" ? "connecting…" : "reconnecting…"}</span> : null}
       </div>
       <div
         className="absolute right-1.5 bottom-1.5 left-1.5 z-10 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1 font-mono text-[11px] text-white"

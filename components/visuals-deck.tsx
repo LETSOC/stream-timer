@@ -1,5 +1,6 @@
 "use client"
 
+import { StatusToast, TOAST_MS } from "@/components/status-toast"
 import Link from "next/link"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
@@ -26,7 +27,7 @@ export function VisualsDeck() {
   }, [])
   useEffect(() => {
     if (!toast) return
-    const id = window.setTimeout(() => setToast(null), 3000)
+    const id = window.setTimeout(() => setToast(null), TOAST_MS)
     return () => window.clearTimeout(id)
   }, [toast])
   const v = state?.visuals
@@ -139,7 +140,7 @@ export function VisualsDeck() {
       </section>
 
       {toast ? (
-        <p role="status" data-testid="visuals-toast" className={`fixed inset-x-3 bottom-[max(16px,env(safe-area-inset-bottom))] rounded-xl px-4 py-3 text-center font-bold shadow-lg ${toast.tone === "error" ? "bg-[#b42318]" : "bg-[#12b76a]"}`}>{toast.text}</p>
+        <StatusToast tone={toast.tone} text={toast.text} testid="visuals-toast" />
       ) : null}
     </main>
   )
