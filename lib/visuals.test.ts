@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { clampHold, cornerOffsets, sanitizeStraps, strapVisible, STRAP_IN_MS, STRAP_LOOP_GAP_MS, STRAP_OUT_MS } from "@/lib/visuals"
+import { clampHold, clampInset, cornerOffsets, SAFE_X_PX, SAFE_Y_PX, sanitizeStraps, strapVisible, STRAP_IN_MS, STRAP_LOOP_GAP_MS, STRAP_OUT_MS } from "@/lib/visuals"
 
 test("strap IN shows for in + hold, then goes out by itself", () => {
   assert.equal(strapVisible("in", 1000, 5, 1000), true)
@@ -26,8 +26,17 @@ test("strap presets are sanitised", () => {
   assert.notEqual(out[1].id, "a")
 })
 test("overlay corners: 96/96 bottom-left default; top-right clears the QR", () => {
-  assert.deepEqual(cornerOffsets("bottom-left"), { left: 96, bottom: 96 })
-  assert.ok((cornerOffsets("top-right").top ?? 0) >= 242)
+  // edges sit on the desk Safe zone line (5%): 96px x, 54px y @1080p, all four corners
+  assert.equal(SAFE_X_PX, 96)
+  assert.equal(SAFE_Y_PX, 54)
+  assert.deepEqual(cornerOffsets("bottom-left"), { left: 96, bottom: 54 })
+  assert.deepEqual(cornerOffsets("top-left"), { left: 96, top: 54 })
+  assert.deepEqual(cornerOffsets("top-right"), { right: 96, top: 54 })
+  assert.deepEqual(cornerOffsets("bottom-right"), { right: 96, bottom: 54 })
+  assert.deepEqual(cornerOffsets("bottom-left", 12), { left: 108, bottom: 66 })
+  assert.equal(clampInset(-5), 0)
+  assert.equal(clampInset(999), 64)
+  assert.equal(clampInset("x", 3), 3)
 })
 
 import { applyTransport, parseAction } from "@/lib/transport"

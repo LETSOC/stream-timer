@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { TimecodeBadge } from "@/components/timecode-badge"
+import { StageGuides } from "@/components/stage-guides"
+import { clampInset, cornerOffsets } from "@/lib/visuals"
 import { beepTimes, ctxTimeFor, parseBeepEvery, parseFps, parseTcSrc, parseVol, TC_BEEP, TC_VARIANT, tcLabel, type TcSrc } from "@/lib/av-diagnostics"
 import { parseCorner } from "@/lib/visuals"
 
@@ -78,13 +80,15 @@ function Inner({ forceSrc }: { forceSrc?: TcSrc }) {
     for (const el of [document.documentElement, document.body]) el.style.setProperty("background", "transparent", "important")
   }, [])
   const at = (n: number) => `calc(${n} * var(--px))`
-  const style = { [pos.endsWith("right") ? "right" : "left"]: at(96), [pos.startsWith("top") ? "top" : "bottom"]: at(96) }
+  const o = cornerOffsets(pos, clampInset(params.get("inset")))
+  const style = { left: o.left === undefined ? undefined : at(o.left), right: o.right === undefined ? undefined : at(o.right), top: o.top === undefined ? undefined : at(o.top), bottom: o.bottom === undefined ? undefined : at(o.bottom) }
   return (
     <div className={params.get("checker") === "1" ? "overlay-stage overlay-checker" : "overlay-stage"} data-audio={audio}>
       <TimecodeBadge label={tcLabel(params.get("label"), src)} border={variant.border} fps={fps} style={style} testId={src === "backup" ? "tc-backup-src" : "tc-obs-src"} flashEveryS={beep ? everyS : undefined} />
       {audio === "blocked" ? (
         <p data-testid="tc-audio-hint" className="absolute top-[3cqi] left-1/2 -translate-x-1/2 rounded-lg bg-black/80 px-[1.2cqi] py-[0.6cqi] font-mono text-[1.1cqi] text-white">Click to enable audio (beep)</p>
       ) : null}
+      {params.get("guides") === "1" ? <StageGuides className="inset-0" /> : null}
     </div>
   )
 }

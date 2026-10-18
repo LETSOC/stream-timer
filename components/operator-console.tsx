@@ -40,6 +40,7 @@ import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DEFAULT_STAGE, localClock, parseStage, serverClock, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
@@ -1157,6 +1158,7 @@ export function OperatorConsole() {
                 </label>
                 <Slider id="social-dwell" label={`Dwell per circle ${(visuals.socialDwellMs / 1000).toFixed(1)}s`} min={500} max={15000} step={100} value={visuals.socialDwellMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialDwellMs", v)} />
                 <Slider id="social-cooldown" label={`Rest after the row ${(visuals.socialCooldownMs / 1000).toFixed(1)}s`} min={0} max={15000} step={100} value={visuals.socialCooldownMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialCooldownMs", v)} />
+                <Slider id="overlay-inset" label={`Inset from safe zone ${visuals.overlayInset}px @1080p (straps, socials, timecode)`} min={OVERLAY_INSET_RANGE.min} max={OVERLAY_INSET_RANGE.max} step={1} value={visuals.overlayInset} onChange={(v) => setVisual("overlayInset", v)} />
                 <Slider id="social-stroke-px" label={`Circle stroke ${visuals.socialStrokePx}px @1080p`} min={0} max={12} step={0.5} value={visuals.socialStrokePx} onChange={(v) => setVisual("socialStrokePx", v)} />
               </div>
             </Panel>
@@ -1337,7 +1339,7 @@ export function OperatorConsole() {
               <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center blur-md brightness-75" style={{ backgroundImage: "url(/brand/hero-bg.png)" }} />
             ) : null}
             {safeZone ? (
-              <div aria-hidden data-testid="safe-zone" className="pointer-events-none absolute inset-[5%] z-20 border-2 border-dashed border-[#D9FF43]/80" />
+              <div aria-hidden data-testid="safe-zone" className="pointer-events-none absolute z-20 border-2 border-dashed border-[#D9FF43]/80" style={{ inset: `${SAFE_ZONE_PCT}%` }} />
             ) : null}
             {thirds ? (
               <div aria-hidden data-testid="thirds" className="pointer-events-none absolute inset-0 z-20 grid grid-cols-3 grid-rows-3">
@@ -2507,7 +2509,7 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   )
 }
 
-const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps"] as const
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "streamTimecode", "streamTimecodeFps"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
   return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals

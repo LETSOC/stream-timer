@@ -7,7 +7,8 @@ import { SocialCircles } from "@/components/social-circles"
 import { FacebookIcon, InstagramIcon, LinkedInIcon, XIcon, YouTubeIcon } from "@/components/countdown-stage"
 import { asEventConfig, DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { parseStage, socialLook, type StageOptions } from "@/lib/stage"
-import { cornerOffsets, parseCorner, strapVisible, type Corner } from "@/lib/visuals"
+import { StageGuides } from "@/components/stage-guides"
+import { clampInset, cornerOffsets, parseCorner, strapVisible, type Corner } from "@/lib/visuals"
 import { useNow } from "@/lib/use-now"
 
 export type OverlayInitial = { event: EventConfig; stage: Partial<Record<keyof StageOptions, unknown>> } | null
@@ -49,10 +50,10 @@ function useOverlayState(initial: OverlayInitial) {
       window.clearInterval(id)
     }
   }, [viewKey])
-  return { event, stage, blocked, checker: params.get("checker") === "1", corner: params.get("corner") }
+  return { event, stage, blocked, checker: params.get("checker") === "1", guides: params.get("guides") === "1", corner: params.get("corner"), insetParam: params.get("inset") }
 }
 
-function Frame({ checker, blocked, children }: { checker: boolean; blocked: boolean; children: ReactNode }) {
+function Frame({ checker, guides, blocked, children }: { checker: boolean; guides?: boolean; blocked: boolean; children: ReactNode }) {
   useEffect(() => {
     const els = [document.documentElement, document.body]
     const prev = els.map((el) => el.style.background)
@@ -63,26 +64,28 @@ function Frame({ checker, blocked, children }: { checker: boolean; blocked: bool
   return (
     <div className={checker ? "overlay-stage overlay-checker" : "overlay-stage"} data-testid="overlay-stage">
       {blocked ? <p className="absolute top-[3cqi] left-[3cqi] rounded bg-black/70 px-[1cqi] py-[0.5cqi] font-mono text-[1cqi] text-white">View key required. Copy the OBS URL from the desk › Visuals.</p> : children}
+      {guides ? <StageGuides className="inset-0" /> : null}
     </div>
   )
 }
 
-function anchorStyle(corner: Corner): CSSProperties {
-  const o = cornerOffsets(corner)
+function anchorStyle(corner: Corner, inset: number): CSSProperties {
+  const o = cornerOffsets(corner, inset)
   const px = (n?: number) => (n === undefined ? undefined : `calc(${n} * var(--px))`)
-  return { left: px(o.left), right: px(o.right), top: px(o.top), bottom: px(o.bottom), display: "flex", flexDirection: "column", alignItems: o.right !== undefined ? "flex-end" : "flex-start" }
+  return { left: px(o.left), right: px(o.right), top: px(o.top), bottom: px(o.bottom), display: "flex", flexDirection: "column", alignItems: o.right !== undefined ? "flex-end" : "flex-start", justifyContent: o.bottom !== undefined ? "flex-end" : "flex-start" }
 }
 
 function StrapInner({ initial }: { initial: OverlayInitial }) {
-  const { stage, blocked, checker, corner } = useOverlayState(initial)
+  const { stage, blocked, checker, guides, corner, insetParam } = useOverlayState(initial)
+  const inset = insetParam !== null ? clampInset(insetParam, stage.overlayInset) : stage.overlayInset
   const now = useNow()
   const preset = stage.straps.find((p) => p.id === stage.strapId) ?? null
   const visible = Boolean(preset && now && strapVisible(stage.strapMode, stage.strapAt, stage.strapHoldSec, now.getTime()))
   const where = corner ? parseCorner(corner, stage.strapCorner) : stage.strapCorner
   return (
-    <Frame checker={checker} blocked={blocked}>
+    <Frame checker={checker} guides={guides} blocked={blocked}>
       {preset ? (
-        <div className="overlay-anchor" style={anchorStyle(where)} data-corner={where}>
+        <div className="overlay-anchor" style={anchorStyle(where, inset)} data-corner={where}>
           <NameStrap key={preset.id} preset={preset} visible={visible} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText }} />
         </div>
       ) : null}
@@ -91,14 +94,16 @@ function StrapInner({ initial }: { initial: OverlayInitial }) {
 }
 
 function SocialsInner({ initial }: { initial: OverlayInitial }) {
-  const { event, stage, blocked, checker, corner } = useOverlayState(initial)
+  const { event, stage, blocked, checker, guides, corner, insetParam } = useOverlayState(initial)
+  const inset = insetParam !== null ? clampInset(insetParam, stage.overlayInset) : stage.overlayInset
   const where = corner ? parseCorner(corner, stage.socialsCorner) : stage.socialsCorner
   const show = stage.socialsOverlay
   return (
-    <Frame checker={checker} blocked={blocked}>
-      <div className="overlay-anchor transition-opacity duration-500" style={{ ...anchorStyle(where), opacity: show ? 1 : 0 }} data-corner={where} data-show={show ? "1" : "0"}>
+    <Frame checker={checker} guides={guides} blocked={blocked}>
+      <div className="overlay-anchor transition-opacity duration-500" style={{ ...anchorStyle(where, inset), opacity: show ? 1 : 0 }} data-corner={where} data-show={show ? "1" : "0"}>
         <SocialCircles
           className={where.endsWith("right") ? "items-end" : undefined}
+          handleAt={where.startsWith("top") ? "below" : "above"}
           look={socialLook(stage)}
           links={[
             { label: "X", href: event.xUrl, icon: <XIcon /> },

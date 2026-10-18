@@ -4,7 +4,7 @@
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
-import { clampHold, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
+import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export type StageOptions = {
   /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
@@ -35,6 +35,8 @@ export type StageOptions = {
   strapCorner: Corner
   socialsOverlay: boolean
   socialsCorner: Corner
+  /** Extra px @1080p in from the safe-zone line for straps, socials and timecode badges (0 = edge on the line). */
+  overlayInset: number
   /** A/V diagnostics: labelled STREAM wall-clock timecode on /stream (TC2), live switch, default off. */
   streamTimecode: boolean
   streamTimecodeFps: number
@@ -115,6 +117,7 @@ export const DEFAULT_STAGE: StageOptions = {
   strapCorner: "bottom-left",
   socialsOverlay: false,
   socialsCorner: "bottom-left",
+  overlayInset: 0,
   streamTimecode: false,
   streamTimecodeFps: 30,
   lineSpacing: 1.14,
@@ -226,6 +229,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     strapCorner: pick("strapCorner", (v) => parseCorner(v)),
     socialsOverlay: pick("socialsOverlay", (v) => v === true),
     socialsCorner: pick("socialsCorner", (v) => parseCorner(v)),
+    overlayInset: pick("overlayInset", (v, f) => clampInset(v, f)),
     streamTimecode: pick("streamTimecode", (v) => v === true),
     streamTimecodeFps: pick("streamTimecodeFps", (v) => ([25, 30, 50, 60].includes(Number(v)) ? Number(v) : 30)),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),

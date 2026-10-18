@@ -94,18 +94,25 @@ export function strapVisible(mode: StrapMode, at: number | null, holdSec: number
   return t % cycle < on
 }
 
-/** Where a 1920x1080 overlay sits: 96px in from the two edges of its corner. Top-right clears the 178px QR (32px margin + QR + 32px). */
-export const CORNER_INSET_PX = 96
-export const QR_CLEAR_TOP_PX = 32 + 178 + 32
-export function cornerOffsets(corner: Corner): { left?: number; right?: number; top?: number; bottom?: number } {
-  switch (corner) {
-    case "bottom-left":
-      return { left: CORNER_INSET_PX, bottom: CORNER_INSET_PX }
-    case "top-left":
-      return { left: CORNER_INSET_PX, top: CORNER_INSET_PX }
-    case "bottom-right":
-      return { right: CORNER_INSET_PX, bottom: CORNER_INSET_PX }
-    case "top-right":
-      return { right: CORNER_INSET_PX, top: Math.max(CORNER_INSET_PX, QR_CLEAR_TOP_PX) }
+/**
+ * Safe zone = the desk preview's "Safe zone" aid (dashed lime box, `inset: 5%`). Overlays sit with their
+ * outer edge exactly on that line: 5% of 1920 = 96px from left/right, 5% of 1080 = 54px from top/bottom.
+ * `inset` (desk › Visuals, default 0) pushes them further in by that many px @1080p, on both axes.
+ */
+export const SAFE_ZONE_PCT = 5
+export const SAFE_X_PX = (1920 * SAFE_ZONE_PCT) / 100
+export const SAFE_Y_PX = (1080 * SAFE_ZONE_PCT) / 100
+export const OVERLAY_INSET_RANGE = { min: 0, max: 64 } as const
+export function clampInset(value: unknown, fallback = 0): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN
+  if (!Number.isFinite(n)) return fallback
+  return Math.round(Math.min(OVERLAY_INSET_RANGE.max, Math.max(OVERLAY_INSET_RANGE.min, n)))
+}
+export function cornerOffsets(corner: Corner, inset = 0): { left?: number; right?: number; top?: number; bottom?: number } {
+  const x = SAFE_X_PX + clampInset(inset)
+  const y = SAFE_Y_PX + clampInset(inset)
+  return {
+    ...(corner.endsWith("right") ? { right: x } : { left: x }),
+    ...(corner.startsWith("top") ? { top: y } : { bottom: y }),
   }
 }

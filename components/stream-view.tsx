@@ -12,6 +12,7 @@ import { useNow } from "@/lib/use-now"
 import { clampChecker, effectiveEndTime, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { StageGuides } from "@/components/stage-guides"
+import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
 import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
@@ -217,9 +218,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
     <main className={`relative flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
       <SyncTestOverlay timeZone={event.timeZone} />
       {stage.streamTimecode ? (
-        // TC2: left of where TC1 (OBS SRC, default bottom-right 96/96) lands in the program, so both read side by side.
+        // TC2: left of where TC1 (OBS SRC, default bottom-right on the safe-zone line) lands in the program, so both read side by side.
         <div aria-hidden className="pointer-events-none fixed inset-0 z-[60]" style={{ ["--px" as string]: "calc(100vw / 1920)" }}>
-          <TimecodeBadge label="STREAM" testId="tc-stream" fps={parseFps(stage.streamTimecodeFps)} style={{ right: `calc(${96 + TC_BADGE_W + TC_GAP} * var(--px))`, bottom: "calc(96 * var(--px))" }} />
+          <TimecodeBadge label="STREAM" testId="tc-stream" fps={parseFps(stage.streamTimecodeFps)} style={{ right: `calc(${SAFE_X_PX + stage.overlayInset + TC_BADGE_W + TC_GAP} * var(--px))`, bottom: `calc(${SAFE_Y_PX + stage.overlayInset} * var(--px))` }} />
         </div>
       ) : null}
       {/* Prewarmed whenever OBS is sending, so "Show program" is instant. */}
