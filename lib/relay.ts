@@ -8,6 +8,7 @@
  * (random publish/read users), mediamtx.yml (generated each start), pidfiles, logs, state.
  * MediaMTX listens on 127.0.0.1 only; the desk preview goes through /api/relay/hls (operator auth).
  */
+import { noteRelayDisruption } from "@/lib/program-rearm"
 import os from "node:os"
 import { cleanMdnsName, DEFAULT_MDNS_NAME, mdnsStatus, type MdnsConfig, type MdnsState } from "@/lib/mdns"
 import { parseFailover, pullUrlError, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
@@ -427,6 +428,7 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
   const bin = findMediamtxBin()
   if (!bin) return { ok: false, status: 500, error: "MediaMTX is not installed. Run scripts/install-mediamtx.sh (or brew install mediamtx), or set MEDIAMTX_BIN." }
   if (!loopAlive("mediamtx")) {
+    noteRelayDisruption()
     writeConfigIfChanged()
     spawnLoop("mediamtx", "mediamtx", [bin, file("mediamtx.yml")])
   } else writeConfigIfChanged() // MediaMTX reloads its config file on change; channels keep running
@@ -443,7 +445,7 @@ function writeConfigIfChanged() {
   const yml = desiredConfig()
   let current = ""
   try { current = fs.readFileSync(file("mediamtx.yml"), "utf8") } catch { /* first start */ }
-  if (current.replace(/# resync .*\n$/, "") !== yml) writePrivate(file("mediamtx.yml"), yml)
+  if (current.replace(/# resync .*\n$/, "") !== yml) { noteRelayDisruption(); writePrivate(file("mediamtx.yml"), yml) }
 }
 
 /**
@@ -487,6 +489,7 @@ async function kickProgramUnlocked(paths: string[] = [PROGRAM_PATH, BACKUP_PATH]
 /** Arm receive: MediaMTX up (independent of forwards and channels) and OBS may publish to /program. */
 export function armProgram(): Promise<RelayResult> {
   return withLock(async () => {
+    noteRelayDisruption() // OBS (re)connecting after an arm isn't a Wi-Fi drop
     writeSettings({ ...readSettings(), programArmed: true })
     const up = await ensureServerUnlocked()
     if (!up.ok) return up
@@ -497,6 +500,7 @@ export function armProgram(): Promise<RelayResult> {
 /** Disarm: OBS login removed and kicked; the server stops only if nothing else uses it. */
 export function disarmProgram(): Promise<RelayResult> {
   return withLock(async () => {
+    noteRelayDisruption()
     writeSettings({ ...readSettings(), programArmed: false })
     if (relayRunning()) writeConfigIfChanged()
     await kickProgramUnlocked()

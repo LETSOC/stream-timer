@@ -10,7 +10,7 @@ import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type Fail
 import fs from "node:fs"
 import path from "node:path"
 import { syncMdns } from "@/lib/mdns"
-import { FRESH_REARM, rearmStep, type RearmMemory } from "@/lib/program-rearm"
+import { FRESH_REARM, noteRelayDisruption, rearmStep, relayQuietUntil, type RearmMemory } from "@/lib/program-rearm"
 import { armProgram, disarmProgram, programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
@@ -24,7 +24,7 @@ let verboseAt = 0
 import type { ProgramSource, ReturnStatus, SourceHealth } from "@/lib/program-source"
 
 const KEY = Symbol.for("stream-timer.program-monitor")
-type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string; baseline: Record<ProgramSource, number | null>; status: ReturnStatus | null; rearm?: RearmMemory; rearming?: boolean }
+type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string; baseline: Record<ProgramSource, number | null>; status: ReturnStatus | null; rearm?: Record<ProgramSource, RearmMemory>; downAt?: Record<ProgramSource, number | null>; rearming?: boolean }
 function monitor(): Monitor {
   const holder = globalThis as { [KEY]?: Monitor }
   if (!holder[KEY]) {
@@ -158,7 +158,7 @@ export async function programMonitorTick(now = Date.now()) {
         }
       }
     }
-  } else if (!m.rearming) { m.memory = FRESH_MEMORY; m.status = null }
+  } else if (!m.rearming) { m.memory = FRESH_MEMORY; m.status = null; m.rearm = undefined; m.downAt = undefined }
   // Push when something a person would see changed (ages in whole seconds, bitrate in 100k steps).
   const view = programSourcesView(now)
   const sig = JSON.stringify(view && [view.main.ready, view.backup.ready, Math.round((view.main.kbps ?? -1) / 100), Math.round((view.backup.kbps ?? -1) / 100), Math.floor((view.main.dataAgeMs ?? -1000) / 1000), Math.floor((view.backup.dataAgeMs ?? -1000) / 1000), view.last?.at, view.failover, view.main.state, view.backup.state, view.main.readyOk, view.backup.readyOk, view.returnStatus, view.main.stats?.fps, view.backup.stats?.fps])
@@ -174,10 +174,21 @@ export async function programMonitorTick(now = Date.now()) {
  */
 function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: number, enabled: boolean) {
   if (m.rearming) return
-  const r = inputReadout(active, now, stallMs)
-  const step = rearmStep(m.rearm ?? FRESH_REARM, { down: !r.ready || r.state === "failed", ready: r.ready && r.readyOk && r.state !== "failed", now, enabled })
-  m.rearm = step.mem
-  if (!step.fire) return
+  const mem = m.rearm ?? { main: FRESH_REARM, backup: FRESH_REARM }
+  const downAt = m.downAt ?? { main: null, backup: null }
+  const reads = { main: inputReadout("main", now, stallMs), backup: inputReadout("backup", now, stallMs) }
+  const isDown = (r: InputReadout) => !r.ready || r.state === "failed"
+  for (const s of ["main", "backup"] as const) downAt[s] = isDown(reads[s]) ? (downAt[s] ?? now) : null
+  let fire = false
+  for (const s of ["main", "backup"] as const) {
+    const r = reads[s]
+    const step = rearmStep(mem[s], { down: isDown(r), ready: r.ready && r.readyOk && r.state !== "failed", onAir: s === active, otherDownAt: downAt[s === "main" ? "backup" : "main"], quietUntil: relayQuietUntil(), now, enabled })
+    mem[s] = step.mem
+    if (step.fire && s === active) fire = true
+  }
+  m.rearm = mem
+  m.downAt = downAt
+  if (!fire) return
   const label = SOURCE_LABEL[active]
   plog(`${label} reconnected → auto re-arm`)
   m.rearming = true
@@ -193,6 +204,7 @@ function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: 
 }
 
 export function startProgramMonitor(intervalMs = 500) {
+  noteRelayDisruption() // server start: publishers are still (re)connecting
   startRttMonitor()
   const m = monitor()
   if (m.timer) return
