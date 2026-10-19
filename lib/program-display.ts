@@ -2,7 +2,8 @@
  * What the OBS program layer shows. Pure, so /stream, the desk and the deck agree (and it is unit-tested).
  * - "video": frames are advancing (or stalled for less than STALL_HOLD_MS: hold the last frame).
  * - "standby": "Waiting for OBS". Only after a grace: not ready for > NOT_READY_MS, no first frame
- *   within FIRST_FRAME_GRACE_MS of switching, or a stall longer than STALL_HOLD_MS.
+ *   within FIRST_FRAME_GRACE_MS of switching, or a stall longer than STALL_HOLD_MS. While the relay
+ *   reports the publisher (ready), only after READY_STALL_TIMEOUT_MS without a frame.
  * - "under": not covering anything yet, so the previous screen (countdown/card) stays visible.
  */
 export const NOT_READY_MS = 3000
@@ -25,6 +26,8 @@ export type ProgramDisplayInput = {
   notReadySince: number | null
   /** Last time the picture advanced (null = no frame since the player (re)loaded). */
   lastFrameAt: number | null
+  /** A last good frame is available to hold on top (the player's cover canvas). */
+  held?: boolean
 }
 
 export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
@@ -39,6 +42,14 @@ export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
     return "standby"
   }
   if (gone && now - activeSince > Math.min(NOT_READY_MS, FIRST_FRAME_GRACE_MS)) return "standby"
+  // No frame yet but the relay reports the publisher (OBS just reconnected after a disarm/arm or a drop;
+  // the rebuilt player needs a few seconds for its first frame): never "Waiting for OBS". Hold the last
+  // frame if there is one, else keep the previous screen; standby only if it never plays.
+  if (ready) {
+    const waiting = now - Math.max(activeSince, input.readyAt ?? activeSince)
+    if (waiting <= READY_STALL_TIMEOUT_MS) return input.held ? "video" : "under"
+    return "standby"
+  }
   if (now - activeSince > FIRST_FRAME_GRACE_MS) return "standby"
   return "under"
 }

@@ -310,6 +310,8 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // is drawn on a canvas on top until the element shows a new frame, so the output freezes, never blacks.
   const coverRef = useRef<HTMLCanvasElement>(null)
   const coverOn = useRef(false)
+  /** the cover canvas holds a good frame (state, so render can read it) */
+  const [hasHeld, setHasHeld] = useState(false)
   const snapshot = useCallback((): boolean => {
     const video = videoRef.current
     const canvas = coverRef.current
@@ -318,6 +320,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) { canvas.width = video.videoWidth; canvas.height = video.videoHeight }
       canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height)
       canvas.dataset.has = "1"
+      setHasHeld(true)
       return true
     } catch { return false }
   }, [])
@@ -359,9 +362,15 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
     if ((!onAir || !load) && coverRef.current) { coverOn.current = false; coverRef.current.style.visibility = "hidden" }
   }, [onAir, load])
   useCaptureAudioTap(videoRef, source)
-  const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
+  // A held last frame (cover canvas) lets a reconnecting OBS (relay READY, rebuilt player not playing yet)
+  // freeze on the last picture instead of the "Waiting for OBS" card.
+  const held = onAir && hasHeld
+  const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt, held })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
   shownRef.current = shown
+  // Holding with no frame in the element yet: put the last frame on top (hidden again by the first new frame).
+  const holding = shown === "video" && lastFrameAt === null && load
+  useEffect(() => { if (holding) showCover() }, [holding, showCover])
   useEffect(() => {
     if (showing.current === shown) return
     const was = showing.current

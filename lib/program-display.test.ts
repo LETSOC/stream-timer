@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { handoverDone, keepLoaded, programDisplay } from "@/lib/program-display"
+import { handoverDone, keepLoaded, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
 
 const base = { now: 10_000, activeSince: 10_000, readyAt: 1000, ready: true, notReadySince: null, lastFrameAt: null }
 
@@ -9,7 +9,21 @@ test("program layer stays under the previous screen until the first frame", () =
   assert.equal(programDisplay(base), "under")
   assert.equal(programDisplay({ ...base, now: 14_000 }), "under")
   assert.equal(programDisplay({ ...base, now: 10_400, lastFrameAt: 10_350 }), "video")
-  assert.equal(programDisplay({ ...base, now: 15_500 }), "standby")
+  // publisher there (ready) but no first frame yet: never "Waiting for OBS" before the ready timeout
+  assert.equal(programDisplay({ ...base, now: 15_500 }), "under")
+  assert.equal(programDisplay({ ...base, now: 10_000 + READY_STALL_TIMEOUT_MS + 1 }), "standby")
+  // not ready (no publisher) and no first frame: standby after the grace as before
+  assert.equal(programDisplay({ ...base, ready: false, notReadySince: 9000, now: 15_500 }), "standby")
+})
+
+test("OBS reconnected after a disarm/arm: relay says READY, rebuilt player has no frame yet → hold the last frame, no 'Waiting for OBS'", () => {
+  // the user's log: publisher back 14:32:27, player rebuilt 14:32:28, first frame 14:32:33; card shown 14:32:30
+  const t = { activeSince: 0, readyAt: 27_000, ready: true, notReadySince: null, lastFrameAt: null, held: true }
+  for (const now of [27_100, 30_000, 33_000, 27_000 + READY_STALL_TIMEOUT_MS]) assert.equal(programDisplay({ ...t, now }), "video", String(now))
+  assert.equal(programDisplay({ ...t, held: false, now: 30_000 }), "under") // nothing to hold: previous screen, still no card
+  assert.equal(programDisplay({ ...t, now: 27_000 + READY_STALL_TIMEOUT_MS + 1 }), "standby") // never plays: card after the timeout
+  // publisher gone: the card as before
+  assert.equal(programDisplay({ ...t, ready: false, notReadySince: 30_000, now: 33_100 }), "standby")
 })
 
 test("stalls hold the last frame, then standby", () => {
