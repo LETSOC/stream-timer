@@ -9,6 +9,7 @@ import { PreviewBadge } from "@/components/preview-badge"
 import { useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
+import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
@@ -44,7 +45,20 @@ function useActiveSince(active: boolean, now: number) {
  * Loads LL-HLS into the <video> while `load`, and reports when the picture last advanced.
  * The element is the same for the player's whole life (WebAudio can attach to it once).
  */
-function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; hold?: boolean } = {}) {
+function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; hold?: boolean; /** /stream only: report to the dropout log (lib/player-diag) */ diag?: { label: string; onAir: boolean } } = {}) {
+  const diagRef = useRef(opts.diag)
+  useEffect(() => { diagRef.current = opts.diag })
+  // "!" only for the input on air; the standby one's trouble is context ("·").
+  const report = (level: "!" | "+" | "·", msg: string, key?: string, dedupeMs?: number) => {
+    const d = diagRef.current
+    if (!d) return
+    playerDiag(level === "!" && !d.onAir ? "·" : level, `${d.label}${d.onAir ? " (on air)" : " (standby)"}: ${msg}`, key ? { key: `${d.label}:${key}`, dedupeMs } : {})
+  }
+  const reportRef = useRef(report)
+  useEffect(() => { reportRef.current = report })
+  /** Why the next teardown happens (a teardown clears the element: black until the next first frame). */
+  const teardownWhy = useRef<string>("unloaded (OBS gone > 3s, or source changed)")
+  const builtAt = useRef<number | null>(null)
   // Operator previews pass stallEvents:false: iOS native LL-HLS fires "waiting"/"stalled" on ordinary
   // part waits, and rebuilding on each one (new src) chopped the deck preview's sound.
   const stallEvents = opts.stallEvents ?? true
@@ -68,13 +82,14 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   // Rebuild the player (not the page) when the page comes back (iOS suspends media in the
   // background) and when the watchdog finds it stuck while OBS is publishing.
   // Back from the background: rebuild, holding the last picture meanwhile (not "Waiting for OBS").
-  const resumeGen = useResumeGeneration(1000, () => setLastFrameAt((at) => (at === null ? null : Date.now())))
+  const resumeGen = useResumeGeneration(1000, () => { teardownWhy.current = "page came back from the background (rebuild)"; setLastFrameAt((at) => (at === null ? null : Date.now())) })
   const [kick, setKick] = useState(0)
   useEffect(() => {
     const video = videoRef.current
     if (!video || !load) return
     let hls: Hls | null = null
     let cancelled = false
+    builtAt.current = Date.now()
     // React doesn't reliably apply the `muted` attribute (WebKit): set the property before anything plays.
     video.muted = !wantSoundRef.current()
     const play = () => {
@@ -99,6 +114,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         hls.attachMedia(video)
         hls.on(HlsLib.Events.MANIFEST_PARSED, play)
         hls.on(HlsLib.Events.ERROR, (_event, data) => {
+          if (data.fatal || data.details === "bufferStalledError") reportRef.current(data.fatal ? "!" : "!", `hls.js ${data.details}${data.fatal ? ` (fatal ${data.type}: ${data.type === HlsLib.ErrorTypes.MEDIA_ERROR ? "recoverMediaError" : "startLoad"})` : " (buffer ran dry: picture holds)"}`, data.details, 3000)
+          else reportRef.current("·", `hls.js ${data.details}`, data.details, 10000)
           if (!data.fatal || !hls) return
           if (data.type === HlsLib.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
           else hls.startLoad()
@@ -111,6 +128,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     })()
     return () => {
       cancelled = true
+      reportRef.current("!", `player torn down: ${teardownWhy.current} → element cleared, BLACK until the first new frame`)
+      teardownWhy.current = "unloaded (OBS gone > 3s, or source changed)"
       hlsRef.current = null
       hls?.destroy()
       video.removeAttribute("src")
@@ -133,8 +152,17 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     let attempt = 0
     let nextKickAt = Date.now() + stallBackoffMs(0)
     // Native HLS (iOS) reports stalls as events; the currentTime check below catches the rest.
-    const onStall = () => { if (Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload() }
-    const reload = () => {
+    const onStall = () => { if (Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload("native stall event after 3s stuck") }
+    const onWaiting = (e: Event) => {
+      const b = video.buffered
+      const ahead = b.length ? b.end(b.length - 1) - video.currentTime : 0
+      reportRef.current("·", `<video> ${e.type} (buffer ahead ${ahead.toFixed(2)}s, readyState ${video.readyState})`, `v-${e.type}`, 2000)
+    }
+    const onVideoError = () => reportRef.current("!", `<video> error ${video.error?.code ?? "?"} ${video.error?.message ?? ""}`.trim(), "v-error", 3000)
+    let firstFrameSeen = false
+    const reload = (why = "watchdog: picture stuck 3s while OBS publishes") => {
+      teardownWhy.current = why
+      firstFrameSeen = false
       nextKickAt = Date.now() + stallBackoffMs(++attempt)
       advancedAt = Date.now()
       setLastFrameAt((at) => (at === null ? null : Date.now())) // hold the picture while it reloads
@@ -145,6 +173,9 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       video.addEventListener("waiting", onStall)
     }
     video.addEventListener("error", onStall)
+    video.addEventListener("waiting", onWaiting)
+    video.addEventListener("stalled", onWaiting)
+    video.addEventListener("error", onVideoError)
     const id = window.setInterval(() => {
       const t = video.currentTime
       if (holdRef.current) { advancedAt = Date.now(); last = t; return }
@@ -160,6 +191,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         })
       }
       if (!video.paused && video.readyState >= 2 && t !== last && t > 0) {
+        if (!firstFrameSeen) { firstFrameSeen = true; if (builtAt.current !== null) reportRef.current("+", `first frame ${Date.now() - builtAt.current}ms after the player (re)built`); builtAt.current = null }
         setLastFrameAt(Date.now())
         const at = hlsRef.current?.playingDate?.getTime()
         setLatency(at ? Date.now() - at : null)
@@ -171,6 +203,9 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       video.removeEventListener("stalled", onStall)
       video.removeEventListener("waiting", onStall)
       video.removeEventListener("error", onStall)
+      video.removeEventListener("waiting", onWaiting)
+      video.removeEventListener("stalled", onWaiting)
+      video.removeEventListener("error", onVideoError)
     }
   }, [videoRef, load, stallEvents])
   useEffect(() => {
@@ -257,17 +292,33 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   const showing = useRef<ProgramDisplay>("under")
   // Standby input in a plain tab: paused (warm buffer, no decode). Browser capture keeps both playing:
   // it takes each input's audio from its element (useCaptureAudioTap), so both must run.
-  const [captureTap] = useState(() => typeof window !== "undefined" && "__programPcm" in window)
+  // Browser capture (?capture=1 / headless, or the page-audio tap) keeps both inputs decoding, so a
+  // Main↔Backup switch or failover in the output never waits for a paused input to catch up.
+  const [captureTap] = useState(() => isCapturePage())
   const hold = holdStandby({ onAir, incoming, captureTap })
-  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted(), { hold })
+  const label = source === "backup" ? "Backup" : "Main"
+  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted(), { hold, diag: { label, onAir } })
   useCaptureAudioTap(videoRef, source)
   const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
   useEffect(() => {
     if (showing.current === shown) return
+    const was = showing.current
     showing.current = shown
     onDisplay?.(shown)
-  }, [shown, onDisplay])
+    if (!onAir) return
+    if (shown === "standby") playerDiag("!", `${label} (on air): "Waiting for OBS" card shown (black screen with text in the output)${ready ? " although the relay says the publisher is there" : ": no publisher for > 3s"}`)
+    else if (shown === "video" && was === "standby") playerDiag("+", `${label} (on air): picture back (after "Waiting for OBS")`)
+    else if (shown === "video" && active) playerDiag("·", `${label} (on air): program picture up`)
+  }, [shown, onDisplay, onAir, label, ready, active])
+  // Frozen picture on air (no new frame for > 0.7s while the program is shown): onset and duration.
+  const frozenSince = useRef<number | null>(null)
+  useEffect(() => {
+    if (!onAir || !active || shown !== "video" || hold || lastFrameAt === null) { frozenSince.current = null; return }
+    const gap = now - lastFrameAt
+    if (gap > 700 && frozenSince.current === null) { frozenSince.current = lastFrameAt; playerDiag("!", `${label} (on air): picture frozen (no new frame for ${(gap / 1000).toFixed(1)}s; the output repeats the last frame)`) }
+    else if (gap <= 400 && frozenSince.current !== null) { playerDiag("+", `${label} (on air): picture moving again after ${((lastFrameAt - frozenSince.current) / 1000).toFixed(1)}s frozen`); frozenSince.current = null }
+  }, [now, lastFrameAt, onAir, active, shown, hold, label])
 
   // Silent unless it is the picture on air.
   useEffect(() => {

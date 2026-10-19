@@ -1,7 +1,8 @@
 "use client"
 
 import { StreamAudioOverlay } from "@/components/stream-audio-overlay"
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { playerDiag } from "@/lib/player-diag"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EndStreamPage } from "@/app/end/page"
@@ -135,8 +136,10 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
             setStage(parseStage(body.stage))
           }
         })
-        .catch(() => undefined)
+        .then(() => { if (fails >= 3) playerDiag("+", `/stream state poll OK again after ${fails} failures`); fails = 0 })
+        .catch(() => { fails += 1; if (fails === 3) playerDiag("!", "/stream can't reach the server state (3 polls failed): switches/cards won't follow until it's back") })
     }
+    let fails = 0
     load()
     const id = window.setInterval(load, 1000)
     return () => {
@@ -204,7 +207,17 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   // Browser capture reads this to switch its audio to the OBS program feed (only once its picture is up).
   useEffect(() => {
     document.documentElement.dataset.screen = shownScreen
-  }, [shownScreen])
+    playerDiag("·", `screen shown: ${shownScreen}${shownScreen !== screen ? ` (operator picked ${screen}; waiting for its first frame)` : ""}`)
+  }, [shownScreen, screen])
+  useEffect(() => {
+    if (handing) playerDiag("·", `hand-over ${air.source === "main" ? "Main" : "Backup"} → ${wanted === "main" ? "Main" : "Backup"} started (old input stays on air until the new one has played ${switchBufferMs}ms)`)
+  }, [handing, air.source, wanted, switchBufferMs])
+  const handStart = useRef<number | null>(null)
+  useEffect(() => {
+    if (handing) { handStart.current ??= Date.now(); return }
+    if (handStart.current !== null) playerDiag("·", `hand-over done → ${air.source === "main" ? "Main" : "Backup"} on air after ${Date.now() - handStart.current}ms`)
+    handStart.current = null
+  }, [handing, air.source])
 
   if (blocked) {
     return (
