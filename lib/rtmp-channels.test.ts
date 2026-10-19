@@ -37,6 +37,7 @@ test("same destination on the other running channel is a conflict; stopped or di
 })
 
 test("each channel keeps its own selected destination", () => {
+  process.env.RTMP_ALLOWED_HOSTS = "*" // example hosts
   const a = d.addDestination("A", "rtmp://a.example/live/k1")
   const b = d.addDestination("B", "rtmp://b.example/live/k2")
   assert.ok(a.ok && b.ok)

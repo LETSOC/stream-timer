@@ -40,7 +40,7 @@ test("autoReturn off: stays on backup; manual backup is not auto-returned", () =
 })
 test("parseFailover clamps and defaults", () => {
   assert.deepEqual(parseFailover(null), DEFAULT_FAILOVER)
-  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60 })
+  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true })
 })
 
 test("backup dies while on air and main is fine: back to main (auto on), not with auto off", () => {

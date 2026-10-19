@@ -1,3 +1,4 @@
+import type { RttView } from "@/lib/rtt"
 /**
  * Per-input state (HEALTHY / SUSPECT / FAILED) and the READY checklist. Pure, client-safe.
  * FAILED = not publishing or no data for the stall threshold (only that fails over).
@@ -16,7 +17,7 @@ export type InputStats = {
 }
 export const EMPTY_STATS: InputStats = { fps: null, fpsMin: null, fpsNominal: null, video: false, audio: null }
 export type InputState = "healthy" | "suspect" | "failed"
-export type InputReadout = SourceHealth & { state: InputState; stateReason: string | null; stats?: InputStats; ready48?: boolean; readyOk: boolean; issues: string[]; kbpsBaseline?: number | null; jitterMs?: number | null; audioDelayMs?: number | null; offsetMs?: number | null }
+export type InputReadout = SourceHealth & { state: InputState; stateReason: string | null; stats?: InputStats; ready48?: boolean; readyOk: boolean; issues: string[]; kbpsBaseline?: number | null; jitterMs?: number | null; audioDelayMs?: number | null; offsetMs?: number | null; rtt?: RttView | null }
 
 export const GAP_SUSPECT_MS = 1000
 

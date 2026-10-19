@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react"
 import { DEFAULT_EVENT, asEventConfig, type EventConfig } from "@/lib/event"
 import { safeUrl } from "@/lib/event"
+import { QrImage } from "@/components/qr-image"
+import { SocialCircles, type SocialLook } from "@/components/social-circles"
 
 type EndCard = {
   title: string
@@ -56,7 +58,7 @@ export default function EndPage() {
   )
 }
 
-export function EndStreamPage({ card, className }: { card: EndCard; className?: string }) {
+export function EndStreamPage({ card, className, social }: { card: EndCard; className?: string; social?: SocialLook }) {
   return (
     <div className={`countdown-stage stage-bg relative flex aspect-video w-full flex-col items-center justify-center overflow-hidden text-center text-white ${className ?? ""}`}>
       <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: "repeating-linear-gradient(125deg, transparent 0 2px, rgba(255,255,255,0.08) 2px 4px)" }} />
@@ -65,16 +67,12 @@ export function EndStreamPage({ card, className }: { card: EndCard; className?: 
       <h1 className="relative m-0 font-[Arial,Helvetica,sans-serif] text-[5cqi] leading-none font-bold">{card.title}</h1>
       <p className="relative mt-[1.2cqi] font-[Arial,Helvetica,sans-serif] text-[1.3cqi] text-white/80">{card.subtitle} • {card.date}</p>
       <p className="relative mt-[2cqi] max-w-[46cqi] font-[Arial,Helvetica,sans-serif] text-[1.05cqi] leading-relaxed text-white/60">{card.body}</p>
-      <img src="/brand/end-qr.png" alt="" className="relative mt-[2cqi] size-[8cqi] bg-white p-[0.4cqi]" />
+      <div className="relative mt-[2cqi] size-[8cqi] bg-white p-[0.4cqi]" aria-label="End card QR code">
+        {card.qrUrl.trim() ? <QrImage key={card.qrUrl} url={safeUrl(card.qrUrl, "")} className="size-full object-cover" /> : <img src="/brand/end-qr.png" alt="" className="size-full object-cover" />}
+      </div>
       <p className="relative mt-[0.5cqi] font-[Arial,Helvetica,sans-serif] text-[0.75cqi] tracking-[0.14em] uppercase">Scan to stay connected</p>
       <a href={safeUrl(card.qrUrl, "#")} className="relative mt-[1.6cqi] rounded-full bg-[#ff3c00] px-[2cqi] py-[0.8cqi] font-[Arial,Helvetica,sans-serif] text-[1cqi] font-bold tracking-[0.08em] text-white uppercase no-underline">{card.button}</a>
-      <div className="relative mt-[1.6cqi] flex gap-[0.7cqi]">
-        {card.socials.map((item) => (
-          <a key={item.label} href={item.href} target="_blank" rel="noreferrer" aria-label={item.label} className="inline-flex size-[2.99cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline">
-            {iconFor(item.label)}
-          </a>
-        ))}
-      </div>
+      <SocialCircles className="relative mt-[1.6cqi] items-center!" look={social} links={card.socials.map((item) => ({ ...item, icon: iconFor(item.label) }))} />
       </div>
     </div>
   )

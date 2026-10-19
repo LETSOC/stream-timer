@@ -117,7 +117,7 @@ let lastSpliceAt = 0
 function programTargetMs() {
   const input = inputs[prog.source]
   const base = prog.latencyMs === null ? progFallbackMs : prog.latencyMs + screencastLag() - readerLagMs - input.arrival.excessMs
-  return Math.max(100, Math.min(5000, base + sync.trimMs + input.offsetMs + videoDelayMs()))
+  return Math.max(100, Math.min(10000, base + sync.trimMs + input.offsetMs + videoDelayMs()))
 }
 function readUrlFor(source) {
   // Main = program-read.url, Backup = program-backup-read.url next to it (both 0600, written by lib/relay).
@@ -338,7 +338,8 @@ const GAIN_STEP = 1 / (0.2 * RATE)
 let bedLine = null // delay line (screencast lag + positive trim), created with the feeder
 /** `wallMs` = timeline time of the first frame (beeps of the sync test line up with the flashes). */
 function pcmBlock(n, wallMs) {
-  const programPcm = prog.wanted ? takeProgram(n) : null
+  // Off Program: still drain the warm reader so its queue stays locked at the delay (output unused).
+  const programPcm = prog.wanted ? takeProgram(n) : (prog.reader && takeProgram(n), null)
   const wantBed = Math.max(0, screencastLag() + Math.max(0, sync.trimMs))
   const curBed = bedLine.delayMs()
   bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
@@ -350,7 +351,7 @@ function pcmBlock(n, wallMs) {
   // underruns, and only comes back when /stream leaves the program for a card/countdown.
   if (programPcm) { prog.mixedAt = Date.now(); prog.flowed = true }
   const suppress = prog.wanted && (prog.flowed || Date.now() - prog.wantedSince > 3000)
-  const target = suppress ? 0 : 1
+  const target = suppress && !sync.test ? 0 : 1
   for (let i = 0; i < n; i++) {
     if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
     else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
@@ -467,13 +468,17 @@ await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g
 let latest = null
 let frames = 0
 // Health counters, reset every stats window.
-const win = { at: Date.now(), screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0 }
+const win = { at: Date.now(), screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0, maxGap: 0 }
+// Diagnostics only (dropout log): longest wait between two screencast frames in this window.
+let lastScreencastAt = 0
 let freshFrame = false
 // Recent frames with arrival time, so a negative A/V trim can show the picture a little later.
 const frameRing = []
 cdp.on("Page.screencastFrame", ({ data, sessionId, metadata }) => {
   latest = Buffer.from(data, "base64")
   const arrived = Date.now()
+  if (lastScreencastAt) win.maxGap = Math.max(win.maxGap, arrived - lastScreencastAt)
+  lastScreencastAt = arrived
   frameRing.push({ buf: latest, at: arrived })
   while (frameRing.length > 2 && arrived - frameRing[1].at > 1200) frameRing.shift()
   // Screencast lag: paint time (CDP, seconds) → arrival here. Smoothed; ignores outliers (GC pauses).
@@ -585,8 +590,8 @@ setInterval(async () => {
   const info = await page.evaluate(() => {
     const feed = document.querySelector("[data-testid=program-feed]")
     const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
-    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
-  }).catch(() => ({ source: prog.source, screen: "", lat: null }))
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
+  }).catch(() => ({ source: prog.source, screen: "", loaded: null, lat: null }))
   const screen = info.screen
   // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
   // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
@@ -598,8 +603,13 @@ setInterval(async () => {
   if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) { prog.wantedSince = Date.now(); prog.flowed = false; log("[audio] /stream shows the program: audio follows OBS") } }
   else if (prog.wanted) log("[audio] /stream left the program: audio bed back")
   prog.wanted = wanted
-  if (wanted) { startProgramReader(); startSpare() }
-  else if (prog.reader && Date.now() - prog.lastWantedAt > 10000) { stopProgramReader(); stopSpare() } // keep warm 10s for quick back-and-forth
+  // On-air reader kept warm whenever the on-air input has a publisher (cards/countdown too), so a
+  // card → Program switch has its audio queued at the delay already. Spare: Program only.
+  if (info.loaded || wanted) prog.publisherAt = Date.now()
+  if (wanted || info.loaded) startProgramReader()
+  if (wanted) startSpare()
+  else if (spare.reader && Date.now() - prog.lastWantedAt > 10000) stopSpare() // keep warm 10s for quick back-and-forth
+  if (!wanted && prog.reader && Date.now() - (prog.publisherAt ?? 0) > 10000) stopProgramReader() // no publisher for 10s
 }, 250)
 ticker = setInterval(() => {
   if (!latest || !ffmpeg?.stdin.writable) return
@@ -674,6 +684,7 @@ if (statsFile) {
       repeatPct: win.written ? +((win.repeats / win.written) * 100).toFixed(1) : 0,
       backpressurePct: total ? +((win.skipped / total) * 100).toFixed(1) : 0,
       maxLagMs: Math.round(win.maxLag),
+      maxGapMs: win.maxGap,
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
       programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, via: prog.via ?? null, formats: { main: inputs.main.format, backup: inputs.backup.format }, arrivalExcessMs: { main: Math.round(inputs.main.arrival.excessMs), backup: Math.round(inputs.backup.arrival.excessMs) }, offsetMs: { main: inputs.main.offsetMs, backup: inputs.backup.offsetMs } },
       sync: { screencastLagMs: sync.lagMs === null ? null : Math.round(sync.lagMs), trimMs: sync.trimMs, videoDelayMs: Math.round(videoDelayMs()), bedDelayMs: Math.round(bedLine.delayMs()), skippedMs: Math.round(skippedMs), test: sync.test },
@@ -693,7 +704,7 @@ if (statsFile) {
         stats.enc = { fps: +((cur.frame - prevEnc.frame) / dt).toFixed(1), kbps: Math.round(((cur.bytes - prevEnc.bytes) * 8) / dt / 1000), speed: +((cur.out - prevEnc.out) / dt).toFixed(2), dup: cur.dup, drop: cur.drop, bytes: cur.bytes }
       }
     }
-    Object.assign(win, { at: now, screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0 })
+    Object.assign(win, { at: now, screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0, maxGap: 0 })
     try {
       fs.writeFileSync(`${statsFile}.tmp`, JSON.stringify(stats), { mode: 0o600 })
       fs.renameSync(`${statsFile}.tmp`, statsFile)

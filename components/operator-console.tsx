@@ -1,4 +1,6 @@
 "use client"
+import { StatusToast, TOAST_MS, TOAST_UNDO_MS } from "@/components/status-toast"
+import { LocalAccessPill } from "@/components/local-access-pill"
 
 import { pullUrlError } from "@/lib/program-source"
 import Link from "next/link"
@@ -19,6 +21,7 @@ import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { failoverText, ProgramSourceSwitch, sourceStatus, useFailoverEvents } from "@/components/program-source-switch"
+import { DropoutLogPanel, markDropout, markToast } from "@/components/dropout-mark"
 import type { FailoverSettings, ProgramSource } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { StreamPlayer } from "@/components/stream-player"
@@ -38,12 +41,17 @@ import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
-import { DEFAULT_STAGE, parseStage, stageScreen, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
+import { DEFAULT_STAGE, localClock, parseStage, serverClock, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
+import { VisualsDeskSection } from "@/components/visuals-desk"
+import { VerticalCard } from "@/components/vertical-output"
+import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import {
   buildLocalTestCommand,
@@ -57,7 +65,7 @@ export function OperatorConsole() {
   const [dests, setDests] = useState<{ selectedId: string | null; selectedCaptureId: string | null; items: Dest[] }>({ selectedId: null, selectedCaptureId: null, items: [] })
   // Destination shown in the "Saved destinations" manager (rename/reveal/copy/delete); separate from what each channel streams to.
   const [manageId, setManageId] = useState<string | null>(null)
-  const [destForm, setDestForm] = useState<{ mode: "add" | "rename" | null; name: string; url: string }>({ mode: null, name: "", url: "" })
+  const [destForm, setDestForm] = useState<{ mode: "add" | "rename" | null; name: string; url: string; key?: string }>({ mode: null, name: "", url: "", key: "" })
   const [destError, setDestError] = useState("")
   const [revealed, setRevealed] = useState<{ id: string; url: string } | null>(null)
   const [legacyRtmp, setLegacyRtmp] = useState<string | null>(null)
@@ -94,6 +102,8 @@ export function OperatorConsole() {
   const [blockGap, setBlockGap] = useState(1.2)
   const [clockScale, setClockScale] = useState(1)
   const [clockText, setClockText] = useState(1)
+  const [visuals, setVisuals] = useState<Visuals>(() => pickVisuals(DEFAULT_STAGE))
+  const setVisual = <K extends keyof Visuals>(key: K, value: Visuals[K]) => setVisuals((cur) => ({ ...cur, [key]: value }))
   const [logoUrl, setLogoUrl] = useState("")
   const [speakers, setSpeakers] = useState<SpeakerCard[]>([])
   const [gallerySeconds, setGallerySeconds] = useState(4)
@@ -139,9 +149,17 @@ export function OperatorConsole() {
   const [pausedAt, setPausedAt] = useState<Date | null>(null)
   const [skewMs, setSkewMs] = useState(0)
   const [testUntil, setTestUntil] = useState<number | null>(null)
+  const testSetAtRef = useRef<number | null>(null)
+  // A desk left open past the test-clock TTL drops it too (so the hero matches /stream).
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (testSetAtRef.current !== null && testClockStale(testSetAtRef.current)) { testSetAtRef.current = null; setTestUntil(null); setPausedAt(null) }
+    }, 30_000)
+    return () => window.clearInterval(id)
+  }, [])
   const [previewFlash, setPreviewFlash] = useState(false)
   // One toast at a time; each kind has its own title, duration and timer. Polling never touches it.
-  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend" | "failover"; text: string; undo?: () => void }
+  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend" | "failover" | "mark"; text: string; undo?: () => void }
   const [toast, setToastState] = useState<Toast | null>(null)
   const toastTimer = useRef<number | null>(null)
   const toastSeq = useRef(0)
@@ -151,8 +169,9 @@ export function OperatorConsole() {
     toastTimer.current = null
     setToastState(null)
   }, [])
+  const [markSeq, setMarkSeq] = useState(0)
   const showToast = useCallback((kind: Toast["kind"], text: string, undo?: () => void) => {
-    const ms = { copy: 2000, "copy-failed": 6000, sync: 2500, conflict: 5000, error: 5000, extend: 8000, failover: 8000 }[kind]
+    const ms = undo ? TOAST_UNDO_MS : { copy: TOAST_MS, "copy-failed": 6000, sync: TOAST_MS, conflict: 5000, error: 4000, extend: TOAST_MS, failover: 5000, mark: TOAST_MS }[kind]
     const id = ++toastSeq.current
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
     setToastState({ id, kind, text, undo })
@@ -325,6 +344,7 @@ export function OperatorConsole() {
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
     if (typeof stage.program === "boolean") setProgram(stage.program)
     if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
+    setVisuals((cur) => ({ ...cur, ...Object.fromEntries(VISUAL_KEYS.filter((k) => stage[k] !== undefined).map((k) => [k, stage[k]])) }))
     if (typeof stage.streamProgramAudio === "boolean" || typeof stage.streamBedAudio === "boolean") setStreamAudio((cur) => ({ program: stage.streamProgramAudio ?? cur.program, bed: stage.streamBedAudio ?? cur.bed }))
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
   }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
@@ -337,9 +357,10 @@ export function OperatorConsole() {
     const applyLocalFallback = () => {
       try {
         if (stageRaw) applyStage(JSON.parse(stageRaw) as Partial<StageOptions>)
-        const clock = clockRaw ? (JSON.parse(clockRaw) as { testUntil?: number | null; pausedAt?: number | null }) : null
-        if (typeof clock?.testUntil === "number") setTestUntil(clock.testUntil)
-        if (typeof clock?.pausedAt === "number") setPausedAt(new Date(clock.pausedAt))
+        // Stale (older than the test-clock TTL, or undated from an older build) = no test clock.
+        const clock = localClock(clockRaw)
+        if (clock.testUntil !== null) setTestUntil(clock.testUntil)
+        if (clock.pausedAt !== null) setPausedAt(new Date(clock.pausedAt))
       } catch {
         /* ignore a bad local cache */
       }
@@ -356,8 +377,10 @@ export function OperatorConsole() {
         const serverWins = body.hasSaved === true
         if (saved && (serverWins || !window.localStorage.getItem("hyphen-countdown-event"))) updateEvent(saved)
         if (serverWins) {
-          setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
-          setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
+          const clock = serverClock(body)
+          testSetAtRef.current = clock.testSetAt
+          setTestUntil(clock.testUntil)
+          setPausedAt(clock.pausedAt !== null ? new Date(clock.pausedAt) : null)
           if (body.stage) applyStage(body.stage)
         } else applyLocalFallback()
         setPublished({ event: saved ?? { ...DEFAULT_EVENT }, stage: parseStage(body.stage) })
@@ -371,7 +394,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -386,7 +409,7 @@ export function OperatorConsole() {
     // Follows testUntil/pausedAt whoever set them (this desk or a synced one): clearing the test clock
     // on another device must put this preview back on real time too, not just hide the banner.
     setSkewMs((current) => previewSkew(target.getTime(), testUntil, pausedMs || null, current))
-    window.localStorage.setItem("hyphen-countdown-clock", JSON.stringify({ testUntil, pausedAt: pausedMs || null }))
+    window.localStorage.setItem("hyphen-countdown-clock", JSON.stringify({ testUntil, pausedAt: pausedMs || null, savedAt: testSetAtRef.current ?? Date.now() }))
   }, [hydrated, valid, target, testUntil, pausedMs])
 
   const loadDests = useCallback(async () => {
@@ -488,8 +511,10 @@ export function OperatorConsole() {
     }
     // Live switches and the test clock always follow the server.
     applyStage(Object.fromEntries(IMMEDIATE_STAGE.map((key) => [key, remote.stage[key]])) as Partial<StageOptions>)
-    setTestUntil(typeof body.testUntil === "number" ? body.testUntil : null)
-    setPausedAt(typeof body.pausedAt === "number" ? new Date(body.pausedAt) : null)
+    const clock = serverClock(body)
+    testSetAtRef.current = clock.testSetAt
+    setTestUntil(clock.testUntil)
+    setPausedAt(clock.pausedAt !== null ? new Date(clock.pausedAt) : null)
     setPublished(remote)
     revRef.current = body.rev
     lastSent.current = ""
@@ -699,7 +724,7 @@ export function OperatorConsole() {
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
   const endTarget = endInstant(date, time, endAt || endTime, timeZone)
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
-  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
+  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program, endAt }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
   /**
    * Every Transport button goes through lib/transport (the same code the phone deck runs on the
@@ -860,6 +885,7 @@ export function OperatorConsole() {
               <span aria-hidden className={`size-2 rounded-full ${wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"}`} />
               Deck
             </Link>
+            <Link href="/visuals" data-testid="desk-visuals-nav" className={`${pillClass("outline", "sm")} no-underline`}>Visuals</Link>
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
@@ -908,6 +934,7 @@ export function OperatorConsole() {
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 w-full lg:flex-row">
         <section className="space-y-4 lg:w-[380px] lg:shrink-0">
+          <LocalAccessPill />
           <div className="rounded-[20px] bg-black p-5 text-white">
             {previewRemaining?.done ? (
               <div>
@@ -976,8 +1003,10 @@ export function OperatorConsole() {
               <button type="button" role="radio" aria-checked={!liveMode} data-testid="mode-rehearsal" onClick={() => runTransport({ type: "mode", live: false })} className={`h-8 rounded-full font-mono text-[13px] ${!liveMode ? "bg-black text-white" : "text-black/70"}`}>Rehearsal</button>
               <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => runTransport({ type: "mode", live: true })} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
             </div>
-            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
-            {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
+            <div className="grid grid-cols-1 gap-2">
+              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={`${pillClass("live")} min-h-12 text-[16px]`} onConfirm={goLiveNow}>Go live now</ConfirmButton>
+            </div>
+            <div data-testid="transport-time" className="space-y-2 rounded-2xl bg-black/[0.03] p-2">
             <div className="flex flex-wrap gap-2">
               {[
                 [15, "15s"],
@@ -988,22 +1017,29 @@ export function OperatorConsole() {
                 <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => jumpPreview(Number(seconds))}>{label} left</Pill>
               ))}
             </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <div className="grid grid-cols-1 gap-2">
               <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => runTransport({ type: pausedAt ? "resume" : "pause" })}>
                 {pausedAt ? "Play" : "Pause"}
               </Pill>
-              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
-              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={pillClass("live")} onConfirm={goLiveNow}>Go live now</ConfirmButton>
-              <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
-              <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
-              <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
+            </div>
+            </div>
+            <div data-testid="transport-cards" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
               <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
-              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
-              <div className="col-span-2"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} /></div>
+              <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
               <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
               <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
-              <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
+              <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
+              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
+              <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
             </div>
+            <div data-testid="transport-danger" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+              <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
+              <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
+            </div>
+              <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
+                <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
+            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
+            {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <p className="font-mono text-[12px] leading-5 text-black/70">
               Pause, play, go live, restore and the break/hold/welcome/end card buttons go to the live /stream straight away. On /stream a break, hold or welcome card beats the end card, which beats the countdown. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
             </p>
@@ -1111,6 +1147,11 @@ export function OperatorConsole() {
                 <Pill tone="outline" size="sm" aria-label="More checker divisions" onClick={() => setChecker((value) => Math.min(12, value + 1))}>+</Pill>
               </div>
             </Field>
+            <div data-testid="countdown-stroke" className="grid gap-3 rounded-xl border border-black/15 p-3">
+              <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Countdown box stroke</p>
+              <Slider id="countdown-stroke-px" label={`Stroke ${visuals.countdownStrokePx}px @1080p`} min={0} max={12} step={0.5} value={visuals.countdownStrokePx} onChange={(v) => setVisual("countdownStrokePx", v)} />
+              <ColorField id="countdown-stroke-color" label="Stroke colour" value={visuals.countdownStrokeColor} onChange={(v) => setVisual("countdownStrokeColor", v)} />
+            </div>
           </Panel>
 
           <Panel id="socials" title="Socials" pill={`${[xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl].filter((url) => url.trim()).length}/5 links set`} defaultOpen={false} dirty={drafts.isDirty("socials")}>
@@ -1120,10 +1161,34 @@ export function OperatorConsole() {
               <Field label="LinkedIn URL" htmlFor="li"><GrowingText id="li" value={linkedinUrl} onChange={(value) => updateEvent({ linkedinUrl: value })} /></Field>
               <Field label="Instagram URL" htmlFor="ig"><GrowingText id="ig" value={instagramUrl} onChange={(value) => updateEvent({ instagramUrl: value })} /></Field>
               <Field label="YouTube URL" htmlFor="yt"><GrowingText id="yt" value={youtubeUrl} onChange={(value) => updateEvent({ youtubeUrl: value })} /></Field>
+              <div data-testid="social-anim" className="mt-2 grid gap-3 rounded-xl border border-black/15 p-3">
+                <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Circle animation & stroke</p>
+                <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
+                  <input type="checkbox" data-testid="social-spotlight" className="size-4 accent-black" checked={visuals.socialSpotlight} onChange={(e) => setVisual("socialSpotlight", e.target.checked)} />
+                  Spotlight one circle at a time
+                </label>
+                <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
+                  <input type="checkbox" data-testid="social-handle-toggle" className="size-4 accent-black" checked={visuals.socialShowHandle} disabled={!visuals.socialSpotlight} onChange={(e) => setVisual("socialShowHandle", e.target.checked)} />
+                  Show handle under the row
+                </label>
+                <Slider id="social-dwell" label={`Dwell per circle ${(visuals.socialDwellMs / 1000).toFixed(1)}s`} min={500} max={15000} step={100} value={visuals.socialDwellMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialDwellMs", v)} />
+                <Slider id="social-cooldown" label={`Rest after the row ${(visuals.socialCooldownMs / 1000).toFixed(1)}s`} min={0} max={15000} step={100} value={visuals.socialCooldownMs} disabled={!visuals.socialSpotlight} onChange={(v) => setVisual("socialCooldownMs", v)} />
+                <Slider id="overlay-inset" label={`Inset from safe zone ${visuals.overlayInset}px @1080p (straps, socials, timecode)`} min={OVERLAY_INSET_RANGE.min} max={OVERLAY_INSET_RANGE.max} step={1} value={visuals.overlayInset} onChange={(v) => setVisual("overlayInset", v)} />
+                <Slider id="social-stroke-px" label={`Circle stroke ${visuals.socialStrokePx}px @1080p`} min={0} max={12} step={0.5} value={visuals.socialStrokePx} onChange={(v) => setVisual("socialStrokePx", v)} />
+              </div>
             </Panel>
 
+          <Panel id="visuals" title="Visuals" pill={`${visuals.straps.length} strap${visuals.straps.length === 1 ? "" : "s"}`} defaultOpen={false} dirty={drafts.isDirty("visuals")}>
+            {draftBar("visuals")}
+            <VisualsDeskSection straps={visuals.straps} accent={visuals.strapAccent} text={visuals.strapText} viewKey={operator.viewKey} onStraps={(v) => setVisual("straps", v)} onAccent={(v) => setVisual("strapAccent", v)} onText={(v) => setVisual("strapText", v)} />
+          </Panel>
+
+          <Panel id="av-diagnostics" title="A/V diagnostics" pill={visuals.streamTimecode ? "STREAM TC on" : "read-only"} defaultOpen={false}>
+            <AvDiagnosticsPanel streamTimecode={visuals.streamTimecode} fps={visuals.streamTimecodeFps} />
+          </Panel>
+
           <Panel id="encoder" title="Encoder (FFmpeg)" pill={rtmpChannels.slate.running && rtmpChannels.capture.running ? "2 live" : rtmpLive ? "1 live" : "off"}>
-            <p className="font-mono text-[12px] text-black/70">Slate and Browser capture are separate outputs. Run either, or both at once to different destinations.</p>
+            <p className="font-mono text-[12px] text-black/70">Slate, Browser capture and Vertical (9:16) are separate outputs. Run any of them at once, to different destinations.</p>
             <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
               {(["slate", "capture"] as const).map((ch) => {
                 const other = ch === "slate" ? "capture" : "slate"
@@ -1137,6 +1202,7 @@ export function OperatorConsole() {
                 )
               })}
               <RelayCard dests={dests.items} />
+              <VerticalCard dests={dests.items} pillClass={pillClass} onDestsChanged={() => void loadDests()} />
               <AudioCard routing={streamAudio} onRouting={(patch) => void saveStreamAudio(patch)} />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
@@ -1179,7 +1245,7 @@ export function OperatorConsole() {
                     className="space-y-2 rounded-xl border border-black/10 bg-white p-3"
                     onSubmit={(event) => {
                       event.preventDefault()
-                      const payload = destForm.mode === "add" ? { action: "add", name: destForm.name, url: destForm.url } : { action: "rename", id: selectedDest?.id, name: destForm.name }
+                      const payload = destForm.mode === "add" ? { action: "add", name: destForm.name, url: joinRtmpServerAndKey(destForm.url, destForm.key ?? "") } : { action: "rename", id: selectedDest?.id, name: destForm.name }
                       void destAction(payload).then((ok) => {
                         if (ok) setDestForm({ mode: null, name: "", url: "" })
                       })
@@ -1187,7 +1253,15 @@ export function OperatorConsole() {
                   >
                     <Input aria-label="Destination name" data-testid="dest-name" placeholder="Name, e.g. Restream main" value={destForm.name} onChange={(event) => setDestForm({ ...destForm, name: event.target.value })} />
                     {destForm.mode === "add" ? (
-                      <Input aria-label="Ingest URL with key" data-testid="dest-url" type="password" autoComplete="off" placeholder="rtmp://live.restream.io/live/KEY" value={destForm.url} onChange={(event) => setDestForm({ ...destForm, url: event.target.value })} />
+                      <>
+                        <label className="block font-mono text-[11px] text-black/60">Server
+                          <Input aria-label="Server" data-testid="dest-url" autoComplete="off" spellCheck={false} placeholder="rtmp://a.rtmp.youtube.com/live2" value={destForm.url} onChange={(event) => setDestForm({ ...destForm, url: event.target.value })} />
+                        </label>
+                        <label className="block font-mono text-[11px] text-black/60">Stream key
+                          <Input aria-label="Stream key" data-testid="dest-key" type="password" autoComplete="off" spellCheck={false} placeholder="xxxx-xxxx-xxxx (or ?password=…; leave empty if the server field has the full URL)" value={destForm.key ?? ""} onChange={(event) => setDestForm({ ...destForm, key: event.target.value })} />
+                        </label>
+                        {destForm.url.trim() ? <p data-testid="dest-joined" className="font-mono text-[11px] break-all text-black/60">Publishes to {joinRtmpServerAndKey(destForm.url, destForm.key?.trim() ? `${destForm.key.trim().startsWith("?") ? "?" : ""}${"•".repeat(8)}` : "")}</p> : null}
+                      </>
                     ) : null}
                     <div className="flex gap-2">
                       <button type="submit" data-testid="dest-save" className={pillClass("live", "sm")}>{destForm.mode === "add" ? "Save destination" : "Save name"}</button>
@@ -1281,7 +1355,7 @@ export function OperatorConsole() {
               <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center blur-md brightness-75" style={{ backgroundImage: "url(/brand/hero-bg.png)" }} />
             ) : null}
             {safeZone ? (
-              <div aria-hidden data-testid="safe-zone" className="pointer-events-none absolute inset-[5%] z-20 border-2 border-dashed border-[#D9FF43]/80" />
+              <div aria-hidden data-testid="safe-zone" className="pointer-events-none absolute z-20 border-2 border-dashed border-[#D9FF43]/80" style={{ inset: `${SAFE_ZONE_PCT}%` }} />
             ) : null}
             {thirds ? (
               <div aria-hidden data-testid="thirds" className="pointer-events-none absolute inset-0 z-20 grid grid-cols-3 grid-rows-3">
@@ -1323,12 +1397,12 @@ export function OperatorConsole() {
                   { label: "Instagram", href: instagramUrl, icon: null },
                   { label: "YouTube", href: youtubeUrl, icon: null },
                 ],
-              }} />
+              }} social={socialLook(draftStage)} />
             ) : (
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} />
+            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} social={socialLook(draftStage)} countdownStrokePx={visuals.countdownStrokePx} countdownStrokeColor={visuals.countdownStrokeColor} />
             )}
             {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
-            {previewScreen === "program" ? <ProgramPlayer key={programSource} scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
+            {previewScreen === "program" ? <ProgramPlayer scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
           </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 [&>*:first-child]:basis-full xl:[&>*:first-child]:basis-0 xl:[&>*:first-child]:grow">
@@ -1366,7 +1440,7 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-endcard-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div> : null}</Field>
+            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time. When an override is due it cuts over Program too; tap Program or Countdown to stay on past it.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-endcard-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div> : null}</Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
@@ -1480,25 +1554,9 @@ export function OperatorConsole() {
         <a href="#top" className="font-bold text-black underline underline-offset-4" onClick={(event) => { event.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }) }}>↑ Back to top</a>
       </footer>
       {toast ? (
-        <button
-          type="button"
-          key={toast.id}
-          role="status"
-          aria-live="polite"
-          data-testid="toast"
-          data-kind={toast.kind}
-          title={toast.undo ? "Tap to undo" : "Tap to dismiss"}
-          onClick={toast.kind === "copy-failed" ? undefined : () => { dismissToast(); toast.undo?.() }}
-          onTouchMove={toast.kind === "copy-failed" ? undefined : dismissToast}
-          className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[60] flex max-w-[min(90vw,32rem)] items-center gap-3 rounded-2xl bg-black px-4 py-3 text-left text-white shadow-[0_12px_40px_rgba(0,0,0,0.3)]"
-        >
-          <svg viewBox="0 0 24 24" className={`size-5 shrink-0 ${toast.kind === "conflict" || toast.kind === "error" || toast.kind === "failover" ? "text-[#ffb020]" : "text-[#D9FF43]"}`} fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d={toast.kind === "conflict" || toast.kind === "error" ? "M12 7v6m0 4h.01" : toast.kind === "sync" ? "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2" : "m5 12 5 5 9-11"} /></svg>
-          <span className="min-w-0">
-            <span className="block text-[13px] font-bold">{{ copy: "Copied to clipboard", "copy-failed": "Copy this (clipboard blocked)", sync: "Synced from another device", conflict: "Changed on another device", error: "Heads up", extend: "End time", failover: "Program source" }[toast.kind]}</span>
-            <span className={`block font-mono text-[12px] text-white/75 ${toast.kind === "copy-failed" ? "break-all select-all" : "truncate"}`}>{toast.text}</span>
-          </span>
-          {toast.undo ? <span data-testid="toast-undo" className="shrink-0 rounded-full bg-[#D9FF43] px-3 py-1 font-mono text-[12px] font-bold text-black">Undo</span> : null}
-        </button>
+        <StatusToast key={toast.id} kind={toast.kind} tone={toast.kind === "error" || toast.kind === "conflict" ? "error" : toast.kind === "failover" ? "warn" : "ok"}
+          text={toast.kind === "copy" ? `Copied · ${toast.text}` : toast.kind === "copy-failed" ? `Copy this: ${toast.text}` : toast.kind === "sync" ? "Synced from another device" : toast.text}
+          selectable={toast.kind === "copy-failed"} undoTestid="toast-undo" onUndo={toast.undo ? () => { const undo = toast.undo!; dismissToast(); undo() } : undefined} />
       ) : null}
       {showHelp ? (
         <div role="dialog" aria-modal="false" aria-label="Keyboard shortcuts" className="fixed left-4 bottom-4 z-50 w-72 rounded-2xl border border-black/10 bg-white p-4 shadow-[0_12px_40px_rgba(0,0,0,0.2)]">
@@ -1952,7 +2010,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: { on: boolean; passphraseSet: boolean; port: number }; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
 const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
@@ -2025,6 +2083,12 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. Toggling briefly reconnects OBS. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
       </label>
       {relay?.backup?.lanIngest ? <MdnsRow relay={relay} busy={busy} act={act} /> : null}
+      {relay?.webrtc ? (
+        <label className="flex items-start gap-2 font-mono text-[12px] text-black/70">
+          <input type="checkbox" data-testid="webrtc-preview" className="mt-0.5 size-4 shrink-0" checked={relay.webrtc.on} disabled={busy} onChange={(e) => void act({ action: "webrtc-preview", on: e.target.checked }, e.target.checked ? "Fast previews (WebRTC) on." : "Previews use HLS (~3s).")} />
+          <span>Fast previews (WebRTC): desk and deck previews play in under a second (badge LIVE &lt;1s), muted; turning sound on, or any failure, falls back to HLS (~3s). Read-only: nothing can publish over WebRTC. Phones need UDP/TCP {relay.webrtc.icePort} to this Mac{relay.webrtc.iceHost === "127.0.0.1" ? " (now this Mac only: start with BIND_HOST=0.0.0.0)" : ""}; allow mediamtx in the macOS firewall.</span>
+        </label>
+      ) : null}
       {obs ? (
         <div data-testid="program-obs" className="space-y-1 rounded-lg bg-black/5 p-2 font-mono text-[12px]">
           <p className="text-black/70">OBS › Settings › Stream › Service: Custom. Hides in 30s.</p>
@@ -2052,6 +2116,50 @@ function CredRow({ label, value, copyLabel, testid }: { label: string; value: st
 }
 
 /** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
+/** Optional SRT ingest for the Backup computer (UDP): additive, RTMP keeps working. */
+function SrtBackup({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const srt = relay?.backup?.srt
+  const [srtUrl, setSrtUrl] = useState<{ url: string | null; lan: boolean; port: number; note: string } | null>(null)
+  const [pp, setPp] = useState("")
+  useEffect(() => {
+    if (!srtUrl) return
+    const id = window.setTimeout(() => setSrtUrl(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [srtUrl])
+  if (!srt || relay?.backup?.pullFrom) return null
+  async function reveal() {
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup-srt" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    setSrtUrl((await response.json().catch(() => null)) as typeof srtUrl)
+  }
+  const ppError = pp.trim() && (pp.trim().length < 10 || pp.trim().length > 79) ? "10 to 79 characters" : null
+  return (
+    <div data-testid="backup-srt" className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" data-testid="backup-srt-on" className="mt-0.5 size-4 shrink-0" checked={srt.on} disabled={busy} onChange={(e) => void act({ action: "srt-backup", on: e.target.checked }, e.target.checked ? `Backup also accepts SRT on UDP ${srt.port}.` : "SRT for Backup is off.")} />
+        <span>Also accept Backup over SRT (UDP {srt.port}) · for OBS 2 on Wi-Fi. RTMP keeps working.</span>
+      </label>
+      {srt.on ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input data-testid="backup-srt-passphrase" type="password" autoComplete="off" placeholder={srt.passphraseSet ? "passphrase set (hidden) · type a new one" : "SRT passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
+            <Pill size="sm" data-testid="backup-srt-passphrase-save" disabled={busy || !pp.trim() || Boolean(ppError)} onClick={() => { void act({ action: "srt-backup", passphrase: pp.trim() }, "SRT passphrase saved: update OBS 2."); setPp(""); setSrtUrl(null) }}>Set</Pill>
+            {srt.passphraseSet ? <Pill size="sm" tone="outline" data-testid="backup-srt-passphrase-clear" disabled={busy} onClick={() => { void act({ action: "srt-backup", passphrase: "" }, "SRT passphrase removed."); setSrtUrl(null) }}>No passphrase</Pill> : null}
+          </div>
+          {ppError ? <p className="text-[#b42318]">Passphrase: {ppError}</p> : null}
+          <Pill size="sm" tone="outline" data-testid="backup-srt-reveal" onClick={() => (srtUrl ? setSrtUrl(null) : void reveal())}>{srtUrl ? "Hide SRT URL" : "SRT URL for OBS 2"}</Pill>
+          {srtUrl?.url ? (
+            <div data-testid="backup-srt-obs" className="space-y-1 rounded-lg bg-black/5 p-2">
+              <CredRow label="SRT" value={srtUrl.url} copyLabel="SRT URL for OBS 2" testid="backup-srt-url" />
+              <p className={srtUrl.lan ? "text-black/70" : "text-[#b45309]"}>{srtUrl.note} latency=300000 is 300 ms (µs in OBS); raise to 500000 on bad Wi-Fi. macOS: allow incoming UDP {srtUrl.port} for mediamtx (System Settings › Network › Firewall). Hides in 30s.</p>
+            </div>
+          ) : srtUrl ? <p className="text-black/70">{srtUrl.note}</p> : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
   const backup = relay?.backup
   const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null; mdnsServer?: string | null } | null>(null)
@@ -2090,6 +2198,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
           <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
         </div>
       ) : null}
+      <SrtBackup relay={relay} busy={busy} act={act} />
       <div className="flex flex-wrap items-center gap-2">
         <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
         <Pill size="sm" data-testid="backup-pull-save" disabled={busy || !pull.trim() || pullUrlError(pull.trim()) !== null} onClick={() => { void act({ action: "backup-pull", url: pull.trim() }, "Backup pulls from the URL."); setPull("") }}>Pull</Pill>
@@ -2197,7 +2306,7 @@ function RelayCard({ dests }: { dests: Dest[] }) {
                     {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}</span> : null}
                     {fwd && fwd.reconnects > 0 ? <span data-testid={`relay-fwd-reconnects-${name}-${dest.name}`} title={`A working connection to ${dest.name} dropped and was re-made ${fwd.reconnects}×. Total relaunches incl. quick retries: ${fwd.restarts}.`} className="font-mono text-[11px] text-[#8a4b06]">{fwd.reconnects} {fwd.reconnects === 1 ? "reconnect" : "reconnects"}</span> : fwd && fwd.restarts > 0 && fwd.state !== "forwarding" ? <span title="Quick retries: the forward could not connect (or the source was not publishing) and was started again." className="font-mono text-[11px] text-black/60">{fwd.restarts} {fwd.restarts === 1 ? "retry" : "retries"}</span> : null}
                     {fwd && fwd.state === "forwarding" ? <HealthChip testid={`relay-fwd-health-${name}-${dest.name}`} health={fwd.health} /> : null}
-                    {fwd?.error && fwd.state !== "waiting" ? <span className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
+                    {fwd?.error && fwd.state !== "waiting" ? <span data-testid={`relay-fwd-error-${name}-${dest.name}`} className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
                     </div> : null}
                   </li>
                 )
@@ -2448,5 +2557,30 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
       </div>
       {message ? <p role="status" data-testid="audio-message" className={`font-mono text-[12px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
     </div>
+  )
+}
+
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "streamTimecode", "streamTimecodeFps"] as const
+type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
+function pickVisuals(stage: StageOptions): Visuals {
+  return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals
+}
+
+function Slider({ id, label, min, max, step, value, disabled, onChange }: { id: string; label: string; min: number; max: number; step: number; value: number; disabled?: boolean; onChange: (value: number) => void }) {
+  return (
+    <label htmlFor={id} className="grid gap-1">
+      <span className="font-mono text-[12px] tracking-[0.08em] text-black/70 uppercase">{label}</span>
+      <input id={id} data-testid={id} type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} className="w-full accent-black disabled:opacity-40" />
+    </label>
+  )
+}
+
+function ColorField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (value: string) => void }) {
+  const full = /^#[0-9a-f]{3}$/i.test(value) ? `#${value.slice(1).split("").map((c) => c + c).join("")}` : value
+  return (
+    <label htmlFor={id} className="flex items-center gap-3">
+      <input id={id} data-testid={id} type="color" value={full} onChange={(e) => onChange(e.target.value)} className="h-8 w-12 cursor-pointer rounded border border-black/20 bg-white" />
+      <span className="font-mono text-[12px] tracking-[0.08em] text-black/70 uppercase">{label} · {value}</span>
+    </label>
   )
 }

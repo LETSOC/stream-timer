@@ -199,6 +199,20 @@ export function ffmpegAvailable(options: { fresh?: boolean } = {}): boolean {
   return found
 }
 
+/** Does this ffmpeg have the drawtext filter (needs libfreetype; Homebrew's plain "ffmpeg" may lack it)? Cached 60s. */
+let drawtextCache = { until: 0, value: true }
+export function hasDrawtextFilter(filtersOutput: string): boolean {
+  return /^\s*\S+\s+drawtext\s/m.test(filtersOutput)
+}
+export function ffmpegHasDrawtext(): boolean {
+  if (Date.now() < drawtextCache.until) return drawtextCache.value
+  const out = spawnSync("ffmpeg", ["-hide_banner", "-filters"], { encoding: "utf8" })
+  const value = out.status === 0 ? hasDrawtextFilter(String(out.stdout ?? "")) : true // can't tell: don't block
+  drawtextCache = { value, until: Date.now() + 60_000 }
+  return value
+}
+export const DRAWTEXT_MISSING = "This ffmpeg has no drawtext filter, which the Slate needs (text rendering). Install a full build, e.g. on macOS: brew uninstall ffmpeg && brew install ffmpeg-full (or brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg). Browser capture doesn't need it."
+
 export type RtmpUrlCheck = { ok: true; url: string } | { ok: false; error: string }
 
 /**
@@ -453,15 +467,32 @@ function rtmpAlive(ch: RtmpChannel = "slate"): boolean {
   return false
 }
 
+/** Common providers allowed when RTMP_ALLOWED_HOSTS is unset (suffix match). */
+export const DEFAULT_RTMP_PROVIDERS = ["youtube.com", "restream.io", "castr.io", "castr.com", "twitch.tv", "live-video.net", "facebook.com", "fbcdn.net"]
+/** LAN / private / loopback hosts (always fine for a local relay or a LAN encoder). */
+export function privateHost(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase()
+  if (h === "localhost" || h.endsWith(".local") || h === "::1" || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe80:/.test(h)) return true
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h)
+  if (!m) return false
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127)
+}
+/**
+ * RTMP_ALLOWED_HOSTS (comma list, suffix match) overrides; "*" allows any host. Unset = LAN/private
+ * hosts + the common providers (YouTube, Restream, Castr, Twitch, Facebook).
+ */
 export function allowedRtmpHost(url: string): boolean {
-  const list = (process.env.RTMP_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
-  if (list.length === 0) return true
+  const env = (process.env.RTMP_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)
+  if (env.includes("*")) return true
   let host = ""
   try {
     host = new URL(url).hostname.toLowerCase()
   } catch {
     return false
   }
+  const list = env.length ? env : DEFAULT_RTMP_PROVIDERS
+  if (!env.length && privateHost(host)) return true
   return list.some((allowed) => host === allowed || host.endsWith(`.${allowed}`))
 }
 
@@ -774,9 +805,10 @@ async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, sourc
   if (!checked.ok) return { ok: false, error: checked.error, status: 400 }
   const url = checked.url
   if (!source.relay && !allowedRtmpHost(url)) {
-    return { ok: false, error: "That RTMP host is not in RTMP_ALLOWED_HOSTS.", status: 400 }
+    return { ok: false, error: process.env.RTMP_ALLOWED_HOSTS ? "That RTMP host is not in RTMP_ALLOWED_HOSTS." : "That RTMP host is not a known provider (YouTube, Restream, Castr, Twitch, Facebook) or a LAN address. Set RTMP_ALLOWED_HOSTS (e.g. RTMP_ALLOWED_HOSTS=myhost.com, or * for any) to allow it.", status: 400 }
   }
   if (!ffmpegAvailable({ fresh: true })) return { ok: false, error: "ffmpeg is not installed on this machine.", status: 500 }
+  if (source.kind === "slate" && !ffmpegHasDrawtext()) return { ok: false, error: DRAWTEXT_MISSING, status: 500 }
   if (!fs.existsSync(/* turbopackIgnore: true */ SCRIPT) || !fs.existsSync(/* turbopackIgnore: true */ SUPERVISOR)) {
     return { ok: false, error: "The countdown script is missing.", status: 500 }
   }

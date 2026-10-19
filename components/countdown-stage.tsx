@@ -16,6 +16,8 @@ import type { EventConfig } from "@/lib/event"
 import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { safeUrl } from "@/lib/event"
+import { QrImage } from "@/components/qr-image"
+import { SocialCircles, type SocialLook } from "@/components/social-circles"
 
 type CountdownStageProps = {
   event: EventConfig
@@ -35,9 +37,14 @@ type CountdownStageProps = {
   galleryOffset?: number
   galleryScale?: number
   clock?: Date | null
+  /** Social circle animation + stroke (desk › Socials) */
+  social?: SocialLook
+  /** Countdown unit-box stroke, px @1080p + colour (desk › Look) */
+  countdownStrokePx?: number
+  countdownStrokeColor?: string
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -86, galleryScale = 80, clock }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -86, galleryScale = 80, clock, social, countdownStrokePx = 2, countdownStrokeColor = "#ffffff" }: CountdownStageProps) {
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -53,7 +60,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
   return (
     <div
       className={cn("countdown-stage relative isolate overflow-visible text-white", className)}
-      style={{ aspectRatio: "16 / 9" }}
+      style={{ aspectRatio: "16 / 9", ["--cd-stroke" as string]: countdownStrokePx, ["--cd-stroke-color" as string]: countdownStrokeColor }}
     >
       <div
         className={cn("pointer-events-none absolute inset-0", transparent ? "" : "stage-bg")}
@@ -95,13 +102,15 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             >
               {rsvpLabel}
             </a>
-            <QrSlot label={scanLabel} />
+            <QrSlot label={scanLabel} url={safeUrl(rsvpUrl, "")} />
           </div>
 
           <div className="mt-[1.6cqi]">
             <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} scale={clockScale} textScale={clockText} />
           </div>
-          <SocialRow
+          <SocialCircles
+            className="mt-[1.5cqi]"
+            look={social}
             links={[
               { label: "X", href: xUrl, icon: <XIcon /> },
               { label: "Facebook", href: facebookUrl, icon: <FacebookIcon /> },
@@ -294,8 +303,9 @@ function UnitRow({
       {units.map((unit) => (
         <div
           key={unit.label}
-          className="flex flex-col items-center justify-center rounded-[0.5cqi] border border-white text-center"
-          style={{ minHeight: `${g.boxMinHeight * size}cqi`, padding: `${g.padY * size}cqi ${g.padX * size}cqi` }}
+          data-testid="countdown-box"
+          className="flex flex-col items-center justify-center rounded-[0.5cqi] border-solid text-center"
+          style={{ borderWidth: "calc(var(--cd-stroke, 2) * var(--px, 1px))", borderColor: "var(--cd-stroke-color, #fff)", minHeight: `${g.boxMinHeight * size}cqi`, padding: `${g.padY * size}cqi ${g.padX * size}cqi` }}
         >
           <div className="font-[Arial,Helvetica,sans-serif] leading-none font-bold tabular-nums" style={{ fontSize: `${g.digit * size * text}cqi` }}>
             {unit.value}
@@ -312,19 +322,18 @@ function UnitRow({
   )
 }
 
-function QrSlot({ label }: { label: string }) {
+function QrSlot({ label, url }: { label: string; url: string }) {
   return (
     <div className="flex flex-col items-center gap-[0.35cqi]">
       <div
         className="relative size-[5.6cqi] shrink-0 overflow-hidden rounded-[0.35cqi] bg-white"
         aria-label="RSVP QR code"
       >
-        <img
-          src="/brand/rsvp-qr.png"
-          alt=""
-          className="size-full object-cover"
-          draggable={false}
-        />
+        {url ? (
+          <QrImage key={url} url={url} className="size-full object-cover" alt="" />
+        ) : (
+          <img src="/brand/rsvp-qr.png" alt="" className="size-full object-cover" draggable={false} />
+        )}
       </div>
       <span className="font-[Arial,Helvetica,sans-serif] text-[0.72cqi] font-bold tracking-[0.12em] text-white uppercase">
         {label}
@@ -389,30 +398,8 @@ function seeded(second: number, index: number) {
   return ((n ^ (n >>> 16)) >>> 0) / 4294967296
 }
 
-function SocialRow({
-  links,
-}: {
-  links: { label: string; href: string; icon: ReactNode }[]
-}) {
-  return (
-    <div className="mt-[1.5cqi] flex items-center gap-[0.7cqi]">
-      {links.map((link) => (
-        <a
-          key={link.label}
-          href={safeUrl(link.href, "#")}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={link.label}
-          className="inline-flex size-[2.99cqi] items-center justify-center overflow-hidden rounded-full border-[0.14cqi] border-white text-white no-underline"
-        >
-          {link.icon}
-        </a>
-      ))}
-    </div>
-  )
-}
 
-function XIcon() {
+export function XIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-black">
       <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>
@@ -422,7 +409,7 @@ function XIcon() {
   )
 }
 
-function FacebookIcon() {
+export function FacebookIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-[#3b5998]">
       <svg viewBox="0 0 24 24" className="size-[1.35cqi]" fill="white" aria-hidden>
@@ -432,7 +419,7 @@ function FacebookIcon() {
   )
 }
 
-function LinkedInIcon() {
+export function LinkedInIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-[#0a66c2]">
       <svg viewBox="0 0 24 24" className="size-[1.3cqi]" fill="white" aria-hidden>
@@ -442,7 +429,7 @@ function LinkedInIcon() {
   )
 }
 
-function InstagramIcon() {
+export function InstagramIcon() {
   return (
     <span
       className="flex size-full items-center justify-center rounded-full"
@@ -457,7 +444,7 @@ function InstagramIcon() {
   )
 }
 
-function YouTubeIcon() {
+export function YouTubeIcon() {
   return (
     <span className="flex size-full items-center justify-center rounded-full bg-[#ff0033]">
       <svg viewBox="0 0 24 24" className="size-[1.25cqi]" fill="white" aria-hidden>

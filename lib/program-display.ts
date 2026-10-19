@@ -8,6 +8,8 @@
 export const NOT_READY_MS = 3000
 export const FIRST_FRAME_GRACE_MS = 5000
 export const STALL_HOLD_MS = 4000
+/** While MediaMTX still reports the input publishing, a player stall (LL-HLS hiccup) keeps the last frame this long before "Waiting for OBS". */
+export const READY_STALL_TIMEOUT_MS = 20000
 
 export type ProgramDisplay = "video" | "standby" | "under"
 
@@ -30,7 +32,10 @@ export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
   if (activeSince === null) return "under"
   const gone = !ready && (notReadySince === null || now - notReadySince > NOT_READY_MS)
   if (lastFrameAt !== null) {
-    if (now - lastFrameAt <= STALL_HOLD_MS) return "video"
+    const stalled = now - lastFrameAt
+    if (stalled <= STALL_HOLD_MS) return "video"
+    // Publisher still there: an LL-HLS stall, not OBS gone. Keep the last frame (the watchdog reloads).
+    if (!gone && stalled <= READY_STALL_TIMEOUT_MS) return "video"
     return "standby"
   }
   if (gone && now - activeSince > Math.min(NOT_READY_MS, FIRST_FRAME_GRACE_MS)) return "standby"
@@ -48,14 +53,41 @@ export const SWITCH_BUFFER_MS = 1000
 /**
  * Pure: may a Main/Backup hand-over complete now? The input on air stays on (never "Waiting for OBS"
  * mid-switch) until the incoming one has played `bufferMs` continuously; if the one on air is already
- * gone, take the incoming one as soon as it has a frame (or after 4s, then its own standby rules).
+ * gone or not advancing (frozen, torn down, publisher gone), take the incoming one as soon as it has a frame (or after 4s, then its own standby rules).
  * 30s cap so a never-arriving input can't pin the old one forever.
  */
-export function handoverDone(input: { screenIsProgram: boolean; pendingSince: number; now: number; incomingVideoSince: number | null; airDisplay: ProgramDisplay; bufferMs: number }): boolean {
-  const { screenIsProgram, pendingSince, now, incomingVideoSince, airDisplay, bufferMs } = input
+export function handoverDone(input: { screenIsProgram: boolean; pendingSince: number; now: number; incomingVideoSince: number | null; airDisplay: ProgramDisplay; bufferMs: number; /** the input on air is still advancing and its publisher is there (false = frozen, torn down, erroring or gone) */ airAlive?: boolean }): boolean {
+  const { screenIsProgram, pendingSince, now, incomingVideoSince, airDisplay, bufferMs, airAlive = true } = input
   if (!screenIsProgram) return true
   if (incomingVideoSince !== null && now - incomingVideoSince >= bufferMs) return true
+  // Old input dead/stalled (failover, publisher gone, player torn down): the overlap only protects a
+  // healthy picture, so cut to the new input at its first frame instead of holding a frozen/black one.
+  if (!airAlive && incomingVideoSince !== null) return true
   const airGone = airDisplay !== "video"
   if (airGone && (incomingVideoSince !== null || now - pendingSince > 4000)) return true
   return now - pendingSince > 30_000
+}
+
+/**
+ * Operator previews (desk/deck players, not /stream): "Waiting for OBS" only once the path has had no
+ * publisher for NOT_READY_MS — never for a player stall, a reload or a WebRTC→HLS swap. Short gaps
+ * keep the last frame with a small "reconnecting" badge.
+ */
+export type PreviewDisplay = "video" | "connecting" | "reconnecting" | "standby"
+export const PREVIEW_GAP_MS = 1500
+export function previewDisplay(input: { now: number; ready: boolean; notReadySince: number | null; lastFrameAt: number | null }): PreviewDisplay {
+  const { now, ready, notReadySince, lastFrameAt } = input
+  const gone = !ready && notReadySince !== null && now - notReadySince > NOT_READY_MS
+  if (gone) return "standby"
+  if (lastFrameAt === null) return "connecting"
+  return now - lastFrameAt > PREVIEW_GAP_MS ? "reconnecting" : "video"
+}
+
+/**
+ * /stream's standby input (prewarmed, not on air, not the hand-over target): paused with a warm buffer
+ * in a plain tab (one decode instead of two). Browser capture keeps it playing: it takes each input's
+ * audio from its own element, so a switch must find the other input's audio already flowing.
+ */
+export function holdStandby(i: { onAir: boolean; incoming: boolean; captureTap: boolean }): boolean {
+  return !i.onAir && !i.incoming && !i.captureTap
 }

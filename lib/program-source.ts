@@ -24,8 +24,10 @@ export type FailoverSettings = {
   flapCount: number
   flapWindowSec: number
   flapStableSec: number
+  /** When the on-air input drops and comes back READY, disarm + re-arm it once (resyncs A/V). Default on. */
+  autoRearm: boolean
 }
-export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60 }
+export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true }
 
 export function parseFailover(raw: unknown): FailoverSettings {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
@@ -40,6 +42,7 @@ export function parseFailover(raw: unknown): FailoverSettings {
     flapCount: num(r.flapCount, 1, 20, DEFAULT_FAILOVER.flapCount),
     flapWindowSec: num(r.flapWindowSec, 30, 3600, DEFAULT_FAILOVER.flapWindowSec),
     flapStableSec: num(r.flapStableSec, 5, 1800, DEFAULT_FAILOVER.flapStableSec),
+    autoRearm: r.autoRearm !== false,
   }
 }
 

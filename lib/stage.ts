@@ -4,11 +4,42 @@
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
+import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export type StageOptions = {
   /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
   streamProgramAudio: boolean
   streamBedAudio: boolean
+  /** Social circles (ported from the Hyphen "Social Circles" design): spotlight one circle at a time. */
+  socialSpotlight: boolean
+  socialDwellMs: number
+  socialCooldownMs: number
+  /** White ring stroke around each circle, px @1080p */
+  socialStrokePx: number
+  socialShowHandle: boolean
+  /** Countdown unit boxes: stroke px @1080p and colour */
+  countdownStrokePx: number
+  countdownStrokeColor: string
+  /** Visuals overlays. Saved (desk › Visuals): presets + colours. */
+  straps: StrapPreset[]
+  strapAccent: string
+  strapText: string
+  /** Live (deck /visuals, applied at once): which strap, IN/OUT/LOOP and when, look overrides, socials overlay. */
+  strapId: string
+  strapMode: StrapMode
+  strapAt: number | null
+  strapHoldSec: number
+  strapMotion: StrapMotion
+  /** "" = the preset's own style */
+  strapStyle: StrapStyle | ""
+  strapCorner: Corner
+  socialsOverlay: boolean
+  socialsCorner: Corner
+  /** Extra px @1080p in from the safe-zone line for straps, socials and timecode badges (0 = edge on the line). */
+  overlayInset: number
+  /** A/V diagnostics: labelled STREAM wall-clock timecode on /stream (TC2), live switch, default off. */
+  streamTimecode: boolean
+  streamTimecodeFps: number
   checker: number
   showMeta: boolean
   showLink: boolean
@@ -67,6 +98,28 @@ export const DEFAULT_STAGE: StageOptions = {
   transparent: false,
   streamProgramAudio: true,
   streamBedAudio: false,
+  socialSpotlight: true,
+  socialDwellMs: 2800,
+  socialCooldownMs: 4000,
+  socialStrokePx: 3,
+  socialShowHandle: true,
+  countdownStrokePx: 2,
+  countdownStrokeColor: "#ffffff",
+  straps: DEFAULT_STRAPS,
+  strapAccent: "#d4ff32",
+  strapText: "#ffffff",
+  strapId: "",
+  strapMode: "out",
+  strapAt: null,
+  strapHoldSec: 5,
+  strapMotion: "slide-left",
+  strapStyle: "",
+  strapCorner: "bottom-left",
+  socialsOverlay: false,
+  socialsCorner: "bottom-left",
+  overlayInset: 0,
+  streamTimecode: false,
+  streamTimecodeFps: 30,
   lineSpacing: 1.14,
   blockGap: 1.2,
   clockScale: 1,
@@ -157,6 +210,28 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     transparent: pick("transparent", (v) => v === true),
     streamProgramAudio: pick("streamProgramAudio", (v) => v !== false),
     streamBedAudio: pick("streamBedAudio", (v) => v === true),
+    socialSpotlight: pick("socialSpotlight", (v) => v !== false),
+    socialDwellMs: pick("socialDwellMs", (v, f) => Math.round(clamp(v, 500, 15000, f))),
+    socialCooldownMs: pick("socialCooldownMs", (v, f) => Math.round(clamp(v, 0, 15000, f))),
+    socialStrokePx: pick("socialStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
+    socialShowHandle: pick("socialShowHandle", (v) => v !== false),
+    countdownStrokePx: pick("countdownStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
+    countdownStrokeColor: pick("countdownStrokeColor", (v, f) => hexColor(v, f)),
+    straps: pick("straps", (v) => sanitizeStraps(v)),
+    strapAccent: pick("strapAccent", (v, f) => hexColor(v, f)),
+    strapText: pick("strapText", (v, f) => hexColor(v, f)),
+    strapId: pick("strapId", (v) => (typeof v === "string" ? v.replace(/[^a-z0-9_-]/gi, "").slice(0, 32) : "")),
+    strapMode: pick("strapMode", (v) => parseStrapMode(v)),
+    strapAt: pick("strapAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
+    strapHoldSec: pick("strapHoldSec", (v, f) => clampHold(v, f)),
+    strapMotion: pick("strapMotion", (v) => parseStrapMotion(v)),
+    strapStyle: pick("strapStyle", (v) => (STRAP_STYLES.includes(v as StrapStyle) ? (v as StrapStyle) : "")),
+    strapCorner: pick("strapCorner", (v) => parseCorner(v)),
+    socialsOverlay: pick("socialsOverlay", (v) => v === true),
+    socialsCorner: pick("socialsCorner", (v) => parseCorner(v)),
+    overlayInset: pick("overlayInset", (v, f) => clampInset(v, f)),
+    streamTimecode: pick("streamTimecode", (v) => v === true),
+    streamTimecodeFps: pick("streamTimecodeFps", (v) => ([25, 30, 50, 60].includes(Number(v)) ? Number(v) : 30)),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),
     blockGap: pick("blockGap", (v, f) => clamp(v, 0, 8, f)),
     clockScale: pick("clockScale", (v, f) => clampSize(v, CLOCK_SCALE_RANGE, f)),
@@ -217,11 +292,51 @@ export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[
 
 /**
  * What /stream shows, in order of precedence:
- * break/hold/welcome overlay  >  OBS program feed  >  end card (forced, or past the end time unless held)  >  countdown.
+ * break/hold/welcome overlay  >  forced end / due end-card override  >  OBS program feed  >  end card (past Event › End time unless held)  >  countdown.
+ *
+ * End card override (ported from agent-forge): when an override time (`endAt`, e.g. deck "End in 2m") is due, or End is
+ * forced, the end card cuts over Program. The plain Event › End time does NOT pre-empt Program (a running show is never
+ * cut by the schedule alone). After it fires, tap Program or Countdown to stay past the end: that sets holdCountdown.
  */
-export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean }, pastEnd: boolean): "break" | "hold" | "welcome" | "program" | "end" | "countdown" {
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endAt?: string }, pastEnd: boolean): "break" | "hold" | "welcome" | "program" | "end" | "countdown" {
   if (stage.overlay !== "none") return stage.overlay
+  if (stage.forceEnd) return "end"
+  if (stage.endAt && pastEnd && !stage.holdCountdown) return "end"
   if (stage.program) return "program"
-  if (stage.forceEnd || (!stage.holdCountdown && pastEnd)) return "end"
+  if (!stage.holdCountdown && pastEnd) return "end"
   return "countdown"
 }
+
+/** The test clock a desk should use from a server body: none once it is stale (same TTL as /stream). */
+export function serverClock(body: { testUntil?: unknown; pausedAt?: unknown; testSetAt?: unknown; testStale?: unknown }, now = Date.now()): { testUntil: number | null; pausedAt: number | null; testSetAt: number | null } {
+  const setAt = typeof body.testSetAt === "number" ? body.testSetAt : null
+  if (body.testStale === true || testClockStale(setAt, now)) return { testUntil: null, pausedAt: null, testSetAt: null }
+  return { testUntil: typeof body.testUntil === "number" ? body.testUntil : null, pausedAt: typeof body.pausedAt === "number" ? body.pausedAt : null, testSetAt: setAt }
+}
+/** The desk's localStorage clock fallback: dropped when it was saved longer ago than the TTL (or undated). */
+export function localClock(raw: string | null, now = Date.now()): { testUntil: number | null; pausedAt: number | null } {
+  try {
+    const c = raw ? (JSON.parse(raw) as { testUntil?: unknown; pausedAt?: unknown; savedAt?: unknown }) : null
+    if (!c || typeof c.savedAt !== "number" || testClockStale(c.savedAt, now)) return { testUntil: null, pausedAt: null }
+    return { testUntil: typeof c.testUntil === "number" ? c.testUntil : null, pausedAt: typeof c.pausedAt === "number" ? c.pausedAt : null }
+  } catch { return { testUntil: null, pausedAt: null } }
+}
+
+/** #rgb / #rrggbb only (goes into inline styles). */
+export function hexColor(value: unknown, fallback: string): string {
+  return typeof value === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim()) ? value.trim().toLowerCase() : fallback
+}
+
+/** The SocialCircles look from stage options. */
+export function socialLook(stage: StageOptions) {
+  return {
+    spotlight: stage.socialSpotlight,
+    dwellMs: stage.socialDwellMs,
+    cooldownMs: stage.socialCooldownMs,
+    strokePx: stage.socialStrokePx,
+    showHandle: stage.socialShowHandle,
+  }
+}
+
+/** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps"] as const satisfies readonly (keyof StageOptions)[]

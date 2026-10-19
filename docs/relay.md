@@ -189,3 +189,41 @@ Relay card shows the backup's audio format and warns if it isn't 48 kHz.
 Switching Main ↔ Backup never shows "Waiting for OBS": the input on air stays up while the incoming one
 plays hidden for the **switch buffer** (Transport › Program source, default 1s, 0–5s), then it
 crossfades. If the input on air is already gone, the incoming one is taken at its first frame.
+
+## Backup over SRT (OBS 2 on Wi-Fi) — optional
+
+SRT (UDP) retransmits lost packets inside its latency window, so short Wi-Fi hiccups don't stall the
+stream the way RTMP (TCP) does. It is **additive**: RTMP for Main and Backup is unchanged, and with
+the box unticked the MediaMTX config is byte-identical to before (`srt: no`).
+
+1. Desk › Relay › /program-backup: tick **Also accept Backup over SRT (UDP 8890)**. Tick **LAN ingest**
+   too (SRT binds like RTMP ingest: loopback without it). Optional: set an SRT passphrase (10–79 chars).
+2. **SRT URL for OBS 2** → Copy. It looks like
+   `srt://<lan-ip>:8890?streamid=publish:program-backup:<user>:<pass>&latency=300000&pkt_size=1316[&passphrase=…]`.
+3. OBS 2 › Settings › Stream: Service **Custom**, Server = that URL, Stream Key **blank**.
+   Output: CBR, keyframe interval 2 s, audio 48 kHz AAC. `latency` is in **µs** (300000 = 300 ms);
+   use ~3–4× the Wi-Fi RTT, up to 500000 on bad Wi-Fi.
+4. macOS firewall on the relay Mac: allow incoming connections for `mediamtx` (System Settings ›
+   Network › Firewall › Options), or SRT's **UDP 8890** is silently dropped. `SRT_PORT` overrides the port.
+
+Disarm, New key, auto-failover and auto re-arm kick SRT publishers too (`/v3/srtconns/kick`). The
+Backup card shows `SRT · 12ms · 0.3% loss · 5 retx` from MediaMTX's own SRT stats (no ping).
+New key changes the SRT URL as well — copy it again into OBS 2.
+
+## Fast previews (WebRTC / WHEP, read-only)
+
+Desk › Relay › **Fast previews (WebRTC)** (default on). Every operator preview (Main, Backup, /capture,
+/slate, /vertical, the deck bar) asks for WebRTC first and shows **LIVE <1s**; on refusal, no frame
+within 3 s, a dropped connection or when you turn the preview's sound on, it plays LL-HLS instead
+(**HLS ~3s**). WebRTC carries no AAC, so a WebRTC preview is picture-only; muted start is unchanged.
+The on-air `/stream` program feed (and so Browser capture) always uses HLS.
+
+- MediaMTX `webrtc: yes`, signalling `webrtcAddress: 127.0.0.1:18889`, proxied by the app at
+  `/api/relay/whep/<path>` behind operator auth (no WHIP route: read-only; publishers stay RTMP/SRT).
+- Media (ICE) on **UDP 8189** with **TCP 8189** fallback, on all interfaces when the app runs with
+  `BIND_HOST=0.0.0.0` (else loopback); the detected LAN IP is advertised (`webrtcAdditionalHosts`).
+  No STUN/TURN: LAN only. Ports: `RELAY_WEBRTC_PORT`, `RELAY_WEBRTC_ICE_PORT`.
+- Off = `webrtc: no` and HLS exactly as before.
+- **macOS firewall**: allow incoming connections for `mediamtx` (System Settings › Network › Firewall ›
+  Options), otherwise phones fall back to HLS after 3 s. Guest/isolated Wi-Fi that blocks
+  client-to-client traffic also forces HLS.

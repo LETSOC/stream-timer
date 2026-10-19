@@ -8,6 +8,7 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import type { FailoverEvent, FailoverSettings, ReturnStatus, SourceHealth } from "@/lib/program-source"
 import type { InputReadout } from "@/lib/input-state"
 import { stageScreen, testClockStale, type StageOptions } from "@/lib/stage"
+import { clampHold, CORNERS, STRAP_MODES, STRAP_MOTIONS, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export const JUMPS = [
   { label: "15s", seconds: 15 },
@@ -36,6 +37,12 @@ export type TransportAction =
   | { type: "programSource"; source: "main" | "backup" }
   /** /stream in-page audio routing: raw program audio and/or the bed (applied at once, synced). */
   | { type: "streamAudio"; program?: boolean; bed?: boolean }
+  /** Visuals: name strap IN / OUT / LOOP and its live look. Applied at once (no Save). */
+  | { type: "strap"; mode?: StrapMode; id?: string; holdSec?: number; motion?: StrapMotion; style?: StrapStyle | ""; corner?: Corner }
+  /** Visuals: social circles overlay show/hide + corner. */
+  | { type: "socials"; show?: boolean; corner?: Corner }
+  /** A/V diagnostics: STREAM timecode on /stream (diagnostic only). */
+  | { type: "timecode"; show?: boolean; fps?: number }
 
 export type ProgramSourcesView = {
   main: SourceHealth & Partial<InputReadout>
@@ -97,7 +104,7 @@ export type TransportState = {
 }
 
 /** Actions that touch /stream in a way that's hard to undo: the deck asks for a second tap. */
-export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "screen:end"])
+export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "screen:end", "screen:program", "screen:countdown", "screen:break", "screen:hold", "screen:welcome"])
 export function isRisky(action: TransportAction): boolean {
   return RISKY.has(action.type) || (action.type === "screen" && RISKY.has(`screen:${action.screen}`))
 }
@@ -118,6 +125,22 @@ export function effectiveNow(state: Pick<TransportState, "event" | "testUntil" |
   const target = eventTarget(state.event).getTime()
   if (state.testUntil !== null && Number.isFinite(target)) return now + (target - state.testUntil)
   return now
+}
+
+/** "4 Nov 09:32" for the end card instant (adds " · next day" when the end rolls past midnight). */
+export function formatEndWhen(date: string, start: string, end: string, timeZone: string): string {
+  const instant = endInstant(date, start, end, timeZone)
+  if (!Number.isFinite(instant.getTime())) return end
+  const label = new Intl.DateTimeFormat("en-GB", { timeZone: timeZone || "UTC", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(instant).replace(",", "")
+  return end < start ? `${label} · next day` : label
+}
+
+/** HH:MM in the event zone, `minutes` after the time /stream counts against (test clock aware). Feeds deck "End in Nm". */
+export function endSoonAt(state: Pick<TransportState, "event" | "testUntil" | "pausedAt">, now: number, minutes: number): string {
+  const at = new Date(effectiveNow(state, now) + minutes * 60_000)
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: state.event.timeZone || "UTC", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at)
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00"
+  return `${get("hour")}:${get("minute")}`
 }
 
 /** Validate untrusted JSON (WebSocket / POST body) into an action. */
@@ -150,6 +173,28 @@ export function parseAction(value: unknown): TransportAction | null {
       if (typeof v.program === "boolean") out.program = v.program
       if (typeof v.bed === "boolean") out.bed = v.bed
       return out.program === undefined && out.bed === undefined ? null : out
+    }
+    case "strap": {
+      const out: Extract<TransportAction, { type: "strap" }> = { type: "strap" }
+      if (STRAP_MODES.includes(v.mode as StrapMode)) out.mode = v.mode as StrapMode
+      if (typeof v.id === "string" && /^[a-z0-9_-]{1,32}$/i.test(v.id)) out.id = v.id
+      if (typeof v.holdSec === "number" && Number.isFinite(v.holdSec)) out.holdSec = clampHold(v.holdSec)
+      if (STRAP_MOTIONS.includes(v.motion as StrapMotion)) out.motion = v.motion as StrapMotion
+      if (v.style === "" || STRAP_STYLES.includes(v.style as StrapStyle)) out.style = v.style as StrapStyle | ""
+      if (CORNERS.includes(v.corner as Corner)) out.corner = v.corner as Corner
+      return Object.keys(out).length > 1 ? out : null
+    }
+    case "socials": {
+      const out: Extract<TransportAction, { type: "socials" }> = { type: "socials" }
+      if (typeof v.show === "boolean") out.show = v.show
+      if (CORNERS.includes(v.corner as Corner)) out.corner = v.corner as Corner
+      return Object.keys(out).length > 1 ? out : null
+    }
+    case "timecode": {
+      const out: Extract<TransportAction, { type: "timecode" }> = { type: "timecode" }
+      if (typeof v.show === "boolean") out.show = v.show
+      if ([25, 30, 50, 60].includes(v.fps as number)) out.fps = v.fps as number
+      return Object.keys(out).length > 1 ? out : null
     }
     default:
       return null
@@ -190,7 +235,9 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       const overlayAt = overlay === "none" ? null : overlay === state.stage.overlay ? state.stage.overlayAt ?? now : now
       // Cards sit on top of the program feed (it stays "on" underneath); countdown/end switch it off.
       const program = action.screen === "program" ? true : overlay !== "none" ? state.stage.program : false
-      return next({}, { overlay, overlayAt, program, forceEnd: action.screen === "end", holdCountdown: action.screen === "countdown" })
+      // Program and Countdown both hold past a due end-card override (else End in 2m → end card → Program snaps back to end).
+      const holdCountdown = action.screen === "countdown" || action.screen === "program" || (overlay !== "none" && state.stage.holdCountdown)
+      return next({}, { overlay, overlayAt, program, forceEnd: action.screen === "end", holdCountdown })
     }
     case "mode":
       return next({}, { deskLive: action.live })
@@ -204,14 +251,31 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       const guard = endGuard(state, to, now)
       if (guard) return { ok: false, error: guard }
       // forceEnd (operator chose "end") stays; otherwise the new end time decides countdown/LIVE vs end card.
-      return field === "endAt" ? next({}, { endAt: to }) : next({ event: { ...state.event, endTime: to } })
+      // A new end time is a decision about the end: an earlier "Countdown" hold must not keep the end card away.
+      return field === "endAt" ? next({}, { endAt: to, holdCountdown: false }) : next({ event: { ...state.event, endTime: to } }, { holdCountdown: false })
     }
     case "programSource":
       return next({}, { programSource: action.source })
     case "streamAudio":
       return next({}, { ...(action.program === undefined ? {} : { streamProgramAudio: action.program }), ...(action.bed === undefined ? {} : { streamBedAudio: action.bed }) })
     case "setEnd":
-      return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt })
+      return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt, holdCountdown: false })
+    case "strap": {
+      const id = action.id ?? state.stage.strapId
+      if (action.mode && action.mode !== "out" && !state.stage.straps.some((p) => p.id === id)) return { ok: false, error: "Pick a saved strap first." }
+      const patch: Partial<StageOptions> = { strapId: id }
+      if (action.holdSec !== undefined) patch.strapHoldSec = action.holdSec
+      if (action.motion) patch.strapMotion = action.motion
+      if (action.style !== undefined) patch.strapStyle = action.style
+      if (action.corner) patch.strapCorner = action.corner
+      // IN / LOOP restart the motion from now; OUT just takes it off.
+      if (action.mode) Object.assign(patch, { strapMode: action.mode, strapAt: action.mode === "out" ? state.stage.strapAt : now })
+      return next({}, patch)
+    }
+    case "timecode":
+      return next({}, { ...(action.show === undefined ? {} : { streamTimecode: action.show }), ...(action.fps ? { streamTimecodeFps: action.fps } : {}) })
+    case "socials":
+      return next({}, { ...(action.show === undefined ? {} : { socialsOverlay: action.show }), ...(action.corner ? { socialsCorner: action.corner } : {}) })
   }
 }
 
@@ -240,6 +304,19 @@ export type DeckState = {
   forceEnd: boolean
   holdCountdown: boolean
   endAt: string
+  /** Visuals deck: strap presets (text only) and the live overlay state. */
+  visuals?: {
+    straps: StrapPreset[]
+    strapId: string
+    strapMode: StrapMode
+    strapAt: number | null
+    strapHoldSec: number
+    strapMotion: StrapMotion
+    strapStyle: StrapStyle | ""
+    strapCorner: Corner
+    socialsOverlay: boolean
+    socialsCorner: Corner
+  }
   serverNow: number
 }
 
@@ -271,6 +348,18 @@ export function deckState(
     forceEnd: state.stage.forceEnd,
     holdCountdown: state.stage.holdCountdown,
     endAt: state.stage.endAt,
+    visuals: {
+      straps: state.stage.straps ?? [],
+      strapId: state.stage.strapId ?? "",
+      strapMode: state.stage.strapMode ?? "out",
+      strapAt: state.stage.strapAt ?? null,
+      strapHoldSec: state.stage.strapHoldSec ?? 5,
+      strapMotion: state.stage.strapMotion ?? "slide-left",
+      strapStyle: state.stage.strapStyle ?? "",
+      strapCorner: state.stage.strapCorner ?? "bottom-left",
+      socialsOverlay: state.stage.socialsOverlay === true,
+      socialsCorner: state.stage.socialsCorner ?? "bottom-left",
+    },
     serverNow: now,
   }
 }

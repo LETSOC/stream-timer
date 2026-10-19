@@ -10,6 +10,7 @@ import next from "next"
 import { WebSocketServer } from "ws"
 import { handleDeckUpgrade } from "./lib/deck-socket"
 import { startProgramMonitor } from "./lib/program-monitor"
+import { startDropoutMonitor } from "./lib/dropout-monitor"
 
 const dev = process.argv.includes("--dev")
 const hostname = process.env.BIND_HOST?.trim() || "127.0.0.1"
@@ -18,17 +19,26 @@ if (!dev) (process.env as Record<string, string>).NODE_ENV = "production"
 
 const app = next({ dev, hostname, port, dir: __dirname })
 
+/** Idle keep-alive (ms): longer than Safari/iOS reuse idle sockets. */
+const KEEP_ALIVE_MS = 75_000
+
 async function main() {
   await app.prepare()
   const handle = app.getRequestHandler()
   const nextUpgrade = app.getUpgradeHandler()
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 })
   const server = createServer((req, res) => void handle(req, res))
+  // Node closes idle keep-alive sockets after 5s; iOS Safari reuses them longer and a POST sent on a
+  // socket the server just closed fails as a network error ("Could not reach the server" on login).
+  // Outlive the client's idle reuse window (headersTimeout must exceed keepAliveTimeout).
+  server.keepAliveTimeout = KEEP_ALIVE_MS
+  server.headersTimeout = KEEP_ALIVE_MS + 5_000
   server.on("upgrade", (req, socket, head) => {
     if (handleDeckUpgrade(wss, req, socket, head)) return
     void nextUpgrade(req, socket, head)
   })
   startProgramMonitor()
+  startDropoutMonitor()
   server.listen(port, hostname, () => {
     console.log(`▲ stream-timer ${dev ? "dev" : "production"} on http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port} (deck WebSocket on the same port)`)
   })

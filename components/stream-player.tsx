@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { PreviewBadge } from "@/components/preview-badge";
+import { useAutoHide } from "@/components/auto-hide";
+import { AudioBar, usePreviewAudio } from "@/components/preview-audio";
+import { whepPathFromHls } from "@/lib/whep-client";
+import { useWhep } from "@/lib/use-whep";
 import type Hls from "hls.js";
 import { useResumeGeneration } from "@/lib/use-resume";
 
@@ -9,13 +14,44 @@ import { useResumeGeneration } from "@/lib/use-resume";
  * (playsInline + webkit-playsinline, pointer events off the <video>, and any fullscreen that
  * still starts is exited at once). The parent handles taps.
  */
-export function StreamPlayer({ src, inline = false }: { src: string; inline?: boolean }) {
+/** Scope for the saved mute choice: one per preview (capture, slate, vertical, …), not per mount. */
+export function previewScope(src: string): string {
+  return /\/hls\/([^/]+)\//.exec(src)?.[1] ?? (src.startsWith("/media/") ? "encoded" : "preview");
+}
+
+export function StreamPlayer({ src, inline = false, scope }: { src: string; inline?: boolean; scope?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const rtcRef = useRef<HTMLVideoElement>(null);
   const resume = useResumeGeneration(); // rebuild after the background (iOS suspends media)
+  // Relay previews: WebRTC (<1s, picture only) in its own element on top. Sound (unmute) or a WebRTC
+  // failure starts HLS underneath; the WebRTC picture stays until HLS has a frame, then it's closed.
+  // Sticky for this player: muting again stays on HLS (no swap back mid-session).
+  const whepPath = whepPathFromHls(src);
+  const audioScope = `${scope ?? previewScope(src)}${inline ? ":deck" : ":desk"}`;
+  // Same audio bar as the program preview; the HLS element carries the sound (WebRTC has none).
+  const audio = usePreviewAudio(videoRef, audioScope);
+  const [wantHlsState, setWantHls] = useState(false);
+  if (!audio.pref.muted && !wantHlsState) setWantHls(true);
+  const wantHls = wantHlsState;
+  const [hlsPlaying, setHlsPlaying] = useState(false);
+  const [seen, setSeen] = useState(src);
+  if (seen !== src) { setSeen(src); setWantHls(!audio.pref.muted); setHlsPlaying(false); }
+  const swapped = whepPath !== null && hlsPlaying && wantHls;
+  const rtc = useWhep(rtcRef, whepPath, whepPath !== null && !swapped);
+  const needHls = whepPath === null || wantHls || rtc.failed;
+  const showRtc = whepPath !== null && !rtc.failed && !(needHls && hlsPlaying);
+  const chrome = useAutoHide();
+  // The WebRTC element never has sound; keep it muted. Re-apply the user's choice once HLS is up.
+  useEffect(() => { if (rtcRef.current) rtcRef.current.muted = true; });
+  const { apply } = audio;
+  useEffect(() => { apply(); }, [swapped, hlsPlaying, apply]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !needHls) return;
+    const onPlaying = () => { if (video.readyState >= 2) setHlsPlaying(true); };
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("timeupdate", onPlaying);
 
     let hls: Hls | null = null;
     let cancelled = false;
@@ -27,9 +63,11 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
       if (HlsLib.isSupported()) {
         hls = new HlsLib({
           enableWorker: false,
-          lowLatencyMode: true,
-          liveSyncDurationCount: 2,
-          liveMaxLatencyDurationCount: 6,
+          // Phones/touch (hls.js via ManagedMediaSource on iOS): standard HLS with a ~3s buffer, no
+          // catch-up speed changes (see useProgramHls). Desktop keeps LL-HLS.
+          ...(audio.muteOnly
+            ? { lowLatencyMode: false, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
+            : { lowLatencyMode: true, liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6 }),
         });
         hls.loadSource(src);
         hls.attachMedia(node);
@@ -69,24 +107,45 @@ export function StreamPlayer({ src, inline = false }: { src: string; inline?: bo
 
     return () => {
       cancelled = true;
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("timeupdate", onPlaying);
       if (inline) node.removeEventListener("webkitbeginfullscreen", exitNative);
       hls?.destroy();
       video.removeAttribute("src");
       video.load();
     };
-  }, [src, inline, resume]);
+  }, [src, inline, resume, needHls, audio.muteOnly]);
 
+  const vClass = `absolute inset-0 h-full w-full bg-[#111111] object-contain ${inline ? "pointer-events-none" : ""}`;
+  const inlineProps = inline ? { "webkit-playsinline": "true", "x-webkit-airplay": "deny" } : {};
   return (
-    <video
-      ref={videoRef}
-      className={`absolute inset-0 h-full w-full bg-[#111111] object-contain ${inline ? "pointer-events-none" : ""}`}
-      autoPlay
-      muted
-      playsInline
-      controls={!inline}
-      disablePictureInPicture={inline || undefined}
-      disableRemotePlayback={inline || undefined}
-      {...(inline ? { "webkit-playsinline": "true", "x-webkit-airplay": "deny" } : {})}
-    />
+    <div className="absolute inset-0 outline-none" data-testid="stream-player" tabIndex={inline ? undefined : 0} aria-label="Preview player (focus to show controls)" {...chrome.bind}>
+      <video
+        ref={videoRef}
+        data-active={showRtc ? undefined : "1"}
+        className={vClass}
+        autoPlay
+        muted
+        playsInline
+                disablePictureInPicture={inline || undefined}
+        disableRemotePlayback={inline || undefined}
+        {...inlineProps}
+      />
+      {whepPath !== null ? (
+        <video
+          ref={rtcRef}
+          data-active={showRtc ? "1" : undefined}
+          className={`${vClass} ${showRtc ? "" : "invisible"}`}
+          autoPlay
+          muted
+          playsInline
+                    disablePictureInPicture={inline || undefined}
+          disableRemotePlayback={inline || undefined}
+          {...inlineProps}
+        />
+      ) : null}
+      <AudioBar audio={audio} scope={audioScope} shown={chrome.shown} />
+      <PreviewBadge idle={chrome.idle} mode={whepPath === null ? null : showRtc ? (rtc.lastFrameAt !== null ? "webrtc" : null) : "hls"} />
+    </div>
   );
 }

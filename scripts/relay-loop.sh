@@ -10,7 +10,7 @@
 # host in rtmp(s) URLs in the output (ffmpeg prints its output URL).
 #      LOOP_WATCH_LOG=<log> (forwards): stall watchdog. ffmpeg's -progress output in that log must
 #      show total_size growing; if it doesn't for LOOP_STALL_SECS (25) after LOOP_STALL_GRACE (30)
-#      the child is killed and restarted (e.g. a Castr connection that hangs without ffmpeg exiting).
+#      the child is killed and restarted (LOOP_WATCH_KEY picks another counter, e.g. out_time_us for the tee muxer, which reports total_size=N/A); (e.g. a Castr connection that hangs without ffmpeg exiting).
 # Stop: SIGTERM the process group. Bash 3.2 compatible (macOS).
 
 umask 077
@@ -36,7 +36,7 @@ watch_progress() {
   sleep "${LOOP_STALL_GRACE:-30}"
   since=$(date +%s)
   while kill -0 "$pid" 2>/dev/null; do
-    cur=$(tail -c 4096 "$LOOP_WATCH_LOG" 2>/dev/null | grep -a 'total_size=' | tail -n 1)
+    cur=$(tail -c 4096 "$LOOP_WATCH_LOG" 2>/dev/null | grep -a "${LOOP_WATCH_KEY:-total_size}=" | tail -n 1)
     now=$(date +%s)
     if [[ -n "$cur" && "$cur" != "$last" ]]; then
       last="$cur"; since=$now
@@ -53,7 +53,7 @@ watch_progress() {
 
 write_state() {
   [[ -z "$STATE_FILE" ]] && return
-  printf '{"tag":"%s","state":"%s","restarts":%s,"reconnects":%s,"lastExit":%s,"updatedAt":%s}\n' "$TAG" "$1" "$restarts" "$reconnects" "${2:-null}" "$(date +%s)" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+  printf '{"tag":"%s","state":"%s","restarts":%s,"reconnects":%s,"lastExit":%s,"nextDelay":%s,"updatedAt":%s}\n' "$TAG" "$1" "$restarts" "$reconnects" "${2:-null}" "${NEXT_DELAY:-null}" "$(date +%s)" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
 }
 stop() {
   echo "[relay-loop $(date '+%H:%M:%S')] stop requested"
@@ -89,8 +89,13 @@ while true; do
   restarts=$(( restarts + 1 ))
   if (( ran >= 10 )); then reconnects=$(( reconnects + 1 )); fi
   if (( ran >= 30 )); then delay=$(( MAX_DELAY < 2 ? MAX_DELAY : 2 )); fi
+  # LOOP_SLOW_AFTER quick failures (<10s) in a row (e.g. an ingest rejecting the key with EOF): stop
+  # hammering it; the wait may grow to LOOP_SLOW_MAX instead of MAX_DELAY. A run of 10s+ resets it.
+  if (( ran < 10 )); then fast=$(( ${fast:-0} + 1 )); else fast=0; fi
+  cap=$MAX_DELAY
+  if [[ -n "${LOOP_SLOW_AFTER:-}" ]] && (( fast >= LOOP_SLOW_AFTER )); then cap=${LOOP_SLOW_MAX:-60}; fi
   echo "[relay-loop $(date '+%H:%M:%S')] exited (code $code after ${ran}s); restarting in ${delay}s"
-  write_state waiting "$code"
+  NEXT_DELAY=$delay write_state waiting "$code"
   sleep "$delay" & wait $!
-  if (( delay * 2 > MAX_DELAY )); then delay=$MAX_DELAY; else delay=$(( delay * 2 )); fi
+  if (( delay * 2 > cap )); then delay=$cap; else delay=$(( delay * 2 )); fi
 done

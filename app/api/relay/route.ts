@@ -1,6 +1,6 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
-import { armProgram, backupObsUrl, disarmProgram, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, disarmProgram, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
   if (denied) return denied
-  const body = (await request.json().catch(() => null)) as { action?: unknown; path?: unknown; destinationId?: unknown; on?: unknown; url?: unknown; failover?: unknown; name?: unknown } | null
+  const body = (await request.json().catch(() => null)) as { action?: unknown; path?: unknown; destinationId?: unknown; on?: unknown; url?: unknown; failover?: unknown; name?: unknown; passphrase?: unknown } | null
   const reply = async (result: { ok: true; note?: string } | { ok: false; error: string; status: number }) =>
     result.ok ? Response.json({ ...(await relayStatus()), note: result.note ?? null }, { headers: NO_STORE }) : Response.json({ ...(await relayStatus()), error: result.error }, { status: result.status, headers: NO_STORE })
   switch (body?.action) {
@@ -41,6 +41,12 @@ export async function POST(request: Request) {
     case "reveal-program":
       // OBS settings, on demand only (POST + operator + same-origin). Never part of GET status.
       return Response.json(programObsUrl(), { headers: NO_STORE })
+    case "reveal-backup-srt":
+      return Response.json(backupSrtUrl(), { headers: NO_STORE })
+    case "webrtc-preview":
+      return reply(await setWebrtcPreview(body.on === true))
+    case "srt-backup":
+      return reply(await setSrtBackup({ on: body.on, passphrase: body.passphrase }))
     case "reveal-backup":
       return Response.json(backupObsUrl(), { headers: NO_STORE })
     case "backup-pull":
@@ -53,6 +59,6 @@ export async function POST(request: Request) {
     case "failover":
       return reply(await setFailover(body.failover))
     default:
-      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | rotate-program | reveal-backup | backup-pull | failover | lan-ingest | mdns-name }." }, { status: 400 })
+      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | rotate-program | reveal-backup | reveal-backup-srt | srt-backup | backup-pull | failover | lan-ingest | mdns-name }." }, { status: 400 })
   }
 }

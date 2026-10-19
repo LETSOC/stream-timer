@@ -1,3 +1,4 @@
+import { rttView, startRttMonitor } from "@/lib/rtt-monitor"
 /**
  * Server-side watcher for the two program inputs (Main /program, Backup /program-backup): keeps their
  * health fresh, runs auto-failover, and tells deck sockets when anything visible changed.
@@ -9,7 +10,8 @@ import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type Fail
 import fs from "node:fs"
 import path from "node:path"
 import { syncMdns } from "@/lib/mdns"
-import { programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
+import { FRESH_REARM, noteRelayDisruption, rearmStep, relayQuietUntil, type RearmMemory } from "@/lib/program-rearm"
+import { armProgram, disarmProgram, programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
 import { inputState, nextBaseline, readiness, type InputReadout } from "@/lib/input-state"
@@ -17,12 +19,15 @@ import { inputStats, syncInputProbe } from "@/lib/input-probe"
 import { BACKUP_PATH, PROGRAM_PATH, relayReadUrl } from "@/lib/relay"
 import { readChannelStatus } from "@/lib/encoder"
 import { changeLogger, plog, PROGRAM_LOG_VERBOSE } from "@/lib/program-log"
+import { dlog } from "@/lib/dropout-log"
 const onChange = changeLogger()
+/** First state after a server start is context, not an incident. */
+const stateSeen = new Set<string>()
 let verboseAt = 0
 import type { ProgramSource, ReturnStatus, SourceHealth } from "@/lib/program-source"
 
 const KEY = Symbol.for("stream-timer.program-monitor")
-type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string; baseline: Record<ProgramSource, number | null>; status: ReturnStatus | null }
+type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string; baseline: Record<ProgramSource, number | null>; status: ReturnStatus | null; rearm?: Record<ProgramSource, RearmMemory>; downAt?: Record<ProgramSource, number | null>; rearming?: boolean }
 function monitor(): Monitor {
   const holder = globalThis as { [KEY]?: Monitor }
   if (!holder[KEY]) {
@@ -57,7 +62,7 @@ export function programSourcesView(now = Date.now()): ProgramSourcesView | null 
   try { const st = readChannelStatus("capture"); pa = st.running ? ((st.health as { capture?: { programAudio?: PA } }).capture?.programAudio ?? null) : null } catch { pa = null }
   const readout = (source: ProgramSource) => {
     const r = inputReadout(source, now, settings.failover.stallSec * 1000)
-    return { ...r, jitterMs: (() => { const j = pa?.arrivalExcessMs?.[source]; return typeof j === "number" && j >= 0 && j < 5000 ? j : null })(), offsetMs: pa?.offsetMs?.[source] ?? null, audioDelayMs: pa?.source === source ? (pa.delayMs ?? null) : null }
+    return { ...r, jitterMs: (() => { const j = pa?.arrivalExcessMs?.[source]; return typeof j === "number" && j >= 0 && j < 5000 ? j : null })(), offsetMs: pa?.offsetMs?.[source] ?? null, audioDelayMs: pa?.source === source ? (pa.delayMs ?? null) : null, rtt: rttView(source, now) }
   }
   return {
     main: readout("main"),
@@ -82,6 +87,8 @@ export function failoverLog(): FailoverEvent[] {
 /** Manual switches are logged too, so every device sees who changed what. */
 export function noteSourceSwitch(event: FailoverEvent) {
   const m = monitor()
+  const rearm = /re-arm/.test(event.reason)
+  dlog(event.auto && event.from !== event.to ? "!" : "·", rearm ? "rearm" : "switch", event.from === event.to ? `${SOURCE_LABEL[event.to]}: ${event.reason}` : `${event.auto ? "auto-failover" : "switch"} ${SOURCE_LABEL[event.from]} → ${SOURCE_LABEL[event.to]}: ${event.reason}`, event.at)
   m.last = event
   m.log = [...m.log, event].slice(-HISTORY_MAX)
   try { fs.writeFileSync(historyFile(), JSON.stringify(m.log)) } catch { /* best effort */ }
@@ -111,7 +118,8 @@ export async function programMonitorTick(now = Date.now()) {
       const r = inputReadout(source, now, settings.failover.stallSec * 1000)
       const label = SOURCE_LABEL[source]
       const a = onChange(`${source}:state`, r.state, `${label} ${r.state.toUpperCase()}${r.stateReason ? ` (${r.stateReason})` : ""}`)
-      if (a) plog(a)
+      if (a) { plog(a); dlog(!stateSeen.has(source) ? "·" : r.state === "healthy" ? "+" : "!", "ingest", a) }
+      stateSeen.add(source)
       const rk = r.ready ? (r.readyOk ? "ready" : `not:${r.issues.join(",")}`) : "off"
       const b = onChange(`${source}:ready`, rk, r.readyOk ? `${label} READY` : r.ready ? `${label} not READY: ${r.issues.join(", ")}` : `${label} not READY: no signal`)
       if (b) plog(b)
@@ -126,13 +134,14 @@ export async function programMonitorTick(now = Date.now()) {
     }
     const state = readServerState()
     const active = state.stage.programSource
+    autoRearmTick(m, active, now, settings.failover.stallSec * 1000, settings.failover.autoRearm)
     const step = failoverStep({ active, main: programSourceHealth("main", now), backup: programSourceHealth("backup", now), settings: settings.failover, memory: m.memory, now, mainReady: inputReadout("main", now, settings.failover.stallSec * 1000).readyOk })
     m.memory = step.memory
     m.status = step.status ?? null
     const fc = onChange("flaps", String(step.memory.mainFails?.length ?? 0), `Main failures in the last ${Math.round(settings.failover.flapWindowSec / 60)} min: ${step.memory.mainFails?.length ?? 0} (flapping above ${settings.failover.flapCount})`)
-    if (fc) plog(fc)
+    if (fc) { plog(fc); dlog("·", "switch", fc) }
     const hold = onChange("hold", step.status?.holdText ? "on" : "off", step.status?.holdText ? `hold start: Main flapping, holding Backup until Main is stable ${settings.failover.flapStableSec}s` : "hold end")
-    if (hold) plog(hold)
+    if (hold) { plog(hold); dlog("·", "switch", hold) }
     const ask = onChange("ask", step.status?.askReturn ? "on" : "off", step.status?.askReturn ? "Ask me: Main ready · waiting for the operator to return" : "Ask me: return prompt cleared")
     if (ask) plog(ask)
     if (step.note) {
@@ -155,7 +164,7 @@ export async function programMonitorTick(now = Date.now()) {
         }
       }
     }
-  } else { m.memory = FRESH_MEMORY; m.status = null }
+  } else if (!m.rearming) { m.memory = FRESH_MEMORY; m.status = null; m.rearm = undefined; m.downAt = undefined }
   // Push when something a person would see changed (ages in whole seconds, bitrate in 100k steps).
   const view = programSourcesView(now)
   const sig = JSON.stringify(view && [view.main.ready, view.backup.ready, Math.round((view.main.kbps ?? -1) / 100), Math.round((view.backup.kbps ?? -1) / 100), Math.floor((view.main.dataAgeMs ?? -1000) / 1000), Math.floor((view.backup.dataAgeMs ?? -1000) / 1000), view.last?.at, view.failover, view.main.state, view.backup.state, view.main.readyOk, view.backup.readyOk, view.returnStatus, view.main.stats?.fps, view.backup.stats?.fps])
@@ -165,7 +174,45 @@ export async function programMonitorTick(now = Date.now()) {
   }
 }
 
+/**
+ * After a Wi-Fi drop the on-air input comes back with A/V out of sync; disarm + re-arm (the operator's
+ * manual fix, same code path as the desk buttons) resyncs it. Once READY has been stable 3s, at most once per 20s.
+ */
+function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: number, enabled: boolean) {
+  if (m.rearming) return
+  const mem = m.rearm ?? { main: FRESH_REARM, backup: FRESH_REARM }
+  const downAt = m.downAt ?? { main: null, backup: null }
+  const reads = { main: inputReadout("main", now, stallMs), backup: inputReadout("backup", now, stallMs) }
+  const isDown = (r: InputReadout) => !r.ready || r.state === "failed"
+  for (const s of ["main", "backup"] as const) downAt[s] = isDown(reads[s]) ? (downAt[s] ?? now) : null
+  let fire = false
+  for (const s of ["main", "backup"] as const) {
+    const r = reads[s]
+    const step = rearmStep(mem[s], { down: isDown(r), ready: r.ready && r.readyOk && r.state !== "failed", onAir: s === active, otherDownAt: downAt[s === "main" ? "backup" : "main"], quietUntil: relayQuietUntil(), now, enabled })
+    mem[s] = step.mem
+    if (step.fire && s === active) fire = true
+  }
+  m.rearm = mem
+  m.downAt = downAt
+  if (!fire) return
+  const label = SOURCE_LABEL[active]
+  plog(`${label} reconnected → auto re-arm`)
+  dlog("!", "rearm", `${label} reconnected → auto re-arm: disarming /program + /program-backup for ~1.5s (publishers kicked; OBS reconnects; /stream holds the last frame, "Waiting for OBS" if it takes > ~7s)`)
+  m.rearming = true
+  void (async () => {
+    try {
+      await disarmProgram()
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const armed = await armProgram()
+      if (!armed.ok) { plog(`auto re-arm: arm failed: ${armed.error ?? "unknown"}`); dlog("!", "rearm", `auto re-arm: arm failed: ${armed.error ?? "unknown"}`) }
+      noteSourceSwitch({ at: Date.now(), from: active, to: active, reason: `${label} reconnected → auto re-arm (A/V resync)`, auto: true })
+    } finally { m.rearming = false }
+  })()
+}
+
 export function startProgramMonitor(intervalMs = 500) {
+  noteRelayDisruption() // server start: publishers are still (re)connecting
+  startRttMonitor()
   const m = monitor()
   if (m.timer) return
   let busy = false

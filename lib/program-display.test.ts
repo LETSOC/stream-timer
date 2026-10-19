@@ -14,7 +14,8 @@ test("program layer stays under the previous screen until the first frame", () =
 
 test("stalls hold the last frame, then standby", () => {
   assert.equal(programDisplay({ ...base, now: 20_000, lastFrameAt: 17_000 }), "video")
-  assert.equal(programDisplay({ ...base, now: 20_000, lastFrameAt: 15_000 }), "standby")
+  assert.equal(programDisplay({ ...base, now: 20_000, lastFrameAt: 15_000 }), "video") // still publishing: hold
+  assert.equal(programDisplay({ ...base, now: 20_000, lastFrameAt: 15_000, ready: false, notReadySince: 16_000 }), "standby")
 })
 
 test("not ready: standby only after the debounce", () => {
@@ -39,4 +40,28 @@ test("Main/Backup hand-over: hold the on-air input until the incoming one has pl
   assert.equal(handoverDone({ ...base, airDisplay: "standby", now: 4100, incomingVideoSince: null }), true)
   assert.equal(handoverDone({ ...base, now: 31_000, incomingVideoSince: null }), true) // cap
   assert.equal(handoverDone({ ...base, screenIsProgram: false, now: 10, incomingVideoSince: null }), true)
+})
+
+test("LL-HLS stall while MediaMTX still has the publisher: keep the last frame, standby only when gone or after the timeout", async () => {
+  const { programDisplay, READY_STALL_TIMEOUT_MS, NOT_READY_MS } = await import("@/lib/program-display")
+  const base = { activeSince: 0, readyAt: 0, lastFrameAt: 100_000 }
+  assert.equal(programDisplay({ ...base, now: 108_000, ready: true, notReadySince: null }), "video")
+  assert.equal(programDisplay({ ...base, now: 100_000 + READY_STALL_TIMEOUT_MS + 1, ready: true, notReadySince: null }), "standby")
+  assert.equal(programDisplay({ ...base, now: 108_000, ready: false, notReadySince: 108_000 - NOT_READY_MS - 1 }), "standby")
+})
+
+test("standby input is held (paused, warm) only in a plain tab: never on air, never the hand-over target, never in Browser capture", async () => {
+  const { holdStandby } = await import("@/lib/program-display")
+  assert.equal(holdStandby({ onAir: false, incoming: false, captureTap: false }), true)
+  assert.equal(holdStandby({ onAir: true, incoming: false, captureTap: false }), false)
+  assert.equal(holdStandby({ onAir: false, incoming: true, captureTap: false }), false)
+  assert.equal(holdStandby({ onAir: false, incoming: false, captureTap: true }), false)
+})
+
+test("hand-over: a dead/frozen on-air input is cut at the new input's first frame; a healthy one keeps the overlap", () => {
+  const base = { screenIsProgram: true, pendingSince: 0, airDisplay: "video" as const, bufferMs: 5000 }
+  assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: 1000, airAlive: true }), false)
+  assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: 1000, airAlive: false }), true)
+  assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: null, airAlive: false }), false) // nothing to cut to yet: hold
+  assert.equal(handoverDone({ ...base, now: 6100, incomingVideoSince: 1000, airAlive: true }), true)
 })

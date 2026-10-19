@@ -1,15 +1,20 @@
 "use client"
 
+import { VerticalDeckTile } from "@/components/vertical-output"
 import { failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
+import { markDropout, markToast } from "@/components/dropout-mark"
 import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
 import { useResumeGeneration } from "@/lib/use-resume"
+import { useAutoHide } from "@/components/auto-hide"
+import { StatusToast, TOAST_MS, TOAST_UNDO_MS } from "@/components/status-toast"
+import { LocalAccessPill } from "@/components/local-access-pill"
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
-import { deckScreen, effectiveNow, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
+import { deckScreen, effectiveNow, endInstant, endSoonAt, formatEndWhen, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
@@ -17,7 +22,20 @@ const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "B
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling (no WebSocket)", offline: "Offline" }
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
-type Preview = "off" | "stream" | "slate" | "capture"
+type Preview = "off" | "stream" | "slate" | "capture" | "vertical"
+
+function endCardLabel(state: DeckState, now: number): { when: string; remaining: string; testClock: boolean } {
+  const hhmm = state.endAt || state.endTime
+  const stale = state.testStale
+  const testClock = Boolean(!stale && (state.testUntil !== null || state.pausedAt !== null))
+  const at = effectiveNow({ event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: stale ? null : state.testUntil, pausedAt: stale ? null : state.pausedAt }, now)
+  const when = formatEndWhen(state.date, state.time, hhmm, state.timeZone)
+  const end = endInstant(state.date, state.time, hhmm, state.timeZone)
+  if (!Number.isFinite(end.getTime())) return { when, remaining: "—", testClock }
+  const r = remainingUntil(end, new Date(at))
+  if (r.done) return { when, remaining: state.forceEnd || !state.holdCountdown ? "due / showing" : "past (held)", testClock }
+  return { when, remaining: `${r.days ? `${r.days}d ` : ""}${pad(r.hours)}:${pad(r.minutes)}:${pad(r.seconds)}`, testClock }
+}
 
 function pad(n: number) {
   return String(n).padStart(2, "0")
@@ -41,10 +59,11 @@ export function StreamDeck() {
   const [busy, setBusy] = useState<string | null>(null)
   const [armed, setArmed] = useState<string | null>(null)
   const [toast, setToast] = useState<{ tone: "error" | "ok"; text: string; undo?: TransportAction } | null>(null)
-  const [preview, setPreview] = useStoredPref<Preview>("deck-preview-mode", "off", ["off", "stream", "slate", "capture"])
+  const [preview, setPreview] = useStoredPref<Preview>("deck-preview-mode", "off", ["off", "stream", "slate", "capture", "vertical"])
   const [collapsed, setCollapsed] = useStoredPref<"0" | "1">("deck-preview-collapsed", "0", ["0", "1"])
   const [big, setBig] = useState(false)
-  const [relayReady, setRelayReady] = useState<{ slate: boolean; capture: boolean }>({ slate: false, capture: false })
+  const chrome = useAutoHide()
+  const [relayReady, setRelayReady] = useState<{ slate: boolean; capture: boolean; vertical: boolean }>({ slate: false, capture: false, vertical: false })
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250)
@@ -61,7 +80,7 @@ export function StreamDeck() {
   }, [armed])
   useEffect(() => {
     if (!toast) return
-    const id = window.setTimeout(() => setToast(null), toast.undo ? 8000 : 4000)
+    const id = window.setTimeout(() => setToast(null), toast.undo ? TOAST_UNDO_MS : TOAST_MS)
     return () => window.clearTimeout(id)
   }, [toast])
   useEffect(() => {
@@ -69,7 +88,7 @@ export function StreamDeck() {
     let cancelled = false
     const load = async () => {
       const body = (await (await fetch("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: Record<string, { ready?: boolean }> } | null
-      if (!cancelled && body?.paths) setRelayReady({ slate: body.paths.slate?.ready === true, capture: body.paths.capture?.ready === true })
+      if (!cancelled && body?.paths) setRelayReady({ slate: body.paths.slate?.ready === true, capture: body.paths.capture?.ready === true, vertical: body.paths.vertical?.ready === true })
     }
     void load()
     const id = window.setInterval(() => void load(), 2000)
@@ -80,8 +99,9 @@ export function StreamDeck() {
   }, [preview])
 
   useFailoverEvents(state?.programSources?.last, (e) => {
-    setToast({ tone: e.auto ? "error" : "ok", text: failoverText(e) })
-    if (e.auto && navigator.vibrate) navigator.vibrate([60, 60, 60])
+    const alarm = e.auto && e.from !== e.to // a re-arm/note is informational, a switch is an alarm
+    setToast({ tone: alarm ? "error" : "ok", text: failoverText(e) })
+    if (alarm && navigator.vibrate) navigator.vibrate([60, 60, 60])
   })
   async function saveFailover(patch: Partial<FailoverSettings>) {
     const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
@@ -152,6 +172,7 @@ export function StreamDeck() {
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]} ${link === "connecting" ? "animate-pulse" : ""}`} />
           {LINK_LABEL[link]}
         </span>
+        <Link href="/visuals" data-testid="deck-visuals-link" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Visuals</Link>
         <Link href="/" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Desk</Link>
       </header>
         <PreviewBar preview={preview} setPreview={setPreview} collapsed={collapsed === "1"} toggle={() => setCollapsed(collapsed === "1" ? "0" : "1")} />
@@ -166,23 +187,26 @@ export function StreamDeck() {
               }
             }}
             data-testid="deck-preview-box"
+            {...chrome.bind}
             data-big={big ? "1" : "0"}
             aria-label={big ? "Make preview smaller" : "Make preview bigger"}
             onClick={() => setBig(!big)}
-            className={`relative mx-auto mt-2 block aspect-video touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}
+            className={`relative mx-auto mt-2 block touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${preview === "vertical" ? `aspect-[9/16] ${big ? "w-[70%] max-w-[calc(62dvh*9/16)]" : "w-[34%] max-w-[calc(30dvh*9/16)]"}` : `aspect-video ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}`}
           >
-            {preview === "stream" && screen === "program" ? <ProgramPlayer key={state?.programSource ?? "main"} scope="deck" src={programOperatorSrc(state?.programSource === "backup" ? "program-backup" : "program")} ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
-              <span data-testid="deck-preview-hls"><StreamPlayer inline src={`/api/relay/hls/${preview}/index.m3u8`} /></span>
+            {preview === "stream" && screen === "program" ? <ProgramPlayer scope="deck" src={programOperatorSrc(state?.programSource === "backup" ? "program-backup" : "program")} ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
+              <span data-testid="deck-preview-hls"><StreamPlayer key={preview} inline src={`/api/relay/hls/${preview}/index.m3u8`} />
+              </span>
             ) : (
               <span data-testid="deck-preview-placeholder" className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center font-mono text-[12px] text-white/60">
-                <span className="text-[13px] font-bold text-white/80">No signal on {preview === "slate" ? "Slate" : "Capture"} out</span>
-                Start the {preview === "slate" ? "Slate" : "Browser capture"} channel with the relay on.
+                <span className="text-[13px] font-bold text-white/80">{preview === "vertical" ? "Vertical not publishing" : `No signal on ${preview === "slate" ? "Slate" : "Capture"} out`}</span>
+                {preview === "vertical" ? "Start Vertical 9:16 (Outputs below)." : `Start the ${preview === "slate" ? "Slate" : "Browser capture"} channel with the relay on.`}
               </span>
             )}
           </div>
         )}
       </div>
 
+      <LocalAccessPill dark className="mb-3" />
       <section aria-label="Current state" data-testid="deck-state" data-screen={screen ?? ""} data-rev={state?.rev ?? ""} className="mb-3 rounded-2xl bg-white/5 p-4">
         <p className="truncate font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">{state?.name ?? "Loading…"}</p>
         <div className="mt-1 flex items-end justify-between gap-2">
@@ -205,31 +229,56 @@ export function StreamDeck() {
         {button("restore", { type: "restore" }, "Restore festival", "danger", "col-span-2")}
       </div>
 
-      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
-      <div className="flex items-center gap-1.5">
-        {EXTENDS.map((m) => button(`extend-${m < 0 ? `minus${-m}` : m}`, { type: "extendEnd", minutes: m }, m < 0 ? `−${-m}` : `+${m}`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[16px]! tabular-nums"))}
-        <span className="font-mono text-[12px] text-white/60">min</span>
-      </div>
-
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Jump · time left</h2>
       <div className="grid grid-cols-4 gap-2">
         {JUMPS.map((jump) => button(`jump-${jump.label}`, { type: "jump", seconds: jump.seconds }, jump.label, "outline"))}
       </div>
 
+      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
+      {state ? (() => {
+        const end = endCardLabel(state, serverNow)
+        return (
+          <div data-testid="deck-end-time" className="mb-2 rounded-2xl bg-white/5 px-4 py-3">
+            <p className="font-mono text-[13px] text-white/70">Shows <span data-testid="deck-end-when" className="font-bold text-white">{end.when}</span>{state.endAt ? " · override" : " · event end"}{end.testClock ? " · on test clock" : ""}</p>
+            <p data-testid="deck-end-remaining" className="mt-1 font-mono text-[18px] font-bold text-white tabular-nums">{end.remaining}</p>
+          </div>
+        )
+      })() : null}
+      <div className="mb-2 flex items-center gap-1.5">
+        {state
+          ? ([2, 5] as const).map((m) => {
+              const hhmm = endSoonAt(
+                { event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: state.testStale ? null : state.testUntil, pausedAt: state.testStale ? null : state.pausedAt },
+                serverNow,
+                m,
+              )
+              return button(`end-soon-${m}`, { type: "setEnd", endTime: state.endTime, endAt: hhmm }, `End in ${m}m`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]!")
+            })
+          : null}
+      </div>
+      <div className="flex items-center gap-1.5">
+        {EXTENDS.map((m) => button(`extend-${m < 0 ? `minus${-m}` : m}`, { type: "extendEnd", minutes: m }, m < 0 ? `−${-m}` : `+${m}`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[16px]! tabular-nums"))}
+        <span className="shrink-0 font-mono text-[12px] text-white/60">min</span>
+      </div>
+      <p className="mt-2 font-mono text-[12px] text-white/60">End in 2m/5m follows the test clock (not your phone time) and will cut over Program when due. After it shows, tap Program to stay on OBS past the end; tapping End in 2m again only delays another cut. ±min nudges the override or Event › End time. HH:MM before the start = next morning.</p>
+
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Screen</h2>
       <div className="grid grid-cols-2 gap-2">
         {(["countdown", "break", "hold", "welcome"] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
-        {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
+        {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : screen === "end" ? "Program · end card over it (tap to stay on)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
         {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn&apos;t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
         {state?.programSources ? (
           <div className="col-span-2 mt-1">
             <h2 className="mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Program source</h2>
-            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} />
+            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
           </div>
         ) : null}
         {state?.programSources ? <LanIngestInfo /> : null}
         {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
       </div>
+
+      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Outputs</h2>
+      <div className="grid grid-cols-2 gap-2"><VerticalDeckTile /></div>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Desk mode</h2>
       <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-2 gap-2">
@@ -239,22 +288,19 @@ export function StreamDeck() {
       {live ? <p className="mt-2 font-mono text-[12px] text-white/60">Live: test clocks, pause, reset and restore are locked.</p> : null}
 
       {toast ? (
-        <p role="status" data-testid="deck-toast" className={`fixed inset-x-3 bottom-[max(16px,env(safe-area-inset-bottom))] rounded-xl px-4 py-3 text-center font-bold shadow-lg ${toast.tone === "error" ? "bg-[#b42318]" : "bg-[#12b76a]"}`}>
-          {toast.text}
-          {toast.undo ? <> · <button type="button" data-testid="deck-toast-undo" className="underline underline-offset-4" onClick={() => { const undo = toast.undo!; setToast(null); void act("undo-end", undo) }}>Undo</button></> : null}
-        </p>
+        <StatusToast tone={toast.tone} text={toast.text} testid="deck-toast" undoTestid="deck-toast-undo" onUndo={toast.undo ? () => { const undo = toast.undo!; setToast(null); void act("undo-end", undo) } : undefined} />
       ) : null}
     </main>
   )
 }
 
-const PREVIEW_LABEL: Record<Preview, string> = { off: "Off", stream: "/stream", slate: "Slate", capture: "Capture" }
+const PREVIEW_LABEL: Record<Preview, string> = { off: "Off", stream: "/stream", slate: "Slate", capture: "Capture", vertical: "9:16" }
 
 function PreviewBar({ preview, setPreview, collapsed, toggle }: { preview: Preview; setPreview: (value: Preview) => void; collapsed: boolean; toggle: () => void }) {
   return (
     <div className="flex items-center gap-1">
-      <div role="radiogroup" aria-label="Preview" className="grid flex-1 grid-cols-4 gap-1 rounded-xl bg-white/5 p-0.5">
-        {(["off", "stream", "slate", "capture"] as const).map((name) => (
+      <div role="radiogroup" aria-label="Preview" className="grid flex-1 grid-cols-5 gap-1 rounded-xl bg-white/5 p-0.5">
+        {(["off", "stream", "slate", "capture", "vertical"] as const).map((name) => (
           <button key={name} type="button" role="radio" aria-checked={preview === name} data-testid={`deck-preview-${name}`} onClick={() => setPreview(name)} className={`min-h-9 rounded-lg font-mono text-[12px] ${preview === name ? "bg-white text-black" : "text-white/80"}`}>
             {PREVIEW_LABEL[name]}
           </button>

@@ -8,6 +8,9 @@
  * (random publish/read users), mediamtx.yml (generated each start), pidfiles, logs, state.
  * MediaMTX listens on 127.0.0.1 only; the desk preview goes through /api/relay/hls (operator auth).
  */
+import { dlog } from "@/lib/dropout-log"
+import type { SrtLink } from "@/lib/rtt"
+import { noteRelayDisruption } from "@/lib/program-rearm"
 import os from "node:os"
 import { cleanMdnsName, DEFAULT_MDNS_NAME, mdnsStatus, type MdnsConfig, type MdnsState } from "@/lib/mdns"
 import { parseFailover, pullUrlError, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
@@ -19,7 +22,10 @@ import { destinationFingerprint, directChannelDests, readChannelStatus, killGrou
 import { listDestinations, resolveDestination } from "@/lib/rtmp-destinations"
 import { diagnose, EMPTY_HEALTH, healthFromSamples, parseProgressBlocks, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 
-export const RELAY_PATHS = ["slate", "capture"] as const
+export const RELAY_PATHS = ["slate", "capture", "vertical"] as const
+/** Paths an RTMP channel (lib/encoder.ts) publishes; /vertical is published by the Vertical output (lib/vertical.ts). */
+export const CHANNEL_PATHS = ["slate", "capture"] as const
+export const VERTICAL_PATH = "vertical"
 export type RelayPath = (typeof RELAY_PATHS)[number]
 
 const root = () => process.cwd()
@@ -31,6 +37,13 @@ const port = (name: string, fallback: number) => {
   return Number.isInteger(value) && value > 0 && value < 65536 ? value : fallback
 }
 export const relayPorts = () => ({ rtmp: port("RELAY_RTMP_PORT", 19350), hls: port("RELAY_HLS_PORT", 18888), api: port("RELAY_API_PORT", 19997) })
+/** WebRTC (WHEP) preview: signalling HTTP on 127.0.0.1 (proxied), media on UDP/TCP `ice` (one port each). */
+export const webrtcPorts = () => ({ http: port("RELAY_WEBRTC_PORT", 18889), ice: port("RELAY_WEBRTC_ICE_PORT", 8189) })
+/** Where WebRTC media listens: all interfaces when the desk is served to the LAN (BIND_HOST), else loopback. */
+export function webrtcIceHost(env: Record<string, string | undefined> = process.env): string {
+  const b = env.BIND_HOST?.trim()
+  return b && !/^(127\.|localhost$|::1$)/.test(b) ? (b === "::" ? "0.0.0.0" : b) : "127.0.0.1"
+}
 /** Interface MediaMTX binds. Keep 127.0.0.1: the app proxies the preview; publishers are local. */
 const bindHost = () => process.env.RELAY_BIND || "127.0.0.1"
 /** Where the RTMP ingest listens when "Accept program ingest from LAN" is on. */
@@ -116,6 +129,21 @@ export type RelaySettings = {
   lanIngest: boolean
   /** mDNS name: <mdnsName>.local while LAN ingest is on */
   mdnsName: string
+  /** Also accept the Backup publisher over SRT (UDP, srtPort). Off = MediaMTX config exactly as before. */
+  srtBackup: boolean
+  /** Optional SRT encryption for /program-backup publishers ("" = off; 10–79 chars). */
+  srtPassphrase: string
+  /** Fast (WebRTC/WHEP, read-only) operator previews. Default on; off = HLS only and `webrtc: no`. */
+  webrtcPreview: boolean
+}
+export const SRT_LATENCY_US = 300_000
+export function srtPort(): number { return Number(process.env.SRT_PORT) || 8890 }
+/** Pure: "" ok (off), else 10–79 printable chars without quotes/backslash (YAML + SRT limits). */
+export function srtPassphraseError(p: string): string | null {
+  if (p === "") return null
+  if (p.length < 10 || p.length > 79) return "SRT passphrase: 10 to 79 characters (or blank for none)."
+  if (!/^[\x21-\x7e]+$/.test(p) || /["'\\&?=#]/.test(p)) return "SRT passphrase: letters, digits and symbols except quotes, backslash, & ? = #."
+  return null
 }
 /** Pure: what may go in `source:` for the backup pull (no file:, no shell, no YAML breakage). */
 export { pullUrlError }
@@ -125,18 +153,21 @@ export function validPullUrl(url: string): boolean {
 export function readSettings(): RelaySettings {
   const raw = readJson<Partial<RelaySettings>>(file("settings.json"))
   const list = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [])
-  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture) }, programArmed: raw?.programArmed === true,
+  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture), vertical: list(raw?.forwards?.vertical) }, programArmed: raw?.programArmed === true,
     backupPullUrl: typeof raw?.backupPullUrl === "string" && validPullUrl(raw.backupPullUrl) ? raw.backupPullUrl : "",
     failover: parseFailover(raw?.failover),
     lanIngest: raw?.lanIngest === true,
     mdnsName: cleanMdnsName(raw?.mdnsName) ?? DEFAULT_MDNS_NAME,
+    srtBackup: raw?.srtBackup === true,
+    webrtcPreview: raw?.webrtcPreview !== false,
+    srtPassphrase: typeof raw?.srtPassphrase === "string" && srtPassphraseError(raw.srtPassphrase) === null ? raw.srtPassphrase : "",
   }
 }
 function writeSettings(settings: RelaySettings) {
   writePrivate(file("settings.json"), JSON.stringify(settings, null, 2))
 }
 
-type Credentials = { publishUser: string; publishPass: string; readUser: string; readPass: string; /** OBS's own publish login, for /program only. */ programUser?: string; programPass?: string; /** Backup publisher's own login, for /program-backup only. */ backupUser?: string; backupPass?: string }
+type Credentials = { publishUser: string; publishPass: string; readUser: string; readPass: string; /** OBS's own publish login, for /program only. */ programUser?: string; programPass?: string; /** Backup publisher's own login, for /program-backup only. */ backupUser?: string; backupPass?: string; /** Vertical (9:16) output's publish login, for /vertical only, localhost only. */ verticalUser?: string; verticalPass?: string }
 export const PROGRAM_PATH = "program"
 export const BACKUP_PATH = "program-backup"
 function token(bytes = 18) {
@@ -145,12 +176,12 @@ function token(bytes = 18) {
 export function credentials(): Credentials {
   const existing = readJson<Credentials>(file("credentials.json"))
   if (existing?.publishPass && existing.readPass) {
-    if (existing.programUser && existing.programPass && existing.backupUser && existing.backupPass) return existing
-    const upgraded = { ...existing, programUser: existing.programUser || `obs_${token(4)}`, programPass: existing.programPass || token(), backupUser: existing.backupUser || `bak_${token(4)}`, backupPass: existing.backupPass || token() }
+    if (existing.programUser && existing.programPass && existing.backupUser && existing.backupPass && existing.verticalUser && existing.verticalPass) return existing
+    const upgraded = { ...existing, programUser: existing.programUser || `obs_${token(4)}`, programPass: existing.programPass || token(), backupUser: existing.backupUser || `bak_${token(4)}`, backupPass: existing.backupPass || token(), verticalUser: existing.verticalUser || `vrt_${token(4)}`, verticalPass: existing.verticalPass || token() }
     writePrivate(file("credentials.json"), JSON.stringify(upgraded))
     return upgraded
   }
-  const created = { publishUser: `pub_${token(4)}`, publishPass: token(), readUser: `read_${token(4)}`, readPass: token(), programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token() }
+  const created = { publishUser: `pub_${token(4)}`, publishPass: token(), readUser: `read_${token(4)}`, readPass: token(), programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token(), verticalUser: `vrt_${token(4)}`, verticalPass: token() }
   writePrivate(file("credentials.json"), JSON.stringify(created))
   return created
 }
@@ -175,7 +206,7 @@ export function rotateProgramCredentials(which: "main" | "backup" = "main"): Pro
  * Internal publishers may publish to slate/capture only; OBS's login (only while `programArmed`)
  * may publish to /program only.
  */
-export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string }): string {
+export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string; /** SRT for the Backup publisher (bound like RTMP ingest) */ srt?: { port: number; passphrase: string }; /** WHEP read-only previews */ webrtc?: { httpPort: number; iceHost: string; icePort: number; additionalHosts: string[] } }): string {
   const { host, ports, creds } = input
   // LAN ingest: only the RTMP listener moves; HLS and the API stay on `host`. Only the program/backup
   // publish logins may connect from other addresses, and only to publish their own path. Reads,
@@ -186,6 +217,8 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
   const pull = input.programArmed && input.backupPullUrl && validPullUrl(input.backupPullUrl) ? input.backupPullUrl : ""
   const backup = input.programArmed && !pull && creds.backupUser && creds.backupPass
   const local = "['127.0.0.1/32', '::1/128']"
+  // SRT only when asked for and the Backup takes a publisher; otherwise the config is exactly as before.
+  const srt = backup && input.srt ? input.srt : null
   return [
     "# Generated by stream-timer (lib/relay.ts) on every relay start. Do not edit; do not commit.",
     "logLevel: info",
@@ -194,8 +227,22 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     "writeTimeout: 10s",
     "rtsp: no",
     `rtspAddress: ${host}:${ports.rtmp + 1}`,
-    "srt: no",
-    "webrtc: no",
+    ...(srt ? ["srt: yes", `srtAddress: ${lan ? input.ingestHost : host}:${srt.port}`] : ["srt: no"]),
+    // WebRTC: reads only. Signalling on 127.0.0.1 (the app proxies it behind operator auth); no
+    // publisher login can reach it (OBS logins are RTMP/SRT; internal publishers are local RTMP).
+    ...(input.webrtc ? [
+      "webrtc: yes",
+      `webrtcAddress: ${host}:${input.webrtc.httpPort}`,
+      "webrtcEncryption: no",
+      "webrtcAllowOrigins: ['*']",
+      `webrtcLocalUDPAddress: ${input.webrtc.iceHost}:${input.webrtc.icePort}`,
+      `webrtcLocalTCPAddress: ${input.webrtc.iceHost}:${input.webrtc.icePort}`,
+      "webrtcIPsFromInterfaces: yes",
+      `webrtcAdditionalHosts: [${input.webrtc.additionalHosts.map((h) => JSON.stringify(h)).join(", ")}]`,
+      "webrtcICEServers2: []",
+      // Keep WebRTC packets under typical Wi-Fi/VPN MTUs (no IP fragmentation, which drops whole frames).
+      "udpMaxPayloadSize: 1200",
+    ] : ["webrtc: no"]),
     "moq: no",
     "playback: no",
     "metrics: no",
@@ -216,7 +263,13 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     `  - user: ${JSON.stringify(creds.publishUser)}`,
     `    pass: ${JSON.stringify(creds.publishPass)}`,
     `    ips: ${local}`,
-    `    permissions: [${RELAY_PATHS.map((name) => `{ action: publish, path: ${name} }`).join(", ")}]`,
+    `    permissions: [${CHANNEL_PATHS.map((name) => `{ action: publish, path: ${name} }`).join(", ")}]`,
+    ...(creds.verticalUser && creds.verticalPass ? [
+      `  - user: ${JSON.stringify(creds.verticalUser)}`,
+      `    pass: ${JSON.stringify(creds.verticalPass)}`,
+      `    ips: ${local}`,
+      `    permissions: [{ action: publish, path: ${VERTICAL_PATH} }]`,
+    ] : []),
     ...(program ? [
       `  - user: ${JSON.stringify(creds.programUser)}`,
       `    pass: ${JSON.stringify(creds.programPass)}`,
@@ -239,7 +292,7 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     // until the dead session times out.
     `  ${PROGRAM_PATH}: { overridePublisher: yes }`,
     // Backup: a second publisher, or MediaMTX pulls it (always on while armed, so failover is instant).
-    pull ? `  ${BACKUP_PATH}: { source: ${JSON.stringify(pull)}, sourceOnDemand: no }` : `  ${BACKUP_PATH}: { overridePublisher: yes }`,
+    pull ? `  ${BACKUP_PATH}: { source: ${JSON.stringify(pull)}, sourceOnDemand: no }` : `  ${BACKUP_PATH}: { overridePublisher: yes${srt?.passphrase ? `, srtPublishPassphrase: ${JSON.stringify(srt.passphrase)}` : ""} }`,
     "",
   ].join("\n")
 }
@@ -270,7 +323,8 @@ function mediamtxVersion(bin: string): string | null {
 
 export function relayPublishUrl(name: RelayPath): string {
   const c = credentials()
-  return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(c.publishUser)}&pass=${encodeURIComponent(c.publishPass)}`
+  const [user, pass] = name === VERTICAL_PATH ? [c.verticalUser ?? "", c.verticalPass ?? ""] : [c.publishUser, c.publishPass]
+  return `rtmp://127.0.0.1:${relayPorts().rtmp}/${name}?user=${encodeURIComponent(user)}&pass=${encodeURIComponent(pass)}`
 }
 export function relayReadUrl(name: RelayPath | typeof PROGRAM_PATH | typeof BACKUP_PATH): string {
   const c = credentials()
@@ -287,7 +341,7 @@ export function isRelayUrl(url: string): boolean {
 // ---------- processes ----------
 
 type Pidfile = { pid: number; startedAt: number; tag: string; adopted?: boolean }
-type LoopState = { state: "running" | "waiting"; restarts: number; reconnects?: number; updatedAt: number; lastExit: number | null }
+type LoopState = { state: "running" | "waiting"; restarts: number; reconnects?: number; updatedAt: number; lastExit: number | null; nextDelay?: number | null }
 
 const forwardKey = (name: RelayPath, destId: string) => `fwd-${name}-${destId.replace(/[^a-zA-Z0-9-]/g, "")}`
 function forwardTag(name: RelayPath, destId: string, fingerprint: string) {
@@ -316,7 +370,8 @@ function spawnLoop(key: string, tag: string, command: string[], opts: { redact?:
       LOOP_REDACT: opts.redact ? "1" : "",
       // Forwards: retry within 5s (a capture relaunch shouldn't leave YouTube dark for 30s), and a
       // watchdog restarts a forward whose bytes-sent stops growing for 25s. MediaMTX keeps 30s.
-      ...(opts.forward ? { LOOP_MAX_DELAY: "5", LOOP_WATCH_LOG: log, LOOP_STALL_SECS: "25", LOOP_STALL_GRACE: "30" } : {}),
+      // After 4 quick failures in a row (ingest rejecting the key), back off up to 30s instead of every 5s.
+      ...(opts.forward ? { LOOP_SLOW_AFTER: "4", LOOP_SLOW_MAX: "30", LOOP_MAX_DELAY: "5", LOOP_WATCH_LOG: log, LOOP_STALL_SECS: "25", LOOP_STALL_GRACE: "30" } : {}),
     }),
   })
   fs.closeSync(out)
@@ -326,6 +381,8 @@ function spawnLoop(key: string, tag: string, command: string[], opts: { redact?:
   return child.pid
 }
 
+/** The Vertical (9:16) output (lib/vertical.ts) runs under relay-loop.sh too; forward reconcile/"Stop forwards" leave it alone. */
+export const isVerticalTag = (tag: string) => tag.startsWith("vertical:")
 export type OwnRelayLoop = { pid: number; tag: string }
 /** Pure: our relay-loop.sh group leaders (this checkout's absolute script path) and their tags. */
 export function parseRelayLoops(psOutput: string, loopPath: string): OwnRelayLoop[] {
@@ -355,7 +412,7 @@ function adopt(loops: OwnRelayLoop[]) {
   for (const loop of loops) {
     let key: string | null = null
     if (loop.tag === "mediamtx") key = "mediamtx"
-    const fwd = /^forward:(slate|capture):([^:]+):dest=[0-9a-f]{16}$/.exec(loop.tag)
+    const fwd = /^forward:(slate|capture|vertical):([^:]+):dest=[0-9a-f]{16}$/.exec(loop.tag)
     if (fwd) key = forwardKey(fwd[1] as RelayPath, fwd[2])
     if (!key || loopAlive(key)?.pid === loop.pid) continue
     if (loopAlive(key)) continue // a different live one owns the key; the reconcile pass will clean up
@@ -377,6 +434,33 @@ async function apiPaths(): Promise<Map<string, ApiPath> | null> {
   }
 }
 
+/** Read-only: every relay path as MediaMTX reports it (null = API down). For the dropout log. */
+export function relayPathsSnapshot(): Promise<Map<string, { ready: boolean; bytesReceived: number; readers: number; source: string | null }> | null> {
+  return apiPaths().then((m) => m && new Map([...m].map(([k, v]) => [k, { ready: v.ready, bytesReceived: v.bytesReceived, readers: v.readers?.length ?? 0, source: v.source?.type ?? null }])))
+}
+
+/**
+ * Read-only MediaMTX stats for the desk's A/V diagnostics (TC3). Our own relay API by default
+ * (RELAY_API_PORT, read user); MEDIAMTX_API_URL points at another MediaMTX (e.g. http://127.0.0.1:9997).
+ * null = API off / unreachable. Never changes anything.
+ */
+export type MediamtxPathStat = { name: string; ready: boolean; readyTime: string | null; source: string | null; readers: number; bytesReceived: number; bytesSent: number | null; tracks: string[] }
+export async function mediamtxPathStats(): Promise<{ url: string; paths: MediamtxPathStat[] } | null> {
+  const external = process.env.MEDIAMTX_API_URL?.replace(/\/+$/, "")
+  const url = external || `http://127.0.0.1:${relayPorts().api}`
+  try {
+    const response = await fetch(`${url}/v3/paths/list`, { headers: external ? {} : { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+    if (!response.ok) return null
+    const body = (await response.json()) as { items?: (ApiPath & { bytesSent?: number })[] }
+    return {
+      url,
+      paths: (body.items ?? []).map((p) => ({ name: p.name, ready: p.ready === true, readyTime: p.readyTime ?? null, source: p.source?.type ?? null, readers: p.readers?.length ?? 0, bytesReceived: p.bytesReceived ?? 0, bytesSent: typeof p.bytesSent === "number" ? p.bytesSent : null, tracks: p.tracks ?? [] })),
+    }
+  } catch {
+    return null
+  }
+}
+
 // ---------- public operations ----------
 
 const lock = { chain: Promise.resolve() as Promise<unknown> }
@@ -392,6 +476,7 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
   const bin = findMediamtxBin()
   if (!bin) return { ok: false, status: 500, error: "MediaMTX is not installed. Run scripts/install-mediamtx.sh (or brew install mediamtx), or set MEDIAMTX_BIN." }
   if (!loopAlive("mediamtx")) {
+    noteRelayDisruption()
     writeConfigIfChanged()
     spawnLoop("mediamtx", "mediamtx", [bin, file("mediamtx.yml")])
   } else writeConfigIfChanged() // MediaMTX reloads its config file on change; channels keep running
@@ -402,31 +487,105 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
 }
 
 function desiredConfig() {
-  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined })
+  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined, srt: readSettings().srtBackup ? { port: srtPort(), passphrase: readSettings().srtPassphrase } : undefined, webrtc: webrtcConfig() })
+}
+function webrtcConfig() {
+  if (!readSettings().webrtcPreview) return undefined
+  const iceHost = webrtcIceHost()
+  const lan = iceHost === "127.0.0.1" ? null : lanIp()
+  return { httpPort: webrtcPorts().http, iceHost, icePort: webrtcPorts().ice, additionalHosts: lan ? [lan] : [] }
+}
+export function relayWebrtcOrigin(): { origin: string; authorization: string } | null {
+  return readSettings().webrtcPreview && relayRunning() ? { origin: `http://127.0.0.1:${webrtcPorts().http}`, authorization: basicAuth() } : null
+}
+export function setWebrtcPreview(on: boolean): Promise<RelayResult> {
+  return withLock(async () => {
+    writeSettings({ ...readSettings(), webrtcPreview: on })
+    if (relayRunning()) writeConfigIfChanged()
+    return { ok: true, note: on ? "Fast previews (WebRTC) on." : "Previews use HLS (~3s)." }
+  })
 }
 function writeConfigIfChanged() {
   const yml = desiredConfig()
   let current = ""
   try { current = fs.readFileSync(file("mediamtx.yml"), "utf8") } catch { /* first start */ }
-  if (current.replace(/# resync .*\n$/, "") !== yml) writePrivate(file("mediamtx.yml"), yml)
+  if (current.replace(/# resync .*\n$/, "") !== yml) { noteRelayDisruption(); writePrivate(file("mediamtx.yml"), yml) }
 }
 
-/** Disconnect whoever publishes /program (disarm / new key). */
+/**
+ * Read-only: remote host of each program input's publisher (RTMP push: rtmpconns remoteAddr; Backup pull:
+ * the pull URL's host). null = no publisher / relay down. Used for per-source RTT, never changes anything.
+ */
+export type PublisherHost = { host: string; via: "push" | "pull"; protocol?: "rtmp" | "srt" | null; srt?: SrtLink | null }
+export async function programPublisherHosts(): Promise<Record<"main" | "backup", PublisherHost | null>> {
+  const out: Record<"main" | "backup", PublisherHost | null> = { main: null, backup: null }
+  for (const conn of (await listPublishers()) ?? []) {
+    if (!conn.host) continue
+    const v: PublisherHost = { host: conn.host, via: "push", protocol: conn.protocol, srt: conn.srt }
+    if (conn.path === PROGRAM_PATH) out.main = v
+    if (conn.path === BACKUP_PATH) out.backup = v
+  }
+  const pull = readSettings().backupPullUrl
+  if (!out.backup && pull) {
+    try { out.backup = { host: new URL(pull).hostname, via: "pull" } } catch { /* bad url */ }
+  }
+  return out
+}
+
+export type Publisher = { id: string; path: string; protocol: "rtmp" | "srt"; host: string | null; srt: SrtLink | null }
+/** Pure: publishers from a MediaMTX /v3/rtmpconns/list or /v3/srtconns/list body. */
+export function parseConns(body: unknown, protocol: "rtmp" | "srt"): Publisher[] {
+  const items = (body as { items?: unknown[] } | null)?.items
+  if (!Array.isArray(items)) return []
+  const out: Publisher[] = []
+  for (const raw of items) {
+    const c = raw as Record<string, unknown>
+    if (c.state !== "publish" || typeof c.id !== "string" || typeof c.path !== "string") continue
+    const host = typeof c.remoteAddr === "string" ? c.remoteAddr.replace(/^\[?([^\]]+?)\]?:\d+$/, "$1") : null
+    let srt: SrtLink | null = null
+    if (protocol === "srt") {
+      const n = (k: string) => (typeof c[k] === "number" && Number.isFinite(c[k]) ? (c[k] as number) : null)
+      const got = n("packetsReceived") ?? 0
+      const lost = n("packetsReceivedLoss") ?? 0
+      srt = { rttMs: n("msRTT") === null ? null : Math.round((n("msRTT") as number) * 10) / 10, lost, retrans: n("packetsReceivedRetrans") ?? 0, lossPct: got + lost > 0 ? Math.round((lost / (got + lost)) * 1000) / 10 : 0, mbps: n("mbpsReceiveRate") }
+    }
+    out.push({ id: c.id, path: c.path, protocol, host, srt })
+  }
+  return out
+}
+/** Every publisher on the relay, RTMP and SRT (an SRT list error, e.g. SRT off, just means none). */
+async function listPublishers(): Promise<Publisher[] | null> {
+  const api = `http://127.0.0.1:${relayPorts().api}/v3`
+  const get = async (protocol: "rtmp" | "srt") => {
+    const response = await fetch(`${api}/${protocol}conns/list`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+    if (!response.ok) throw new Error(String(response.status))
+    return parseConns(await response.json(), protocol)
+  }
+  try {
+    const rtmp = await get("rtmp")
+    const srt = readSettings().srtBackup ? await get("srt").catch(() => []) : []
+    return [...rtmp, ...srt]
+  } catch { return null }
+}
+/** Pure: which conns to kick for these paths, as API paths. */
+export function kickTargets(pubs: Publisher[], paths: string[]): string[] {
+  return pubs.filter((p) => paths.includes(p.path)).map((p) => `${p.protocol}conns/kick/${encodeURIComponent(p.id)}`)
+}
+
+/** Disconnect whoever publishes /program (disarm / new key), over RTMP or SRT. */
 async function kickProgramUnlocked(paths: string[] = [PROGRAM_PATH, BACKUP_PATH]) {
   if (!relayRunning()) return
-  try {
-    const api = `http://127.0.0.1:${relayPorts().api}/v3`
-    const response = await fetch(`${api}/rtmpconns/list`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
-    const body = (await response.json()) as { items?: { id: string; path: string; state: string }[] }
-    for (const conn of body.items ?? []) {
-      if (paths.includes(conn.path) && conn.state === "publish") await fetch(`${api}/rtmpconns/kick/${encodeURIComponent(conn.id)}`, { method: "POST", headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500) })
-    }
-  } catch { /* nothing to kick */ }
+  const api = `http://127.0.0.1:${relayPorts().api}/v3`
+  for (const target of kickTargets((await listPublishers()) ?? [], paths)) {
+    try { await fetch(`${api}/${target}`, { method: "POST", headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500) }) } catch { /* gone already */ }
+  }
 }
 
 /** Arm receive: MediaMTX up (independent of forwards and channels) and OBS may publish to /program. */
 export function armProgram(): Promise<RelayResult> {
   return withLock(async () => {
+    noteRelayDisruption() // OBS (re)connecting after an arm isn't a Wi-Fi drop
+    dlog("·", "rearm", "program input ARMED (OBS may publish to /program and /program-backup)")
     writeSettings({ ...readSettings(), programArmed: true })
     const up = await ensureServerUnlocked()
     if (!up.ok) return up
@@ -437,6 +596,8 @@ export function armProgram(): Promise<RelayResult> {
 /** Disarm: OBS login removed and kicked; the server stops only if nothing else uses it. */
 export function disarmProgram(): Promise<RelayResult> {
   return withLock(async () => {
+    noteRelayDisruption()
+    dlog("!", "rearm", "program input DISARMED: OBS logins removed and publishers kicked (Main and Backup drop)")
     writeSettings({ ...readSettings(), programArmed: false })
     if (relayRunning()) writeConfigIfChanged()
     await kickProgramUnlocked()
@@ -455,6 +616,34 @@ export function programObsUrl(): { server: string; streamKey: string; url: strin
 }
 
 /** Backup publisher settings (second computer). Operator-only, on demand. */
+/** Pure: the SRT URL OBS 2 pastes as Server (Stream Key blank). latency is µs. */
+export function srtObsUrl(input: { host: string; port: number; user: string; pass: string; passphrase: string; latencyUs?: number }): string {
+  const sid = `publish:${BACKUP_PATH}:${input.user}:${input.pass}`
+  return `srt://${input.host}:${input.port}?streamid=${sid}&latency=${input.latencyUs ?? SRT_LATENCY_US}&pkt_size=1316${input.passphrase ? `&passphrase=${input.passphrase}` : ""}`
+}
+/** SRT settings for OBS 2 (operator-only reveal). url null = SRT off; lan false = only reachable from this machine. */
+export function backupSrtUrl(): { url: string | null; lan: boolean; port: number; note: string } {
+  const s = readSettings()
+  const c = credentials()
+  if (!s.srtBackup) return { url: null, lan: false, port: srtPort(), note: "SRT for Backup is off." }
+  if (s.backupPullUrl) return { url: null, lan: false, port: srtPort(), note: "Backup pulls from a URL; SRT publish is off while pulling." }
+  const lanHost = s.lanIngest ? lanIp() : null
+  const url = srtObsUrl({ host: lanHost ?? "127.0.0.1", port: srtPort(), user: c.backupUser ?? "", pass: c.backupPass ?? "", passphrase: s.srtPassphrase })
+  return { url, lan: Boolean(lanHost), port: srtPort(), note: lanHost ? "OBS 2: Settings › Stream › Custom, paste as Server, leave Stream Key blank." : "Turn on LAN ingest so OBS 2 on another machine can reach SRT (this URL only works on this Mac)." }
+}
+export function setSrtBackup(raw: { on?: unknown; passphrase?: unknown }): Promise<RelayResult> {
+  return withLock(async () => {
+    const cur = readSettings()
+    const passphrase = typeof raw.passphrase === "string" ? raw.passphrase.trim() : cur.srtPassphrase
+    const why = srtPassphraseError(passphrase)
+    if (why) return { ok: false, status: 400, error: why }
+    const on = typeof raw.on === "boolean" ? raw.on : cur.srtBackup
+    writeSettings({ ...cur, srtBackup: on, srtPassphrase: passphrase })
+    if (relayRunning()) writeConfigIfChanged()
+    return { ok: true, note: on ? `Backup also accepts SRT on UDP ${srtPort()}${passphrase ? " (encrypted)" : ""}.` : "SRT for Backup is off." }
+  })
+}
+
 export function backupObsUrl(): { server: string; streamKey: string; url: string; lanServer: string | null; mdnsServer: string | null } {
   const c = credentials()
   const server = `rtmp://127.0.0.1:${relayPorts().rtmp}/`
@@ -616,12 +805,19 @@ export function startRelay(): Promise<RelayResult> {
 }
 
 async function killForwardsUnlocked() {
-  for (const loop of findRelayLoops()) if (loop.tag !== "mediamtx") await killGroup(loop.pid)
+  // "Stop forwards" is the HD fan-out switch: the Vertical encoder and its /vertical forwards have their own.
+  for (const loop of findRelayLoops()) if (loop.tag !== "mediamtx" && !isVerticalTag(loop.tag) && !loop.tag.startsWith(`forward:${VERTICAL_PATH}:`)) await killGroup(loop.pid)
   for (const name of fs.existsSync(relayDir()) ? fs.readdirSync(relayDir()) : []) {
-    if (/^fwd-.*\.json$/.test(name)) fs.rmSync(file(name), { force: true })
+    if (/^fwd-.*\.json$/.test(name) && !name.startsWith(`fwd-${VERTICAL_PATH}-`)) fs.rmSync(file(name), { force: true })
   }
 }
-const publishingChannels = () => directChannelDests().filter((item) => item.running && item.relay)
+const publishingChannels = () => [...directChannelDests().filter((item) => item.running && item.relay), ...(verticalPublishing() ? [{ channel: VERTICAL_PATH, running: true, relay: true }] : [])]
+/** The Vertical output's loop is alive (its pidfile names a running relay-loop.sh). Read here, not via lib/vertical (that imports this module). */
+const allDirectDests = () => directChannelDests()
+export function verticalPublishing(): boolean {
+  const meta = readJson<{ pid?: number; relay?: boolean }>(path.join(dataDir(), "vertical", "vertical.json"))
+  return Boolean(meta?.pid && meta.relay !== false && pidRunsScript(meta.pid, LOOP()))
+}
 
 async function stopServerIfIdleUnlocked() {
   const settings = readSettings()
@@ -672,9 +868,9 @@ function relayRunning() {
 /** Fingerprints of destinations the relay forwards to (enabled forwards, while the relay is on). */
 export function relayForwardFingerprints(): { path: RelayPath; dest: string; destId: string }[] {
   const settings = readSettings()
-  if (!settings.enabled) return []
   const out: { path: RelayPath; dest: string; destId: string }[] = []
-  for (const name of RELAY_PATHS) {
+  // HD paths count while forwards are on; /vertical forwards whenever ticked (they follow the Vertical encoder).
+  for (const name of settings.enabled ? RELAY_PATHS : [VERTICAL_PATH] as const) {
     for (const destId of settings.forwards[name]) {
       const destination = resolveDestination(destId)
       if (destination) out.push({ path: name, dest: destinationFingerprint(destination.url), destId })
@@ -691,12 +887,12 @@ export function forwardConflict(target: { path: RelayPath; dest: string }, forwa
   const other = forwards.find((item) => item.dest === target.dest && item.path !== target.path)
   if (other) return `Relay /${other.path} already forwards to this destination. One stream key takes one publisher.`
   const channel = direct.find((item) => item.running && !item.relay && item.dest === target.dest)
-  if (channel) return `The ${channel.channel === "capture" ? "Browser capture" : "Slate"} stream publishes to this destination directly. Stop it or pick another destination.`
+  if (channel) return `The ${channel.channel === "capture" ? "Browser capture" : channel.channel === VERTICAL_PATH ? "Vertical" : "Slate"} stream publishes to this destination directly. Stop it or pick another destination.`
   return null
 }
 
 export function setForward(name: RelayPath, destId: string, on: boolean): Promise<RelayResult> {
-  const direct = directChannelDests()
+  const direct = allDirectDests()
   return withLock(async () => {
     const destination = resolveDestination(destId)
     if (!destination) return { ok: false, status: 404, error: "No such destination." }
@@ -721,23 +917,25 @@ async function reconcileUnlocked() {
   const settings = readSettings()
   // The server must run while a channel publishes into it or forwards are on (e.g. pidfile lost).
   if (!relayRunning() && (settings.enabled || settings.programArmed || publishingChannels().length > 0) && findMediamtxBin()) await ensureServerUnlocked()
-  const on = settings.enabled && relayRunning()
+  // HD paths: while "Start forwards" is on. /vertical: whenever ticked AND the Vertical encoder runs
+  // (its own switch), so ticks apply live and a stopped Vertical leaves them "waiting", not retrying.
+  const pathOn = (name: RelayPath) => relayRunning() && (name === VERTICAL_PATH ? verticalPublishing() : settings.enabled)
   const wanted = new Map<string, { name: RelayPath; destId: string; url: string; tag: string }>()
-  if (on) {
-    for (const name of RELAY_PATHS) {
+  {
+    for (const name of RELAY_PATHS.filter(pathOn)) {
       for (const destId of settings.forwards[name]) {
         const destination = resolveDestination(destId)
         if (!destination) continue
         // Never become a second publisher on a key a direct channel is already using.
-        if (forwardConflict({ path: name, dest: destinationFingerprint(destination.url) }, [], directChannelDests())) continue
+        if (forwardConflict({ path: name, dest: destinationFingerprint(destination.url) }, [], allDirectDests())) continue
         wanted.set(forwardKey(name, destId), { name, destId, url: destination.url, tag: forwardTag(name, destId, destinationFingerprint(destination.url)) })
       }
     }
   }
   // Stop forwards no longer wanted (or whose destination URL changed), including unknown leftovers.
   for (const loop of findRelayLoops()) {
-    if (loop.tag === "mediamtx") continue
-    const fwd = /^forward:(slate|capture):([^:]+):/.exec(loop.tag)
+    if (loop.tag === "mediamtx" || isVerticalTag(loop.tag)) continue
+    const fwd = /^forward:(slate|capture|vertical):([^:]+):/.exec(loop.tag)
     const key = fwd ? forwardKey(fwd[1] as RelayPath, fwd[2]) : null
     const want = key ? wanted.get(key) : undefined
     if (!want || want.tag !== loop.tag) {
@@ -758,8 +956,15 @@ export function forwardCommand(name: RelayPath, destinationUrl: string): string[
 }
 
 let reconcileAt = 0
-export async function reconcileRelay() {
-  if (Date.now() - reconcileAt < 2000) return
+/** Ticked /vertical forwards (migration from the old direct "vertical destinations"); no process change here. */
+export function addVerticalForwards(ids: string[]) {
+  if (!ids.length) return
+  const settings = readSettings()
+  writeSettings({ ...settings, forwards: { ...settings.forwards, vertical: [...new Set([...settings.forwards.vertical, ...ids])] } })
+}
+
+export async function reconcileRelay(force = false) {
+  if (!force && Date.now() - reconcileAt < 2000) return
   reconcileAt = Date.now()
   await withLock(reconcileUnlocked)
 }
@@ -785,6 +990,22 @@ function logAgeMs(key: string): number | null {
   }
 }
 
+/**
+ * Pure: an operator hint for a forward's last ffmpeg error line. "End of file" while opening the output
+ * means the ingest accepted TCP and then hung up: almost always a wrong/expired stream key, a wrong app
+ * path, or rtmp:// where the platform wants rtmps://.
+ */
+export function friendlyForwardError(line: string, url?: string): string {
+  const scheme = url?.startsWith("rtmps:") ? "rtmps" : url?.startsWith("rtmp:") ? "rtmp" : null
+  if (/End of file/i.test(line)) return `Platform closed the connection — check the stream URL/key (TikTok/Instagram keys expire each session; get a fresh one)${scheme === "rtmp" ? ". If the platform gives an rtmps:// URL, use that" : ""}.`
+  if (/Connection refused/i.test(line)) return "Connection refused — wrong server/port, or the ingest is down."
+  if (/(Connection timed out|Operation timed out|timed out)/i.test(line)) return "Timed out reaching the ingest — check the server address and your network."
+  if (/(Failed to resolve|Name or service not known|nodename nor servname)/i.test(line)) return "Can't resolve the server name — check the URL."
+  if (/(403|Forbidden|denied|Unauthorized|401)/i.test(line)) return "The platform refused the stream key (not authorised)."
+  if (/(Broken pipe|Connection reset)/i.test(line)) return "The platform dropped the connection — reconnecting."
+  return line.slice(0, 200)
+}
+
 export type ForwardState = "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"
 /** Pure: one forward's state from its loop state, path readiness and log freshness. */
 export function deriveForwardState(input: { running: boolean; loop: LoopState | null; sourceReady: boolean; logAgeMs: number | null; lastLine: string; runAgeMs: number | null }): ForwardState {
@@ -799,8 +1020,8 @@ export function deriveForwardState(input: { running: boolean; loop: LoopState | 
 }
 
 /** restarts = every relaunch of the forward ffmpeg (incl. quick retries); reconnects = relaunches after a working run (10s+) dropped. */
-export type RelayForwardStatus = { destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
-export type RelayPathStatus = { name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
+export type RelayForwardStatus = { /** the ffmpeg line behind `error` */ rawError?: string | null; destId: string; name: string; host: string; state: ForwardState; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
+export type RelayPathStatus = { /** per saved destination: why it can't be ticked on this path (null = fine) */ available: { destId: string; reason: string | null }[]; name: RelayPath; ready: boolean; publisher: string | null; tracks: string[]; readers: number; bytesReceived: number; forwards: RelayForwardStatus[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 export type IngestDiag = { resyncs: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl: string | null; mdns: MdnsState; lastReject: { at: string; text: string } | null; logFile: string }
 /**
  * Pure: from MediaMTX's log, where the RTMP ingest last started listening and the last refused /
@@ -824,8 +1045,8 @@ export function parseIngestLog(log: string): { listen: string | null; lastReject
   return { listen, lastReject }
 }
 
-export type BackupStatus = { lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings; audioTrack: ProgramStatus["audioTrack"] }
-export type RelayStatus = { ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
+export type BackupStatus = { srt: { on: boolean; passphraseSet: boolean; port: number }; lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings; audioTrack: ProgramStatus["audioTrack"] }
+export type RelayStatus = { webrtc: { on: boolean; icePort: number; iceHost: string }; ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 /** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
 export function programAudioTrack(prog: Pick<ApiPath, "tracks" | "tracks2">): ProgramStatus["audioTrack"] {
@@ -846,9 +1067,9 @@ export async function relayStatus(): Promise<RelayStatus> {
   const paths = {} as Record<RelayPath, RelayPathStatus>
   for (const name of RELAY_PATHS) {
     const info = api?.get(name)
-    const channel = readChannelStatus(name)
-    const source = channel.running && channel.relay ? channel.health : null
-    const expect = { fps: 30, kbps: channel.running && channel.relay && channel.bitrateK ? channel.bitrateK + 128 : null }
+    const channel = name === VERTICAL_PATH ? null : readChannelStatus(name)
+    const source = channel?.running && channel.relay ? channel.health : null
+    const expect = { fps: 30, kbps: name === VERTICAL_PATH ? 4500 + 128 : channel?.running && channel.relay && channel.bitrateK ? channel.bitrateK + 128 : null }
     const forwards = settings.forwards[name].filter((id) => dests.has(id)).map((destId): RelayForwardStatus => {
       const key = forwardKey(name, destId)
       const meta = loopAlive(key)
@@ -859,14 +1080,25 @@ export async function relayStatus(): Promise<RelayStatus> {
       const errorLine = [...lines].reverse().find((line) => /error|failed|refused|timed out|denied|not found/i.test(line) && !/^\[relay-loop/.test(line))
       const dest = dests.get(destId)!
       const resolved = resolveDestination(destId)
-      const blocked = !meta && resolved ? forwardConflict({ path: name, dest: destinationFingerprint(resolved.url) }, [], directChannelDests()) : null
-      if (blocked && settings.enabled) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, reconnects: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
+      const blocked = !meta && resolved ? forwardConflict({ path: name, dest: destinationFingerprint(resolved.url) }, [], allDirectDests()) : null
+      if (name === VERTICAL_PATH && !meta && !blocked) {
+        // Not running because nothing publishes /vertical: say so (it starts by itself once Vertical runs).
+        const why = !verticalPublishing() ? "Waiting for /vertical (start Vertical 9:16)." : !relayRunning() ? "Relay server is starting…" : "Starting…"
+        return { destId, name: dest.name, host: dest.host, state: "waiting", restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: why, adopted: false, health: EMPTY_HEALTH }
+      }
+      if (name === VERTICAL_PATH && meta && info?.ready !== true) {
+        return { destId, name: dest.name, host: dest.host, state: "waiting", restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: "Waiting for /vertical to publish (Vertical starting, or Browser capture not on the relay).", adopted: meta.adopted === true, health: EMPTY_HEALTH }
+      }
+      if (blocked && (settings.enabled || name === VERTICAL_PATH)) return { destId, name: dest.name, host: dest.host, state: "blocked", restarts: 0, reconnects: 0, error: blocked, adopted: false, health: EMPTY_HEALTH }
       const health = meta && info?.ready ? healthFromSamples(parseProgressBlocks(tailOf(key, 32768)).slice(-13), 5, logAgeMs(key), expect) : EMPTY_HEALTH
-      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: state === "forwarding" || state === "off" ? null : (errorLine?.slice(0, 200) ?? null), adopted: meta?.adopted === true, health }
+      return { destId, name: dest.name, host: dest.host, state, restarts: loop?.restarts ?? 0, reconnects: loop?.reconnects ?? 0, error: state === "forwarding" || state === "off" || !errorLine ? null : `${friendlyForwardError(errorLine, resolved?.url)}${state === "retrying" && loop?.nextDelay ? ` Next try in ${loop.nextDelay}s.` : ""}`, rawError: errorLine?.slice(0, 200) ?? null, adopted: meta?.adopted === true, health }
     })
     const outKbps = forwards.reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
-    const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : "Browser capture", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
-    paths[name] = { name, ready: info?.ready === true, publisher: info?.source?.type ?? null, tracks: info?.tracks ?? [], readers: info?.readers.length ?? 0, bytesReceived: info?.bytesReceived ?? 0, forwards, source, outKbps, diagnosis }
+    const diagnosis = diagnose({ source: source ? { label: name === "slate" ? "Slate" : name === "capture" ? "Browser capture" : "Vertical", health: source } : null, forwards: forwards.map((item) => ({ name: item.name, health: item.health })), totalKbps: outKbps || null, needKbps: expect.kbps ? expect.kbps * forwards.filter((item) => item.state !== "off" && item.state !== "blocked").length : null })
+    const allFwd = RELAY_PATHS.flatMap((p) => settings.forwards[p].map((id) => { const d = resolveDestination(id); return { path: p, dest: d ? destinationFingerprint(d.url) : "" } }))
+    const direct = allDirectDests()
+    const available = [...dests.values()].map((d) => { const r = resolveDestination(d.id); return { destId: d.id, reason: r ? forwardConflict({ path: name, dest: destinationFingerprint(r.url) }, allFwd, direct) : "Missing." } })
+    paths[name] = { available, name, ready: info?.ready === true, publisher: info?.source?.type ?? null, tracks: info?.tracks ?? [], readers: info?.readers.length ?? 0, bytesReceived: info?.bytesReceived ?? 0, forwards, source, outKbps, diagnosis }
   }
   const prog = api?.get(PROGRAM_PATH)
   if (prog?.ready) {
@@ -887,17 +1119,19 @@ export async function relayStatus(): Promise<RelayStatus> {
   }
   const lastLines = tailOf("mediamtx").split("\n").filter((line) => /ERR|FATAL/.test(line))
   // Upload estimate: every forward plus any channel publishing straight to a destination.
-  const direct = RELAY_PATHS.map((name) => readChannelStatus(name)).filter((item) => item.running && !item.relay).reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
+  const direct = CHANNEL_PATHS.map((name) => readChannelStatus(name)).filter((item) => item.running && !item.relay).reduce((sum, item) => sum + (item.health.kbps ?? 0), 0)
   await refreshProgramSources()
   let pullFrom: string | null = null
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
   const bk = api?.get(BACKUP_PATH)
-  const backup: BackupStatus = { lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover, audioTrack: bk?.ready ? programAudioTrack(bk) : null }
+  const webrtcPreview = settings.webrtcPreview
+  const backup: BackupStatus = { srt: { on: settings.srtBackup, passphraseSet: settings.srtPassphrase !== "", port: srtPort() }, lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover, audioTrack: bk?.ready ? programAudioTrack(bk) : null }
   const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
   // Live bind from MediaMTX itself (the startup log line scrolls out of the tail on a busy relay).
   const live = api ? await liveGlobalConfig() : null
   const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: (live?.rtmpAddress !== "?" ? live?.rtmpAddress : undefined) ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), mdnsUrl: mdnsServerUrl(), mdns: mdnsStatus(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
   return {
+    webrtc: { on: webrtcPreview, icePort: webrtcPorts().ice, iceHost: webrtcIceHost() },
     ingest,
     backup,
     program,
@@ -906,7 +1140,7 @@ export async function relayStatus(): Promise<RelayStatus> {
     bin,
     version: bin ? mediamtxVersion(bin) : null,
     enabled: settings.enabled,
-    publishing: RELAY_PATHS.filter((name) => directChannelDests().some((item) => item.channel === name && item.running && item.relay)),
+    publishing: RELAY_PATHS.filter((name) => (name === VERTICAL_PATH ? verticalPublishing() : directChannelDests().some((item) => item.channel === name && item.running && item.relay))),
     running: mtx !== null,
     apiUp: api !== null,
     adopted: mtx?.adopted === true,
