@@ -66,3 +66,25 @@ export function noteRelayDisruption(now = Date.now(), ms = QUIET_MS) {
 export function relayQuietUntil(): number {
   return (globalThis as Holder)[KEY] ?? 0
 }
+
+// ---------- re-arm hold: players keep the last frame instead of "Waiting for OBS" ----------
+/**
+ * A disarm (auto re-arm, or the operator's Disarm → Arm) kicks OBS on purpose; it reconnects a few
+ * seconds later. For REARM_HOLD_MS after a disarm, /stream and the previews hold the last frame instead
+ * of the "Waiting for OBS" card; then the normal rules apply (a disarm that stays off shows the card).
+ */
+export const REARM_HOLD_MS = 15_000
+export type RearmHold = { disarmAt: number | null; until: number }
+export const NO_REARM_HOLD: RearmHold = { disarmAt: null, until: 0 }
+/** Pure: the hold after a disarm (a later Arm keeps that window: never past disarm + REARM_HOLD_MS). */
+export const nextRearmHold = (now: number): RearmHold => ({ disarmAt: now, until: now + REARM_HOLD_MS })
+export const rearmHoldLeft = (s: RearmHold, now: number) => Math.max(0, s.until - now)
+const HOLD_KEY = Symbol.for("stream-timer.rearm-hold")
+type HoldHolder = { [HOLD_KEY]?: RearmHold }
+export function noteProgramDisarm(now = Date.now()) {
+  (globalThis as HoldHolder)[HOLD_KEY] = nextRearmHold(now)
+}
+/** ms left in the re-arm hold (0 = none): what /api/public/state and the deck state carry. */
+export function rearmHoldLeftMs(now = Date.now()): number {
+  return rearmHoldLeft((globalThis as HoldHolder)[HOLD_KEY] ?? NO_REARM_HOLD, now)
+}

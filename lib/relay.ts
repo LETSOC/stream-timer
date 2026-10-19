@@ -10,7 +10,7 @@
  */
 import { dlog } from "@/lib/dropout-log"
 import type { SrtLink } from "@/lib/rtt"
-import { noteRelayDisruption } from "@/lib/program-rearm"
+import { noteProgramDisarm, noteRelayDisruption } from "@/lib/program-rearm"
 import os from "node:os"
 import { cleanMdnsName, DEFAULT_MDNS_NAME, mdnsStatus, type MdnsConfig, type MdnsState } from "@/lib/mdns"
 import { parseFailover, pullUrlError, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
@@ -606,6 +606,7 @@ export function armProgram(): Promise<RelayResult> {
 export function disarmProgram(): Promise<RelayResult> {
   return withLock(async () => {
     noteRelayDisruption()
+    noteProgramDisarm() // players hold the last frame (no "Waiting for OBS") while OBS reconnects
     dlog("!", "rearm", "program input DISARMED: OBS logins removed and publishers kicked (Main and Backup drop)")
     writeSettings({ ...readSettings(), programArmed: false })
     if (relayRunning()) writeConfigIfChanged()
