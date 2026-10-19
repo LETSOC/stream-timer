@@ -1,4 +1,5 @@
 "use client"
+import { MarkBlackoutButton } from "@/components/dropout-mark"
 
 import { rttLabel } from "@/lib/rtt"
 
@@ -71,7 +72,9 @@ export function useFailoverEvents(last: FailoverEvent | null | undefined, onEven
  * Main / Backup toggle with live status of each input and the auto-failover settings.
  * Used by the desk (Transport) and the phone deck (dark).
  */
-export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark = false, disabled = false }: {
+export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark, dark = false, disabled = false }: {
+  /** "⚑ Mark blackout" (dropout log) next to the inputs */
+  onMark?: () => void
   view: ProgramSourcesView | null
   active: ProgramSource
   onSwitch: (source: ProgramSource) => void
@@ -125,6 +128,7 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, dark =
           )
         })}
       </div>
+      {onMark ? <div className="flex justify-end"><MarkBlackoutButton onMark={onMark} dark={dark} /></div> : null}
       {view?.returnStatus?.askReturn && active === "backup" ? (
         <button type="button" data-testid="return-now" disabled={disabled} onClick={() => onSwitch("main")} className="w-full rounded-xl bg-[#12b76a] px-3 py-2 text-[15px] font-black text-black">Main ready · Return now</button>
       ) : null}
