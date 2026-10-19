@@ -1,8 +1,7 @@
 "use client"
 
 import { StreamAudioOverlay } from "@/components/stream-audio-overlay"
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { playerDiag } from "@/lib/player-diag"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EndStreamPage } from "@/app/end/page"
@@ -10,18 +9,14 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
-import { clampChecker, effectiveEndTime, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
+import { clampChecker, effectiveEndTime, parseStage, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { StageGuides } from "@/components/stage-guides"
-import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
 import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { endInstant } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
-import { SyncTestOverlay } from "@/components/sync-test-overlay"
-import { TC_BADGE_W, TC_GAP, TimecodeBadge } from "@/components/timecode-badge"
-import { parseFps } from "@/lib/av-diagnostics"
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
@@ -136,10 +131,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
             setStage(parseStage(body.stage))
           }
         })
-        .then(() => { if (fails >= 3) playerDiag("+", `/stream state poll OK again after ${fails} failures`); fails = 0 })
-        .catch(() => { fails += 1; if (fails === 3) playerDiag("!", "/stream can't reach the server state (3 polls failed): switches/cards won't follow until it's back") })
+        .catch(() => undefined)
     }
-    let fails = 0
     load()
     const id = window.setInterval(load, 1000)
     return () => {
@@ -187,20 +180,15 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [displays, setDisplays] = useState<Record<"main" | "backup", ProgramDisplay>>({ main: "under", backup: "under" })
   // When each input's picture last started playing continuously (null = not playing): the switch buffer.
   const [videoSince, setVideoSince] = useState<Record<"main" | "backup", number | null>>({ main: null, backup: null })
-  // Each input's picture is really advancing (not frozen / torn down / erroring).
-  const [alive, setAlive] = useState<Record<"main" | "backup", boolean>>({ main: false, backup: false })
-  const airAlive = alive[air.source] && sourceReady[air.source]
   const nowMs = now?.getTime() ?? 0
   if (air.source !== wanted && air.pendingSince === null) setAir({ source: air.source, pendingSince: nowMs })
   else if (air.source === wanted && air.pendingSince !== null) setAir({ source: wanted, pendingSince: null })
-  else if (air.source !== wanted && air.pendingSince !== null && handoverDone({ screenIsProgram: screen === "program", pendingSince: air.pendingSince, now: nowMs, incomingVideoSince: videoSince[wanted], airDisplay: displays[air.source], bufferMs: switchBufferMs, airAlive })) setAir({ source: wanted, pendingSince: null })
+  else if (air.source !== wanted && air.pendingSince !== null && handoverDone({ screenIsProgram: screen === "program", pendingSince: air.pendingSince, now: nowMs, incomingVideoSince: videoSince[wanted], airDisplay: displays[air.source], bufferMs: switchBufferMs })) setAir({ source: wanted, pendingSince: null })
   const handing = air.source !== wanted
   const onDisplayOf = useCallback((source: "main" | "backup", d: ProgramDisplay) => {
     setDisplays((cur) => (cur[source] === d ? cur : { ...cur, [source]: d }))
     setVideoSince((cur) => { const v = d === "video" ? (cur[source] ?? Date.now()) : null; return cur[source] === v ? cur : { ...cur, [source]: v } })
   }, [])
-  const onAliveMain = useCallback((v: boolean) => setAlive((cur) => (cur.main === v ? cur : { ...cur, main: v })), [])
-  const onAliveBackup = useCallback((v: boolean) => setAlive((cur) => (cur.backup === v ? cur : { ...cur, backup: v })), [])
   const onMain = useCallback((d: ProgramDisplay) => onDisplayOf("main", d), [onDisplayOf])
   const onBackup = useCallback((d: ProgramDisplay) => onDisplayOf("backup", d), [onDisplayOf])
   // Switching to program keeps the previous screen up until the feed has a frame (then crossfades).
@@ -212,18 +200,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   // Browser capture reads this to switch its audio to the OBS program feed (only once its picture is up).
   useEffect(() => {
     document.documentElement.dataset.screen = shownScreen
-    playerDiag("·", `screen shown: ${shownScreen}${shownScreen !== screen ? ` (operator picked ${screen}; waiting for its first frame)` : ""}`)
-  }, [shownScreen, screen])
-  useEffect(() => {
-    if (handing) playerDiag("·", `hand-over ${air.source === "main" ? "Main" : "Backup"} → ${wanted === "main" ? "Main" : "Backup"} started (${airAlive ? `old input healthy: stays on air until the new one has played ${switchBufferMs}ms` : "old input frozen/gone: cut at the new one's first frame"})`)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- log once per hand-over start
-  }, [handing, air.source, wanted, switchBufferMs])
-  const handStart = useRef<number | null>(null)
-  useEffect(() => {
-    if (handing) { handStart.current ??= Date.now(); return }
-    if (handStart.current !== null) playerDiag("·", `hand-over done → ${air.source === "main" ? "Main" : "Backup"} on air after ${Date.now() - handStart.current}ms`)
-    handStart.current = null
-  }, [handing, air.source])
+  }, [shownScreen])
 
   if (blocked) {
     return (
@@ -235,22 +212,15 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
 
   return (
     <main className={`relative flex min-h-dvh items-center justify-center ${transparent ? "bg-transparent" : "bg-black"}`}>
-      <SyncTestOverlay timeZone={event.timeZone} />
-      {stage.streamTimecode ? (
-        // TC2: left of where TC1 (OBS SRC, default bottom-right on the safe-zone line) lands in the program, so both read side by side.
-        <div aria-hidden className="pointer-events-none fixed inset-0 z-[60]" style={{ ["--px" as string]: "calc(100vw / 1920)" }}>
-          <TimecodeBadge label="STREAM" testId="tc-stream" fps={parseFps(stage.streamTimecodeFps)} style={{ right: `calc(${SAFE_X_PX + stage.overlayInset + TC_BADGE_W + TC_GAP} * var(--px))`, bottom: `calc(${SAFE_Y_PX + stage.overlayInset} * var(--px))` }} />
-        </div>
-      ) : null}
       {/* Prewarmed whenever OBS is sending, so "Show program" is instant. */}
       {(["main", "backup"] as const).map((source) => {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir || !stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} />
       })}
       <StreamAudioOverlay />
-      {stage.streamBedAudio ? <StreamBed plan={bed} muted={params.get("mute") === "1" || shownScreen === "program"} viewKey={viewKey} /> : null}
+      {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} viewKey={viewKey} /> : null}
       {params.get("guides") === "1" ? <StageGuides className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null}
       {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard
@@ -278,7 +248,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
             { label: "Instagram", href: event.instagramUrl, icon: null },
             { label: "YouTube", href: event.youtubeUrl, icon: null },
           ],
-        }} social={socialLook(stage)} />
+        }} />
       ) : (
       <CountdownStage
         event={event}
@@ -297,9 +267,6 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         galleryOffset={stage.galleryOffset}
         galleryScale={stage.galleryScale}
         clock={testClock}
-        social={socialLook(stage)}
-        countdownStrokePx={stage.countdownStrokePx}
-        countdownStrokeColor={stage.countdownStrokeColor}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
       )}
@@ -322,9 +289,6 @@ function StreamFallback({ initial }: { initial: StreamInitial | null }) {
         clockScale={stage.clockScale}
         clockText={stage.clockText}
         logoUrl={stage.logoUrl}
-        social={socialLook(stage)}
-        countdownStrokePx={stage.countdownStrokePx}
-        countdownStrokeColor={stage.countdownStrokeColor}
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
     </main>
