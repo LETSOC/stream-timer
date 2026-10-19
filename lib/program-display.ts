@@ -53,13 +53,16 @@ export const SWITCH_BUFFER_MS = 1000
 /**
  * Pure: may a Main/Backup hand-over complete now? The input on air stays on (never "Waiting for OBS"
  * mid-switch) until the incoming one has played `bufferMs` continuously; if the one on air is already
- * gone, take the incoming one as soon as it has a frame (or after 4s, then its own standby rules).
+ * gone or not advancing (frozen, torn down, publisher gone), take the incoming one as soon as it has a frame (or after 4s, then its own standby rules).
  * 30s cap so a never-arriving input can't pin the old one forever.
  */
-export function handoverDone(input: { screenIsProgram: boolean; pendingSince: number; now: number; incomingVideoSince: number | null; airDisplay: ProgramDisplay; bufferMs: number }): boolean {
-  const { screenIsProgram, pendingSince, now, incomingVideoSince, airDisplay, bufferMs } = input
+export function handoverDone(input: { screenIsProgram: boolean; pendingSince: number; now: number; incomingVideoSince: number | null; airDisplay: ProgramDisplay; bufferMs: number; /** the input on air is still advancing and its publisher is there (false = frozen, torn down, erroring or gone) */ airAlive?: boolean }): boolean {
+  const { screenIsProgram, pendingSince, now, incomingVideoSince, airDisplay, bufferMs, airAlive = true } = input
   if (!screenIsProgram) return true
   if (incomingVideoSince !== null && now - incomingVideoSince >= bufferMs) return true
+  // Old input dead/stalled (failover, publisher gone, player torn down): the overlap only protects a
+  // healthy picture, so cut to the new input at its first frame instead of holding a frozen/black one.
+  if (!airAlive && incomingVideoSince !== null) return true
   const airGone = airDisplay !== "video"
   if (airGone && (incomingVideoSince !== null || now - pendingSince > 4000)) return true
   return now - pendingSince > 30_000

@@ -57,3 +57,11 @@ test("standby input is held (paused, warm) only in a plain tab: never on air, ne
   assert.equal(holdStandby({ onAir: false, incoming: true, captureTap: false }), false)
   assert.equal(holdStandby({ onAir: false, incoming: false, captureTap: true }), false)
 })
+
+test("hand-over: a dead/frozen on-air input is cut at the new input's first frame; a healthy one keeps the overlap", () => {
+  const base = { screenIsProgram: true, pendingSince: 0, airDisplay: "video" as const, bufferMs: 5000 }
+  assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: 1000, airAlive: true }), false)
+  assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: 1000, airAlive: false }), true)
+  assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: null, airAlive: false }), false) // nothing to cut to yet: hold
+  assert.equal(handoverDone({ ...base, now: 6100, incomingVideoSince: 1000, airAlive: true }), true)
+})

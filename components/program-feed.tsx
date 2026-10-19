@@ -3,7 +3,7 @@
 import { AudioBar, usePreviewAudio } from "@/components/preview-audio"
 import { isViewerMuted } from "@/components/stream-audio-overlay"
 import { stallBackoffMs, useResumeGeneration } from "@/lib/use-resume"
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type Hls from "hls.js"
 import { PreviewBadge } from "@/components/preview-badge"
 import { useAutoHide } from "@/components/auto-hide"
@@ -45,7 +45,9 @@ function useActiveSince(active: boolean, now: number) {
  * Loads LL-HLS into the <video> while `load`, and reports when the picture last advanced.
  * The element is the same for the player's whole life (WebAudio can attach to it once).
  */
-function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; hold?: boolean; /** /stream only: report to the dropout log (lib/player-diag) */ diag?: { label: string; onAir: boolean } } = {}) {
+function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; hold?: boolean; /** /stream only: report to the dropout log (lib/player-diag) */ diag?: { label: string; onAir: boolean }; /** the element is about to go blank (teardown) or is broken (decode error): show the last frame */ onTrouble?: () => void } = {}) {
+  const troubleRef = useRef(opts.onTrouble)
+  useEffect(() => { troubleRef.current = opts.onTrouble })
   const diagRef = useRef(opts.diag)
   useEffect(() => { diagRef.current = opts.diag })
   // "!" only for the input on air; the standby one's trouble is context ("·").
@@ -114,6 +116,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         hls.attachMedia(video)
         hls.on(HlsLib.Events.MANIFEST_PARSED, play)
         hls.on(HlsLib.Events.ERROR, (_event, data) => {
+          if (data.fatal || data.details === "mediaSourceRequiresReset") troubleRef.current?.()
           if (data.fatal || data.details === "bufferStalledError") reportRef.current(data.fatal ? "!" : "!", `hls.js ${data.details}${data.fatal ? ` (fatal ${data.type}: ${data.type === HlsLib.ErrorTypes.MEDIA_ERROR ? "recoverMediaError" : "startLoad"})` : " (buffer ran dry: picture holds)"}`, data.details, 3000)
           else reportRef.current("·", `hls.js ${data.details}`, data.details, 10000)
           if (!data.fatal || !hls) return
@@ -128,7 +131,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     })()
     return () => {
       cancelled = true
-      reportRef.current("!", `player torn down: ${teardownWhy.current} → element cleared, BLACK until the first new frame`)
+      troubleRef.current?.() // snapshot the last frame before the element is cleared
+      reportRef.current("!", `player torn down: ${teardownWhy.current} → element cleared; last frame held on top until the first new frame`)
       teardownWhy.current = "unloaded (OBS gone > 3s, or source changed)"
       hlsRef.current = null
       hls?.destroy()
@@ -158,7 +162,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       const ahead = b.length ? b.end(b.length - 1) - video.currentTime : 0
       reportRef.current("·", `<video> ${e.type} (buffer ahead ${ahead.toFixed(2)}s, readyState ${video.readyState})`, `v-${e.type}`, 2000)
     }
-    const onVideoError = () => reportRef.current("!", `<video> error ${video.error?.code ?? "?"} ${video.error?.message ?? ""}`.trim(), "v-error", 3000)
+    const onVideoError = () => { troubleRef.current?.(); reportRef.current("!", `<video> error ${video.error?.code ?? "?"} ${video.error?.message ?? ""}`.trim(), "v-error", 3000) }
     let firstFrameSeen = false
     const reload = (why = "watchdog: picture stuck 3s while OBS publishes") => {
       teardownWhy.current = why
@@ -283,7 +287,7 @@ function useCaptureAudioTap(videoRef: RefObject<HTMLVideoElement | null>, source
   }, [videoRef, source])
 }
 
-export function ProgramFeed({ ready, active, muted = false, onDisplay, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false }: { /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
+export function ProgramFeed({ ready, active, muted = false, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false }: { /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; muted?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
@@ -297,7 +301,53 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   const [captureTap] = useState(() => isCapturePage())
   const hold = holdStandby({ onAir, incoming, captureTap })
   const label = source === "backup" ? "Backup" : "Main"
-  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted(), { hold, diag: { label, onAir } })
+  // Last-frame cover: a player rebuild / decode error clears the <video> (black). The last good frame
+  // is drawn on a canvas on top until the element shows a new frame, so the output freezes, never blacks.
+  const coverRef = useRef<HTMLCanvasElement>(null)
+  const coverOn = useRef(false)
+  const snapshot = useCallback((): boolean => {
+    const video = videoRef.current
+    const canvas = coverRef.current
+    if (!video || !canvas || video.readyState < 2 || !video.videoWidth || video.error) return false
+    try {
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) { canvas.width = video.videoWidth; canvas.height = video.videoHeight }
+      canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height)
+      canvas.dataset.has = "1"
+      return true
+    } catch { return false }
+  }, [])
+  const showCover = useCallback(() => {
+    const canvas = coverRef.current
+    if (!canvas || coverOn.current) return
+    // Fresh snapshot if the element still has its frame; else the last periodic one (capture page).
+    snapshot()
+    if (canvas.dataset.has !== "1") return
+    coverOn.current = true
+    canvas.style.visibility = "visible"
+  }, [snapshot])
+  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted(), { hold, diag: { label, onAir }, onTrouble: showCover })
+  // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
+  // a decode error (element already blank) still has a frame to hold.
+  const [periodic] = useState(() => isCapturePage())
+  useEffect(() => {
+    const video = videoRef.current
+    const canvas = coverRef.current
+    if (!video || !canvas) return
+    let last = -1
+    let tick = 0
+    const id = window.setInterval(() => {
+      const t = video.currentTime
+      const advancing = t !== last && t > 0 && !video.paused && video.readyState >= 2 && !video.error
+      last = t
+      if (coverOn.current && advancing) { coverOn.current = false; canvas.style.visibility = "hidden" }
+      if (periodic && onAir && advancing && !coverOn.current && ++tick % 3 === 0) snapshot()
+    }, 150)
+    return () => window.clearInterval(id)
+  }, [periodic, onAir, snapshot])
+  // Off air / unloaded: the cover goes with it (the hand-over or the standby card takes over).
+  useEffect(() => {
+    if ((!onAir || !load) && coverRef.current) { coverOn.current = false; coverRef.current.style.visibility = "hidden" }
+  }, [onAir, load])
   useCaptureAudioTap(videoRef, source)
   const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
@@ -336,10 +386,13 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   }, [shown, muted])
 
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
+  const alive = lastFrameAt !== null && now - lastFrameAt < 700 && ready
+  useEffect(() => { onAlive?.(alive) }, [alive, onAlive])
   const visual: ProgramDisplay = incoming ? "under" : shown
   return (
     <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-want-sound={shown === "video" && !muted ? "1" : "0"} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
       <video ref={videoRef} className="h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture />
+      <canvas ref={coverRef} data-testid="program-cover" aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ visibility: "hidden" }} />
       {visual === "standby" ? <Standby /> : null}
     </div>
   )
