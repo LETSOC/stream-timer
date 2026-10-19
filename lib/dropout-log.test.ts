@@ -56,3 +56,19 @@ test("capture stats: screencast gaps / repeats only count while the program is o
   assert.deepEqual(captureTrouble({ maxGapMs: 450, programAudio: { on: true } }).map((x) => x.key), ["gap"])
   assert.deepEqual(captureTrouble({ heartbeatAgeMs: 5000, backpressurePct: 3, enc: { fps: 30, speed: 0.9, kbps: 4000 } }).map((x) => x.key), ["backpressure", "speed"])
 })
+
+test("operator marks: events 15s before → 5s after each mark", async () => {
+  const { markIncidents, formatMark } = await import("@/lib/dropout-log")
+  const base = Date.UTC(2026, 10, 4, 10, 0, 0)
+  const ev = parseDropoutLog([
+    dropoutLine(base - 20000, "·", "switch", "too early"),
+    dropoutLine(base - 12000, "!", "relay", "Backup GONE"),
+    dropoutLine(base, "!", "operator", "blackout marked on desk (on air: Backup, screen: program)"),
+    dropoutLine(base + 4000, "+", "player", "picture back"),
+    dropoutLine(base + 9000, "·", "switch", "too late"),
+  ].join("\n"))
+  const m = markIncidents(ev)
+  assert.equal(m.length, 1)
+  assert.deepEqual(m[0].context.map((e) => e.msg.slice(0, 11)), ["Backup GONE", "blackout ma", "picture bac"])
+  assert.match(formatMark(m[0]), /Blackout marked 10:00:00 .*on desk.*−12\.0s ! \[relay\] Backup GONE/s)
+})

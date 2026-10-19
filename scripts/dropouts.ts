@@ -1,5 +1,6 @@
 /**
- * npm run dropouts                 today's incidents, each with every event ±5s around it
+ * npm run dropouts                 today's operator marks first (⚑ Mark blackout: events 15s before → 5s
+ *                                   after, YouTube runs behind), then incidents with every event ±5s
  * npm run dropouts -- 2026-11-04   that day (London date)
  * npm run dropouts -- --window 10  wider correlation window (seconds)
  * npm run dropouts -- --all        the whole log, not just incidents
@@ -8,8 +9,9 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { correlate, dropoutDir, londonParts, parseDropoutLog, type DropEvent } from "../lib/dropout-log"
+import { correlate, dropoutDir, formatMark, isMark, londonParts, markIncidents, parseDropoutLog, type DropEvent } from "../lib/dropout-log"
 
+process.stdout.on("error", () => process.exit(0)) // piped into head etc.
 const args = process.argv.slice(2)
 const opt = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
 const windowMs = Number(opt("--window") ?? 5) * 1000
@@ -36,7 +38,13 @@ if (args.includes("--all")) {
   for (const e of events) console.log(e.line.slice(11))
   process.exit(0)
 }
-const incidents = correlate(events, windowMs)
+const marks = markIncidents(events)
+if (marks.length) {
+  console.log(`\n══ ${marks.length} operator mark${marks.length === 1 ? "" : "s"} (⚑ Mark blackout) · YouTube runs several seconds behind the local output: look at what broke BEFORE the mark`)
+  marks.forEach((m, i) => console.log(`\n── Mark ${i + 1}\n${formatMark(m, "   ")}`))
+  console.log("\n══ All incidents")
+}
+const incidents = correlate(events.filter((e) => !isMark(e)), windowMs)
 if (!incidents.length) console.log("No incidents (no \"!\" lines).")
 incidents.forEach((inc, i) => {
   const first = inc.problems.slice().sort((a, b) => ORDER.indexOf(a.cat) - ORDER.indexOf(b.cat) || a.at - b.at)[0]

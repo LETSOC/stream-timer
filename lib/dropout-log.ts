@@ -11,7 +11,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 export type DropLevel = "!" | "+" | "·"
-export type DropCategory = "relay" | "ingest" | "player" | "switch" | "rearm" | "capture" | "push" | "srt" | "server"
+export type DropCategory = "relay" | "ingest" | "player" | "switch" | "rearm" | "capture" | "push" | "srt" | "server" | "operator"
 export const DROP_ZONE = "Europe/London"
 const MAX_BYTES = 20_000_000
 const KEEP_DAYS = 14
@@ -77,6 +77,40 @@ export function correlate(events: DropEvent[], windowMs = 5000): Incident[] {
   }
   for (const inc of incidents) inc.context = sorted.filter((e) => e.at >= inc.from - windowMs && e.at <= inc.to + windowMs)
   return incidents
+}
+
+/** Operator "Mark blackout" taps (seen on YouTube, which runs behind the local output). */
+export const isMark = (e: DropEvent) => e.cat === "operator" && /blackout marked/.test(e.msg)
+/** YouTube shows things later than they happen here, so a mark looks back further than forward. */
+export const MARK_BEFORE_MS = 15_000
+export const MARK_AFTER_MS = 5_000
+export type MarkIncident = { mark: DropEvent; context: DropEvent[] }
+/** Pure: each operator mark with every event from `beforeMs` before to `afterMs` after it (newest last). */
+export function markIncidents(events: DropEvent[], beforeMs = MARK_BEFORE_MS, afterMs = MARK_AFTER_MS): MarkIncident[] {
+  const sorted = [...events].sort((a, b) => a.at - b.at)
+  return sorted.filter(isMark).map((mark) => ({ mark, context: sorted.filter((e) => e.at >= mark.at - beforeMs && e.at <= mark.at + afterMs) }))
+}
+/** Plain text for one marked incident (desk copy button and `npm run dropouts`). */
+export function formatMark(inc: MarkIncident, indent = ""): string {
+  const head = `${indent}Blackout marked ${londonParts(inc.mark.at).time.slice(0, 8)} (London) · ${inc.mark.msg.replace(/^blackout marked /, "")} · events −${MARK_BEFORE_MS / 1000}s…+${MARK_AFTER_MS / 1000}s (YouTube runs several seconds behind the local output, so the cause is usually before the mark)`
+  const rows = inc.context.map((e) => {
+    const rel = (e.at - inc.mark.at) / 1000
+    return `${indent}  ${londonParts(e.at).time} ${rel >= 0 ? "+" : "−"}${Math.abs(rel).toFixed(1).padStart(4)}s ${e.level} [${e.cat}] ${e.msg}`
+  })
+  return [head, ...rows].join("\n")
+}
+/** Server: today's (and yesterday's, around midnight) events since `sinceMs`. */
+export function readDropoutEvents(sinceMs: number, now = Date.now()): DropEvent[] {
+  const dir = dropoutDir()
+  const days = new Set([londonParts(now).date, londonParts(sinceMs).date])
+  let text = ""
+  try {
+    for (const name of fs.readdirSync(dir).sort()) {
+      const m = /^dropouts-(\d{4}-\d{2}-\d{2})/.exec(name)
+      if (m && days.has(m[1])) text += `${fs.readFileSync(path.join(dir, name), "utf8")}\n`
+    }
+  } catch { return [] }
+  return parseDropoutLog(text).filter((e) => e.at >= sinceMs)
 }
 
 const KEY = Symbol.for("stream-timer.dropout-log")
