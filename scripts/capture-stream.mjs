@@ -468,13 +468,17 @@ await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g
 let latest = null
 let frames = 0
 // Health counters, reset every stats window.
-const win = { at: Date.now(), screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0 }
+const win = { at: Date.now(), screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0, maxGap: 0 }
+// Diagnostics only (dropout log): longest wait between two screencast frames in this window.
+let lastScreencastAt = 0
 let freshFrame = false
 // Recent frames with arrival time, so a negative A/V trim can show the picture a little later.
 const frameRing = []
 cdp.on("Page.screencastFrame", ({ data, sessionId, metadata }) => {
   latest = Buffer.from(data, "base64")
   const arrived = Date.now()
+  if (lastScreencastAt) win.maxGap = Math.max(win.maxGap, arrived - lastScreencastAt)
+  lastScreencastAt = arrived
   frameRing.push({ buf: latest, at: arrived })
   while (frameRing.length > 2 && arrived - frameRing[1].at > 1200) frameRing.shift()
   // Screencast lag: paint time (CDP, seconds) → arrival here. Smoothed; ignores outliers (GC pauses).
@@ -680,6 +684,7 @@ if (statsFile) {
       repeatPct: win.written ? +((win.repeats / win.written) * 100).toFixed(1) : 0,
       backpressurePct: total ? +((win.skipped / total) * 100).toFixed(1) : 0,
       maxLagMs: Math.round(win.maxLag),
+      maxGapMs: win.maxGap,
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
       programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, via: prog.via ?? null, formats: { main: inputs.main.format, backup: inputs.backup.format }, arrivalExcessMs: { main: Math.round(inputs.main.arrival.excessMs), backup: Math.round(inputs.backup.arrival.excessMs) }, offsetMs: { main: inputs.main.offsetMs, backup: inputs.backup.offsetMs } },
       sync: { screencastLagMs: sync.lagMs === null ? null : Math.round(sync.lagMs), trimMs: sync.trimMs, videoDelayMs: Math.round(videoDelayMs()), bedDelayMs: Math.round(bedLine.delayMs()), skippedMs: Math.round(skippedMs), test: sync.test },
@@ -699,7 +704,7 @@ if (statsFile) {
         stats.enc = { fps: +((cur.frame - prevEnc.frame) / dt).toFixed(1), kbps: Math.round(((cur.bytes - prevEnc.bytes) * 8) / dt / 1000), speed: +((cur.out - prevEnc.out) / dt).toFixed(2), dup: cur.dup, drop: cur.drop, bytes: cur.bytes }
       }
     }
-    Object.assign(win, { at: now, screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0 })
+    Object.assign(win, { at: now, screencast: 0, written: 0, repeats: 0, skipped: 0, maxLag: 0, maxGap: 0 })
     try {
       fs.writeFileSync(`${statsFile}.tmp`, JSON.stringify(stats), { mode: 0o600 })
       fs.renameSync(`${statsFile}.tmp`, statsFile)

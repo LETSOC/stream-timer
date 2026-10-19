@@ -19,7 +19,10 @@ import { inputStats, syncInputProbe } from "@/lib/input-probe"
 import { BACKUP_PATH, PROGRAM_PATH, relayReadUrl } from "@/lib/relay"
 import { readChannelStatus } from "@/lib/encoder"
 import { changeLogger, plog, PROGRAM_LOG_VERBOSE } from "@/lib/program-log"
+import { dlog } from "@/lib/dropout-log"
 const onChange = changeLogger()
+/** First state after a server start is context, not an incident. */
+const stateSeen = new Set<string>()
 let verboseAt = 0
 import type { ProgramSource, ReturnStatus, SourceHealth } from "@/lib/program-source"
 
@@ -84,6 +87,8 @@ export function failoverLog(): FailoverEvent[] {
 /** Manual switches are logged too, so every device sees who changed what. */
 export function noteSourceSwitch(event: FailoverEvent) {
   const m = monitor()
+  const rearm = /re-arm/.test(event.reason)
+  dlog(event.auto && event.from !== event.to ? "!" : "·", rearm ? "rearm" : "switch", event.from === event.to ? `${SOURCE_LABEL[event.to]}: ${event.reason}` : `${event.auto ? "auto-failover" : "switch"} ${SOURCE_LABEL[event.from]} → ${SOURCE_LABEL[event.to]}: ${event.reason}`, event.at)
   m.last = event
   m.log = [...m.log, event].slice(-HISTORY_MAX)
   try { fs.writeFileSync(historyFile(), JSON.stringify(m.log)) } catch { /* best effort */ }
@@ -113,7 +118,8 @@ export async function programMonitorTick(now = Date.now()) {
       const r = inputReadout(source, now, settings.failover.stallSec * 1000)
       const label = SOURCE_LABEL[source]
       const a = onChange(`${source}:state`, r.state, `${label} ${r.state.toUpperCase()}${r.stateReason ? ` (${r.stateReason})` : ""}`)
-      if (a) plog(a)
+      if (a) { plog(a); dlog(!stateSeen.has(source) ? "·" : r.state === "healthy" ? "+" : "!", "ingest", a) }
+      stateSeen.add(source)
       const rk = r.ready ? (r.readyOk ? "ready" : `not:${r.issues.join(",")}`) : "off"
       const b = onChange(`${source}:ready`, rk, r.readyOk ? `${label} READY` : r.ready ? `${label} not READY: ${r.issues.join(", ")}` : `${label} not READY: no signal`)
       if (b) plog(b)
@@ -133,9 +139,9 @@ export async function programMonitorTick(now = Date.now()) {
     m.memory = step.memory
     m.status = step.status ?? null
     const fc = onChange("flaps", String(step.memory.mainFails?.length ?? 0), `Main failures in the last ${Math.round(settings.failover.flapWindowSec / 60)} min: ${step.memory.mainFails?.length ?? 0} (flapping above ${settings.failover.flapCount})`)
-    if (fc) plog(fc)
+    if (fc) { plog(fc); dlog("·", "switch", fc) }
     const hold = onChange("hold", step.status?.holdText ? "on" : "off", step.status?.holdText ? `hold start: Main flapping, holding Backup until Main is stable ${settings.failover.flapStableSec}s` : "hold end")
-    if (hold) plog(hold)
+    if (hold) { plog(hold); dlog("·", "switch", hold) }
     const ask = onChange("ask", step.status?.askReturn ? "on" : "off", step.status?.askReturn ? "Ask me: Main ready · waiting for the operator to return" : "Ask me: return prompt cleared")
     if (ask) plog(ask)
     if (step.note) {
@@ -191,13 +197,14 @@ function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: 
   if (!fire) return
   const label = SOURCE_LABEL[active]
   plog(`${label} reconnected → auto re-arm`)
+  dlog("!", "rearm", `${label} reconnected → auto re-arm: disarming /program + /program-backup for ~1.5s (publishers kicked; OBS reconnects; /stream holds the last frame, "Waiting for OBS" if it takes > ~7s)`)
   m.rearming = true
   void (async () => {
     try {
       await disarmProgram()
       await new Promise((resolve) => setTimeout(resolve, 1500))
       const armed = await armProgram()
-      if (!armed.ok) plog(`auto re-arm: arm failed: ${armed.error ?? "unknown"}`)
+      if (!armed.ok) { plog(`auto re-arm: arm failed: ${armed.error ?? "unknown"}`); dlog("!", "rearm", `auto re-arm: arm failed: ${armed.error ?? "unknown"}`) }
       noteSourceSwitch({ at: Date.now(), from: active, to: active, reason: `${label} reconnected → auto re-arm (A/V resync)`, auto: true })
     } finally { m.rearming = false }
   })()

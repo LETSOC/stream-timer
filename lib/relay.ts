@@ -8,6 +8,7 @@
  * (random publish/read users), mediamtx.yml (generated each start), pidfiles, logs, state.
  * MediaMTX listens on 127.0.0.1 only; the desk preview goes through /api/relay/hls (operator auth).
  */
+import { dlog } from "@/lib/dropout-log"
 import type { SrtLink } from "@/lib/rtt"
 import { noteRelayDisruption } from "@/lib/program-rearm"
 import os from "node:os"
@@ -433,6 +434,11 @@ async function apiPaths(): Promise<Map<string, ApiPath> | null> {
   }
 }
 
+/** Read-only: every relay path as MediaMTX reports it (null = API down). For the dropout log. */
+export function relayPathsSnapshot(): Promise<Map<string, { ready: boolean; bytesReceived: number; readers: number; source: string | null }> | null> {
+  return apiPaths().then((m) => m && new Map([...m].map(([k, v]) => [k, { ready: v.ready, bytesReceived: v.bytesReceived, readers: v.readers?.length ?? 0, source: v.source?.type ?? null }])))
+}
+
 /**
  * Read-only MediaMTX stats for the desk's A/V diagnostics (TC3). Our own relay API by default
  * (RELAY_API_PORT, read user); MEDIAMTX_API_URL points at another MediaMTX (e.g. http://127.0.0.1:9997).
@@ -579,6 +585,7 @@ async function kickProgramUnlocked(paths: string[] = [PROGRAM_PATH, BACKUP_PATH]
 export function armProgram(): Promise<RelayResult> {
   return withLock(async () => {
     noteRelayDisruption() // OBS (re)connecting after an arm isn't a Wi-Fi drop
+    dlog("·", "rearm", "program input ARMED (OBS may publish to /program and /program-backup)")
     writeSettings({ ...readSettings(), programArmed: true })
     const up = await ensureServerUnlocked()
     if (!up.ok) return up
@@ -590,6 +597,7 @@ export function armProgram(): Promise<RelayResult> {
 export function disarmProgram(): Promise<RelayResult> {
   return withLock(async () => {
     noteRelayDisruption()
+    dlog("!", "rearm", "program input DISARMED: OBS logins removed and publishers kicked (Main and Backup drop)")
     writeSettings({ ...readSettings(), programArmed: false })
     if (relayRunning()) writeConfigIfChanged()
     await kickProgramUnlocked()
