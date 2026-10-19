@@ -1,5 +1,6 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
+import { notePlannedBack } from "@/lib/program-rearm"
 import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, disarmProgram, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
       return reply(await setForward(body.path as RelayPath, body.destinationId, body.on === true))
     }
     case "arm-program":
+      notePlannedBack("both") // manual Arm: no auto re-arm right after
       return reply(await armProgram())
     case "disarm-program":
       return reply(await disarmProgram())
