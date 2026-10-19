@@ -44,7 +44,10 @@ function useActiveSince(active: boolean, now: number) {
  * Loads LL-HLS into the <video> while `load`, and reports when the picture last advanced.
  * The element is the same for the player's whole life (WebAudio can attach to it once).
  */
-function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean) {
+function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean } = {}) {
+  // Operator previews pass stallEvents:false: iOS native LL-HLS fires "waiting"/"stalled" on ordinary
+  // part waits, and rebuilding on each one (new src) chopped the deck preview's sound.
+  const stallEvents = opts.stallEvents ?? true
   const hlsRef = useRef<Hls | null>(null)
   const [lastFrameAt, setLastFrameAt] = useState<number | null>(null)
   const [latency, setLatency] = useState<number | null>(null)
@@ -123,8 +126,10 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       setLastFrameAt((at) => (at === null ? null : Date.now())) // hold the picture while it reloads
       setKick((k) => k + 1)
     }
-    video.addEventListener("stalled", onStall)
-    video.addEventListener("waiting", onStall)
+    if (stallEvents) {
+      video.addEventListener("stalled", onStall)
+      video.addEventListener("waiting", onStall)
+    }
     video.addEventListener("error", onStall)
     const id = window.setInterval(() => {
       const t = video.currentTime
@@ -152,7 +157,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       video.removeEventListener("waiting", onStall)
       video.removeEventListener("error", onStall)
     }
-  }, [videoRef, load])
+  }, [videoRef, load, stallEvents])
   return { lastFrameAt, latency }
 }
 
@@ -278,11 +283,16 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const wantHls = stickyHls || !pref.muted
   const [rtcFailedSeen, setRtcFailedSeen] = useState(false)
   const hlsLoad = load && (whepPath === null || wantHls || rtcFailedSeen)
-  const { lastFrameAt: hlsFrameAt, latency } = useProgramHls(videoRef, src, hlsLoad, audio.wantSound)
+  const { lastFrameAt: hlsFrameAt, latency } = useProgramHls(videoRef, src, hlsLoad, audio.wantSound, { stallEvents: false })
   const hlsPlaying = hlsFrameAt !== null && now - hlsFrameAt < 1000
-  const rtc = useWhep(rtcRef, whepPath, load && whepPath !== null && !(wantHls && hlsPlaying))
+  // Once HLS has taken over with sound, WebRTC stays closed for this source: re-opening it on every
+  // short HLS gap swapped the picture back and forth (churn on the deck).
+  const [retiredFor, setRetiredFor] = useState<string | null>(null)
+  if (wantHls && hlsPlaying && retiredFor !== src) setRetiredFor(src)
+  const rtcRetired = retiredFor === src
+  const rtc = useWhep(rtcRef, whepPath, load && whepPath !== null && !rtcRetired && !(wantHls && hlsPlaying))
   if (rtc.failed !== rtcFailedSeen) setRtcFailedSeen(rtc.failed)
-  const showRtc = whepPath !== null && !rtc.failed && rtc.lastFrameAt !== null && !(hlsLoad && hlsPlaying)
+  const showRtc = whepPath !== null && !rtcRetired && !rtc.failed && rtc.lastFrameAt !== null && !(hlsLoad && hlsPlaying)
   const lastFrameAt = Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) >= 0 ? Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) : null
   void activeSince; void readyAt
   const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt })

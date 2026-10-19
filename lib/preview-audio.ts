@@ -26,3 +26,13 @@ export function parsePref(raw: unknown): AudioPref {
   const r = raw as Partial<AudioPref> | null
   return r && typeof r.muted === "boolean" && typeof r.volume === "number" ? { muted: r.muted, volume: Math.min(1, Math.max(0, r.volume)) } : DEFAULT_PREF
 }
+
+/**
+ * Mute-only audio (no WebAudio, no slider, no meter): iOS/iPadOS ignore element.volume and WebAudio
+ * can't tap native HLS (and routing it through a MediaElementSource there causes dropouts), and the
+ * deck is a phone surface. Desktop browsers keep volume + meter (the graph works there with hls.js/MSE).
+ */
+export function muteOnlyAudio(env: { ua: string; maxTouchPoints: number; coarsePointer: boolean; deck: boolean }): boolean {
+  const ios = /iPad|iPhone|iPod/.test(env.ua) || (/Macintosh/.test(env.ua) && env.maxTouchPoints > 1)
+  return env.deck || ios || env.coarsePointer
+}

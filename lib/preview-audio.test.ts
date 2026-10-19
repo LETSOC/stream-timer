@@ -28,3 +28,13 @@ test("only the audio element, after a gesture, unmuted and visible is audible", 
   assert.deepEqual(parsePref({ muted: false, volume: 5 }), { muted: false, volume: 1 })
   assert.deepEqual(parsePref("junk"), DEFAULT_PREF)
 })
+
+test("mute-only on deck, iPhone, iPad (desktop UA) and touch; desktop desk keeps volume + meter", async () => {
+  const { muteOnlyAudio } = await import("@/lib/preview-audio")
+  const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15"
+  assert.equal(muteOnlyAudio({ ua: mac, maxTouchPoints: 0, coarsePointer: false, deck: false }), false)
+  assert.equal(muteOnlyAudio({ ua: mac, maxTouchPoints: 5, coarsePointer: false, deck: false }), true)
+  assert.equal(muteOnlyAudio({ ua: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", maxTouchPoints: 5, coarsePointer: true, deck: false }), true)
+  assert.equal(muteOnlyAudio({ ua: mac, maxTouchPoints: 0, coarsePointer: false, deck: true }), true)
+  assert.equal(muteOnlyAudio({ ua: "Mozilla/5.0 (Linux; Android 14)", maxTouchPoints: 5, coarsePointer: true, deck: false }), true)
+})

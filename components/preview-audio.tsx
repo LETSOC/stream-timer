@@ -7,14 +7,21 @@
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { controlsClass } from "@/components/auto-hide"
-import { DEFAULT_PREF, elementMuted, nextPref, parsePref, type AudioEvent, type AudioPref } from "@/lib/preview-audio"
+import { DEFAULT_PREF, elementMuted, muteOnlyAudio, nextPref, parsePref, type AudioEvent, type AudioPref } from "@/lib/preview-audio"
 
 const key = (scope: string) => `program-audio:${scope}`
 function readPref(scope: string): AudioPref {
   try { return parsePref(JSON.parse(window.localStorage.getItem(key(scope)) ?? "null")) } catch { return DEFAULT_PREF }
 }
 
+function detectMuteOnly(scope: string): boolean {
+  if (typeof window === "undefined") return true
+  return muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: scope.endsWith("deck") })
+}
+
 export function usePreviewAudio(videoRef: RefObject<HTMLVideoElement | null>, scope: string) {
+  // Decided once per player: never attach WebAudio on iOS/touch/deck (element.muted only).
+  const [muteOnly] = useState(() => detectMuteOnly(scope))
   const [pref, setPrefState] = useState<AudioPref>(() => (typeof window === "undefined" ? DEFAULT_PREF : readPref(scope)))
   const prefRef = useRef(pref)
   const graph = useRef<{ ctx: AudioContext; gain: GainNode; analyser: AnalyserNode; el: HTMLVideoElement } | null>(null)
@@ -27,11 +34,11 @@ export function usePreviewAudio(videoRef: RefObject<HTMLVideoElement | null>, sc
     const video = videoRef.current
     if (!video) return
     const muted = elementMuted({ pref: prefRef.current, audioOn: audioOnRef.current, audioElement: true, pageVisible: document.visibilityState === "visible" })
-    video.muted = muted
+    if (video.muted !== muted) video.muted = muted
     if (graph.current) graph.current.gain.gain.value = muted ? 0 : prefRef.current.volume
-    else video.volume = prefRef.current.volume
-    if (!muted) void video.play().catch(() => { video.muted = true })
-  }, [videoRef])
+    else if (!muteOnly && video.volume !== prefRef.current.volume) video.volume = prefRef.current.volume
+    if (!muted && video.paused) void video.play().catch(() => { video.muted = true })
+  }, [videoRef, muteOnly])
 
   const dispatch = useCallback((e: AudioEvent) => {
     const next = nextPref(prefRef.current, e)
@@ -43,7 +50,7 @@ export function usePreviewAudio(videoRef: RefObject<HTMLVideoElement | null>, sc
 
   const buildGraph = useCallback(() => {
     const video = videoRef.current
-    if (!video || graph.current?.el === video) return
+    if (muteOnly || !video || graph.current?.el === video) return
     try {
       const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       const ctx = new Ctx()
@@ -57,7 +64,7 @@ export function usePreviewAudio(videoRef: RefObject<HTMLVideoElement | null>, sc
       gain.connect(ctx.destination)
       graph.current = { ctx, gain, analyser, el: video }
     } catch { /* no WebAudio: element mute/volume only */ }
-  }, [videoRef])
+  }, [videoRef, muteOnly])
 
   /** Inside a user gesture: start sound (iOS/WebKit need the gesture), then apply mute/volume. */
   const enable = useCallback(() => {
@@ -127,11 +134,11 @@ export function usePreviewAudio(videoRef: RefObject<HTMLVideoElement | null>, sc
   const db = level === null || !audioOn || pref.muted ? null : Math.max(-60, Math.round(level))
   /** For players' own loops: should the element be audible right now? */
   const wantSound = useCallback(() => !elementMuted({ pref: prefRef.current, audioOn: audioOnRef.current, audioElement: true, pageVisible: document.visibilityState === "visible" }), [])
-  return { pref, audioOn, db, needsTap: !pref.muted && !audioOn, toggle, setVolume, wantSound, apply }
+  return { muteOnly, pref, audioOn, db, needsTap: !pref.muted && !audioOn, toggle, setVolume, wantSound, apply }
 }
 
 export function AudioBar({ audio, scope, shown, label = "Preview" }: { audio: ReturnType<typeof usePreviewAudio>; scope: string; shown: boolean; label?: string }) {
-  const { pref, audioOn, db, needsTap } = audio
+  const { pref, audioOn, db, needsTap, muteOnly } = audio
   const pct = db === null ? 0 : Math.max(0, Math.min(100, ((db + 60) / 60) * 100))
   return (
     <div
@@ -145,11 +152,13 @@ export function AudioBar({ audio, scope, shown, label = "Preview" }: { audio: Re
       <button type="button" data-testid={`program-audio-toggle-${scope}`} aria-pressed={!pref.muted} onClick={audio.toggle} className={`min-h-7 shrink-0 rounded-md px-2 font-bold ${needsTap ? "animate-pulse bg-[#D9FF43] text-black" : pref.muted ? "bg-white/15" : "bg-[#128a3e]"}`}>
         {needsTap ? "Tap for sound" : pref.muted ? "🔇 Unmute" : "🔊 Mute"}
       </button>
+      {muteOnly ? null : <>
       <input type="range" aria-label={`${label} volume`} data-testid={`program-audio-volume-${scope}`} min={0} max={1} step={0.05} value={pref.volume} onChange={(event) => audio.setVolume(Number(event.target.value))} className="h-1 w-16 min-w-0 shrink accent-[#D9FF43]" />
       <span className="relative h-2 min-w-6 flex-1 overflow-hidden rounded-full bg-white/15" title={`${label} audio level`}>
         <span data-testid={`program-audio-meter-${scope}`} className={`absolute inset-y-0 left-0 rounded-full ${db !== null && db > -6 ? "bg-[#ff3c00]" : "bg-[#D9FF43]"}`} style={{ width: `${pct}%` }} />
       </span>
       <span className="w-14 shrink-0 text-right tabular-nums text-white/80">{audioOn && !pref.muted ? (db === null || db <= -60 ? "silent" : `${db} dB`) : "muted"}</span>
+      </>}
     </div>
   )
 }
