@@ -28,11 +28,16 @@ export type ProgramDisplayInput = {
   lastFrameAt: number | null
   /** A last good frame is available to hold on top (the player's cover canvas). */
   held?: boolean
+  /** A disarm/arm cycle is in progress (auto re-arm or the desk buttons, ≤ REARM_HOLD_MS): OBS was kicked on purpose. */
+  rearmHold?: boolean
 }
 
 export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
   const { now, activeSince, ready, notReadySince, lastFrameAt } = input
   if (activeSince === null) return "under"
+  // Re-arm in progress: OBS was kicked on purpose and is reconnecting. Freeze on the last frame (the
+  // element's, or the cover canvas after a teardown) instead of "Waiting for OBS"; afterwards, the rules below.
+  if (input.rearmHold && (lastFrameAt !== null || input.held)) return "video"
   const gone = !ready && (notReadySince === null || now - notReadySince > NOT_READY_MS)
   if (lastFrameAt !== null) {
     const stalled = now - lastFrameAt
@@ -81,14 +86,14 @@ export function handoverDone(input: { screenIsProgram: boolean; pendingSince: nu
 
 /**
  * Operator previews (desk/deck players, not /stream): "Waiting for OBS" only once the path has had no
- * publisher for NOT_READY_MS — never for a player stall, a reload or a WebRTC→HLS swap. Short gaps
+ * publisher for NOT_READY_MS — never for a player stall, a reload, a WebRTC→HLS swap or a re-arm. Short gaps
  * keep the last frame with a small "reconnecting" badge.
  */
 export type PreviewDisplay = "video" | "connecting" | "reconnecting" | "standby"
 export const PREVIEW_GAP_MS = 1500
-export function previewDisplay(input: { now: number; ready: boolean; notReadySince: number | null; lastFrameAt: number | null }): PreviewDisplay {
+export function previewDisplay(input: { now: number; ready: boolean; notReadySince: number | null; lastFrameAt: number | null; /** disarm/arm cycle in progress: "reconnecting", never the card */ rearmHold?: boolean }): PreviewDisplay {
   const { now, ready, notReadySince, lastFrameAt } = input
-  const gone = !ready && notReadySince !== null && now - notReadySince > NOT_READY_MS
+  const gone = !ready && notReadySince !== null && now - notReadySince > NOT_READY_MS && !input.rearmHold
   if (gone) return "standby"
   if (lastFrameAt === null) return "connecting"
   return now - lastFrameAt > PREVIEW_GAP_MS ? "reconnecting" : "video"

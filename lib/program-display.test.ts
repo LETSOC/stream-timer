@@ -79,3 +79,23 @@ test("hand-over: a dead/frozen on-air input is cut at the new input's first fram
   assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: null, airAlive: false }), false) // nothing to cut to yet: hold
   assert.equal(handoverDone({ ...base, now: 6100, incomingVideoSince: 1000, airAlive: true }), true)
 })
+
+test("re-arm hold: a disarm/arm cycle (auto re-arm or the desk buttons) freezes on the last frame, never 'Waiting for OBS'", async () => {
+  const { previewDisplay, NOT_READY_MS } = await import("@/lib/program-display")
+  const { nextRearmHold, rearmHoldLeft, REARM_HOLD_MS } = await import("@/lib/program-rearm")
+  // 15:00:53 replay: OBS kicked (not ready), player torn down (no frame in the element), cover holds the last frame.
+  const gone = { ...base, now: 20_000, ready: false, notReadySince: 20_000 - NOT_READY_MS - 500, lastFrameAt: null, held: true }
+  assert.equal(programDisplay(gone), "standby") // before: the card
+  assert.equal(programDisplay({ ...gone, rearmHold: true }), "video") // now: the held frame
+  assert.equal(programDisplay({ ...gone, lastFrameAt: 14_000, held: false, rearmHold: true }), "video") // element still has its frame
+  assert.equal(programDisplay({ ...gone, held: false, rearmHold: true }), "standby") // nothing to hold: normal rules
+  // previews: "reconnecting" with the last frame instead of the card
+  const p = { now: 20_000, ready: false, notReadySince: 10_000, lastFrameAt: 15_000 }
+  assert.equal(previewDisplay(p), "standby")
+  assert.equal(previewDisplay({ ...p, rearmHold: true }), "reconnecting")
+  // the hold lasts REARM_HOLD_MS from the disarm, then the normal rules apply
+  const h = nextRearmHold(1000)
+  assert.equal(rearmHoldLeft(h, 1000), REARM_HOLD_MS)
+  assert.equal(rearmHoldLeft(h, 1000 + REARM_HOLD_MS + 1), 0)
+  assert.ok(REARM_HOLD_MS >= 10_000 && REARM_HOLD_MS <= 15_000)
+})

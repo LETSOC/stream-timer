@@ -197,7 +197,7 @@ function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: 
   if (!fire) return
   const label = SOURCE_LABEL[active]
   plog(`${label} reconnected → auto re-arm`)
-  dlog("!", "rearm", `${label} reconnected → auto re-arm: disarming /program + /program-backup for ~1.5s (publishers kicked; OBS reconnects; /stream holds the last frame, "Waiting for OBS" if it takes > ~7s)`)
+  dlog("!", "rearm", `${label} reconnected → auto re-arm: disarming /program + /program-backup for ~1.5s (publishers kicked; OBS reconnects; /stream and the previews hold the last frame, "Waiting for OBS" only if OBS is still away after ~15s)`)
   m.rearming = true
   void (async () => {
     try {
