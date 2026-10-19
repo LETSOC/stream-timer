@@ -117,3 +117,42 @@ test("operator markers: types round-trip; problem marks are incidents, on-purpos
   const inc = correlate(a.filter((e) => !isMark(e)))
   assert.deepEqual(inc.map((i) => i.problems.length), [1, 1])
 })
+
+test("operator markers: HD capture / Vertical stopped + back on label /capture and /vertical lines expected", async () => {
+  const { annotateExpected, formatMarkers, isRealProblem, eventSource } = await import("@/lib/dropout-log")
+  const { markMessage, parseMarkMessage } = await import("@/lib/marks")
+  for (const t of ["capture-stopped", "capture-back", "vertical-stopped", "vertical-back"] as const) assert.equal(parseMarkMessage(markMessage(t, "phone", "Main", "program"))?.type, t)
+  const base = Date.UTC(2026, 10, 4, 10, 0, 0)
+  const line = (dt: number, lvl: "!" | "+" | "·", cat: Parameters<typeof dropoutLine>[2], msg: string) => dropoutLine(base + dt, lvl, cat, msg)
+  const ev = parseDropoutLog([
+    line(-3000, "!", "ingest", "Browser capture /capture: no data for 2.0s while the publisher is still connected"),
+    line(-2000, "!", "relay", "Browser capture /capture publisher GONE (RTMP publisher of /capture (127.0.0.1:1) closed: EOF)"),
+    line(-2000, "!", "relay", "Vertical /vertical publisher GONE (RTMP publisher of /vertical (127.0.0.1:2) closed: EOF)"),
+    line(-2000, "!", "push", "live.restream.io vertical (from /capture): exited (code 0 after 282s); restarting in 2s"),
+    line(-2000, "!", "push", "OneStream (from /vertical): exited (code 0 after 276s); restarting in 2s"),
+    line(-1000, "!", "relay", "Main /program publisher GONE (closed: EOF)"), // Main isn't covered by an HD capture stop
+    line(0, "·", "operator", markMessage("capture-stopped", "desk", "Main", "program")),
+    line(6000, "+", "relay", "Browser capture /capture publisher READY (rtmpConn)"),
+    line(8000, "·", "operator", markMessage("capture-back", "phone", "Main", "program")),
+    line(120_000, "!", "relay", "Browser capture /capture publisher GONE (closed: EOF)"), // after back on + 20s: real
+    line(200_000, "·", "operator", markMessage("vertical-stopped", "deck", "Main", "program")),
+    line(201_000, "!", "push", "UPSTREAM TEST (from /vertical): exited (code 0 after 10s)"),
+    line(201_000, "!", "push", "C_HD_TEST LIVE (from /capture): exited (code 0 after 10s)"), // a Vertical stop doesn't explain HD
+    line(205_000, "·", "operator", markMessage("vertical-back", "deck", "Main", "program")),
+  ].join("\n"))
+  assert.equal(eventSource(ev.find((e) => e.msg.startsWith("live.restream.io vertical"))!), "capture")
+  const a = annotateExpected(ev)
+  const exp = (s: string) => a.find((e) => e.msg.startsWith(s))?.expected
+  assert.equal(exp("Browser capture /capture: no data"), "operator stopped HD capture")
+  assert.equal(exp("Vertical /vertical publisher GONE"), "operator stopped HD capture")
+  assert.equal(exp("OneStream"), "operator stopped HD capture")
+  assert.equal(exp("live.restream.io"), "operator stopped HD capture")
+  assert.equal(exp("Browser capture /capture publisher READY"), "operator stopped HD capture")
+  assert.equal(exp("UPSTREAM TEST"), "operator stopped Vertical")
+  assert.deepEqual(a.filter(isRealProblem).map((e) => e.msg.slice(0, 20)), ["Main /program publis", "Browser capture /cap", "C_HD_TEST LIVE (from"])
+  const markers = formatMarkers(ev)
+  assert.equal(markers.length, 4)
+  assert.match(markers[0], /^10:00:00 · HD capture stopped on purpose · on desk .* 5 problem line\(s\) labelled expected/)
+  assert.match(markers[1], /HD capture back on · on phone/)
+  assert.match(markers[2], /Vertical stopped on purpose · on deck .* 1 problem line/)
+})

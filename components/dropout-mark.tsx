@@ -26,6 +26,7 @@ export const markToast = (r: Extract<MarkResult, { ok: true }>) => `Marked ${r.t
 const GROUPS: { title: string; types: MarkType[]; problem?: boolean }[] = [
   { title: "Seen on YouTube", types: ["blackout", "frozen", "audio"], problem: true },
   { title: "On purpose", types: ["main-stopped", "backup-stopped", "main-back", "backup-back"] },
+  { title: "On purpose · outputs", types: ["capture-stopped", "vertical-stopped", "capture-back", "vertical-back"] },
   { title: "Test", types: ["test-start", "test-end"] },
 ]
 

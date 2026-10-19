@@ -9,7 +9,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { parseMarkMessage, type MarkSource, type ParsedMark } from "./marks"
+import { MARK_COVERS, parseMarkMessage, SOURCE_NAME, type MarkSource, type ParsedMark } from "./marks"
 
 export type DropLevel = "!" | "+" | "·"
 export type DropCategory = "relay" | "ingest" | "player" | "switch" | "rearm" | "capture" | "push" | "srt" | "server" | "operator"
@@ -94,7 +94,7 @@ export const BACK_AFTER_MS = 20_000
 /** A stop / test with no "back on" / "test end" mark stays expected this long at most. */
 export const OPEN_WINDOW_MS = 30 * 60_000
 
-export type ExpectedWindow = { from: number; to: number; source: MarkSource | "all"; reason: string; markAt: number }
+export type ExpectedWindow = { from: number; to: number; source: MarkSource | "all"; /** every feed the window explains (an HD capture stop also takes Vertical down) */ covers?: MarkSource[]; reason: string; markAt: number }
 /** Pure: the time ranges in which relay/ingest/player lines are caused by the operator on purpose. */
 export function expectedWindows(events: DropEvent[]): ExpectedWindow[] {
   const marks = events.map((e) => ({ e, m: markOf(e) })).filter((x): x is { e: DropEvent; m: ParsedMark } => x.m !== null).sort((a, b) => a.e.at - b.e.at)
@@ -105,9 +105,9 @@ export function expectedWindows(events: DropEvent[]): ExpectedWindow[] {
     if (kind === "stop" && source) {
       const back = later.find((x) => x.m.def.kind === "back" && x.m.def.source === source)
       const to = back ? back.e.at + BACK_AFTER_MS : e.at + OPEN_WINDOW_MS
-      out.push({ from: e.at - STOP_BEFORE_MS, to, source, reason: `operator stopped ${source === "main" ? "Main" : "Backup"}`, markAt: e.at })
+      out.push({ from: e.at - STOP_BEFORE_MS, to, source, covers: MARK_COVERS[source], reason: `operator stopped ${SOURCE_NAME[source]}`, markAt: e.at })
     } else if (kind === "back" && source) {
-      out.push({ from: e.at - 5000, to: e.at + BACK_AFTER_MS, source, reason: `operator: ${source === "main" ? "Main" : "Backup"} back on`, markAt: e.at })
+      out.push({ from: e.at - 5000, to: e.at + BACK_AFTER_MS, source, covers: MARK_COVERS[source], reason: `operator: ${SOURCE_NAME[source]} back on`, markAt: e.at })
     } else if (kind === "test-start") {
       const end = later.find((x) => x.m.def.kind === "test-end")
       out.push({ from: e.at - 5000, to: end ? end.e.at + BACK_AFTER_MS : e.at + OPEN_WINDOW_MS, source: "all", reason: "operator test", markAt: e.at })
@@ -115,8 +115,16 @@ export function expectedWindows(events: DropEvent[]): ExpectedWindow[] {
   })
   return out
 }
-/** Which input a line is about (a failover line: the input in its reason, after the colon). */
+/**
+ * Which feed a line is about. Outputs first: a forward names its source path ("X (from /capture)",
+ * even when the destination is called "… vertical"), then /vertical, then /capture or the capture
+ * process ([capture] lines); else the OBS input (a failover line: the input in its reason, after the colon).
+ */
 export function eventSource(e: DropEvent): MarkSource | null {
+  const from = /\(from \/(capture|vertical)\)/.exec(e.msg)
+  if (from) return from[1] as MarkSource
+  if (/\/vertical\b|^Vertical\b/.test(e.msg)) return "vertical"
+  if (e.cat === "capture" || /\/capture\b|^Browser capture\b/.test(e.msg)) return "capture"
   const part = /→/.test(e.msg) && e.msg.includes(":") ? e.msg.slice(e.msg.indexOf(":") + 1) : e.msg
   const backup = /\bBackup\b|\/program-backup\b/.test(part)
   const main = /\bMain\b|\/program(?![-\w])/.test(part)
@@ -129,7 +137,7 @@ export function annotateExpected(events: DropEvent[]): DropEvent[] {
   return events.map((e) => {
     if (e.cat === "operator" || e.level === "·") return e
     const src = eventSource(e)
-    const w = wins.find((x) => e.at >= x.from && e.at <= x.to && (x.source === "all" || x.source === src))
+    const w = wins.find((x) => e.at >= x.from && e.at <= x.to && (x.source === "all" || (src !== null && (x.covers ?? [x.source]).includes(src))))
     return w ? { ...e, expected: w.reason } : e
   })
 }
