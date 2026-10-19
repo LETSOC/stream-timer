@@ -1,5 +1,5 @@
 "use client"
-import { MarkBlackoutButton } from "@/components/dropout-mark"
+import { MarkMenu, type MarkType } from "@/components/dropout-mark"
 
 import { rttLabel } from "@/lib/rtt"
 
@@ -73,8 +73,8 @@ export function useFailoverEvents(last: FailoverEvent | null | undefined, onEven
  * Used by the desk (Transport) and the phone deck (dark).
  */
 export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark, dark = false, disabled = false }: {
-  /** "⚑ Mark blackout" (dropout log) next to the inputs */
-  onMark?: () => void
+  /** "⚑ Mark" menu (dropout log markers) next to the inputs */
+  onMark?: (type: MarkType, note: string) => void
   view: ProgramSourcesView | null
   active: ProgramSource
   onSwitch: (source: ProgramSource) => void
@@ -86,6 +86,15 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
   const [stall, setStall] = useState<string | null>(null)
   const [ret, setRet] = useState<string | null>(null)
   const [buf, setBuf] = useState<string | null>(null)
+  // Manual switch = two taps (like the other risky buttons): the first arms "Tap again…" for 3s.
+  // Auto-failover and "Return now" don't go through this.
+  const [armed, setArmed] = useState<ProgramSource | null>(null)
+  useEffect(() => {
+    if (!armed) return
+    const id = window.setTimeout(() => setArmed(null), 3000)
+    return () => window.clearTimeout(id)
+  }, [armed])
+  const armedFor = armed !== null && armed !== active ? armed : null
   const muted = dark ? "text-white/60" : "text-black/60"
   const tones = { ok: dark ? "text-[#6ce9a6]" : "text-[#067647]", warn: "text-[#f79009]", off: muted }
   return (
@@ -100,16 +109,21 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
           const notReady = !!view && hasSignal(h) && h?.readyOk === false
           const stateCls = state === "healthy" ? "bg-[#067647] text-white" : state === "suspect" ? "bg-[#f79009] text-black" : "bg-[#b42318] text-white"
           return (
-            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || dead} data-no-signal={dead || undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} onClick={() => {
-                if (!on && notReady && typeof window !== "undefined" && !window.confirm(`${SOURCE_LABEL[source]} is not READY (${h?.issues?.join(", ")}). Switch anyway?`)) return
+            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || dead} data-no-signal={dead || undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} data-armed={armedFor === source ? "1" : undefined} onClick={() => {
+                if (on) { onSwitch(source); return }
+                if (armedFor !== source) { setArmed(source); return }
+                setArmed(null)
+                if (notReady && typeof window !== "undefined" && !window.confirm(`${SOURCE_LABEL[source]} is not READY (${h?.issues?.join(", ")}). Switch anyway?`)) return
                 onSwitch(source)
               }}
-              className={`min-h-16 min-w-0 overflow-hidden rounded-xl px-2.5 py-2 text-left disabled:opacity-50 ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"}`}>
+              onBlur={() => { if (armedFor === source) setArmed(null) }}
+              className={`min-h-16 min-w-0 overflow-hidden rounded-xl px-2.5 py-2 text-left disabled:opacity-50 ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"} ${armedFor === source ? (dark ? "ring-4 ring-[#fdb022] ring-offset-2 ring-offset-[#0b0b0f]" : "ring-2 ring-[#b42318] ring-offset-2") : ""}`}>
               <span className="flex min-w-0 items-center gap-1.5">
                 {view && h?.ready ? <span data-testid={`program-source-${source}-ready`} data-ready={h.readyOk ? "yes" : "no"} title={h.readyOk ? "READY: video + audio, fps stable, data fresh, 48 kHz" : `Not ready: ${h.issues?.join(", ")}`} aria-label={h.readyOk ? "READY" : "not ready"} className={`size-2.5 shrink-0 rounded-full ${h.readyOk ? "bg-[#12b76a]" : "border-2 border-[#f79009]"}`} /> : null}
                 <span className="min-w-0 truncate text-[15px] font-black">{on ? "● " : ""}{SOURCE_LABEL[source]}{source === "backup" && view?.backup.pull ? " (pull)" : ""}</span>
                 {view && state ? <span data-testid={`program-source-${source}-state`} data-input-state={state} title={h?.stateReason ?? undefined} className={`ml-auto shrink-0 rounded px-1 py-px font-mono text-[9px] font-bold leading-tight ${stateCls}`}>{STATE_LABEL[state]}</span> : null}
               </span>
+              {armedFor === source ? <span data-testid={`program-source-${source}-confirm`} className={`block font-mono text-[11px] font-bold ${dark ? "text-[#fdb022]" : "text-[#b42318]"}`}>Tap again to switch to {SOURCE_LABEL[source]}</span> : null}
               <span data-testid={`program-source-${source}-status`} className={`block truncate font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? (dead ? `no signal · ${st.text}` : h?.ready ? (h.readyOk ? "READY" : `not ready: ${h.issues?.join(", ")}`) : st.text) : "relay not armed"}</span>
               {view && h?.ready ? (
                 <span data-testid={`program-source-${source}-readout`} className="mt-1 grid grid-cols-1 gap-x-1.5 font-mono text-[10px] leading-snug opacity-80 min-[520px]:grid-cols-2">
@@ -128,7 +142,7 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
           )
         })}
       </div>
-      {onMark ? <div className="flex justify-end"><MarkBlackoutButton onMark={onMark} dark={dark} /></div> : null}
+      {onMark ? <div className="flex justify-end"><MarkMenu onMark={onMark} dark={dark} /></div> : null}
       {view?.returnStatus?.askReturn && active === "backup" ? (
         <button type="button" data-testid="return-now" disabled={disabled} onClick={() => onSwitch("main")} className="w-full rounded-xl bg-[#12b76a] px-3 py-2 text-[15px] font-black text-black">Main ready · Return now</button>
       ) : null}

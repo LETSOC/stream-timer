@@ -9,6 +9,7 @@ type Ingest = { lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; md
 export function LanIngestInfo() {
   const [ingest, setIngest] = useState<Ingest | null>(null)
   const [qr, setQr] = useState<string | null>(null)
+  const [showQr, setShowQr] = useState(false)
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -41,8 +42,11 @@ export function LanIngestInfo() {
       {ingest.lanUrl ? row(ingest.mdnsUrl ? "LAN IP" : "LAN", ingest.lanUrl, "deck-lan-ip") : null}
       {ingest.mdns?.state === "conflict" ? <p className="text-[#fdb022]">{ingest.mdns.name}.local is taken by {ingest.mdns.conflictWith ?? "another device"}: use the IP, or rename on the desk.</p> : null}
       <CopyFallbackHost />
-      {server && qr ? (
-        <div className="flex items-center gap-3">
+      {server && qr && !showQr ? (
+        <button type="button" data-testid="deck-lan-qr-show" onClick={() => setShowQr(true)} className="rounded-full border border-white/30 px-3 py-1 text-[13px]">Show QR</button>
+      ) : null}
+      {server && qr && showQr ? (
+        <div className="flex items-center gap-3" onClick={() => setShowQr(false)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img data-testid="deck-lan-qr" alt={`QR: ${server}`} className="size-32 shrink-0 rounded bg-white p-1" src={`data:image/svg+xml;utf8,${encodeURIComponent(qr)}`} />
           <p className="text-white/60">Backup OBS › Settings › Stream › Server: scan or type this. Stream key: reveal it on the desk (keys never shown here).</p>

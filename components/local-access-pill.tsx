@@ -20,7 +20,9 @@ export function LocalAccessPill({ dark = false, className = "" }: { dark?: boole
   const [ok, setOk] = useState<boolean | null>(null)
   const [spin, setSpin] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [collapsed, setCollapsed] = usePref("local-access-collapsed", "0")
+  // Collapsed by default (the QR only shows after a click); remembered per device. New key: earlier
+  // builds stored "expanded" under local-access-collapsed.
+  const [collapsed, setCollapsed] = usePref("local-access-collapsed-v2", "1")
   const [auto, setAuto] = usePref("local-access-auto", "1")
   const [view, setView] = usePref("local-access-view", dark ? "deck" : "desk")
   const v: View = view === "deck" ? "deck" : "desk"
