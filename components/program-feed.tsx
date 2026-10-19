@@ -292,12 +292,13 @@ function useCaptureAudioTap(videoRef: RefObject<HTMLVideoElement | null>, source
   }, [videoRef, source])
 }
 
-export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false }: { /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
+export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false, rearmHoldUntil = null }: { /** a disarm/arm cycle (auto re-arm / desk buttons) holds the last frame until this local time (null = none) */ rearmHoldUntil?: number | null; /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
   const activeSince = useActiveSince(active, now)
   const load = keepLoaded(ready, notReadySince, now)
+  const rearmHold = rearmHoldUntil !== null && now < rearmHoldUntil
   const showing = useRef<ProgramDisplay>("under")
   // Standby input in a plain tab: paused (warm buffer, no decode). Browser capture keeps both playing:
   // it takes each input's audio from its element (useCaptureAudioTap), so both must run.
@@ -358,19 +359,27 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
     return () => window.clearInterval(id)
   }, [periodic, onAir, snapshot])
   // Off air / unloaded: the cover goes with it (the hand-over or the standby card takes over).
+  // Not during a re-arm: OBS was kicked on purpose, the cover holds the last frame until it is back.
   useEffect(() => {
-    if ((!onAir || !load) && coverRef.current) { coverOn.current = false; coverRef.current.style.visibility = "hidden" }
-  }, [onAir, load])
+    if ((!onAir || (!load && !rearmHold)) && coverRef.current) { coverOn.current = false; coverRef.current.style.visibility = "hidden" }
+  }, [onAir, load, rearmHold])
   useCaptureAudioTap(videoRef, source)
   // A held last frame (cover canvas) lets a reconnecting OBS (relay READY, rebuilt player not playing yet)
   // freeze on the last picture instead of the "Waiting for OBS" card.
   const held = onAir && hasHeld
-  const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt, held })
+  const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt, held, rearmHold })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
   shownRef.current = shown
   // Holding with no frame in the element yet: put the last frame on top (hidden again by the first new frame).
-  const holding = shown === "video" && lastFrameAt === null && load
+  const holding = shown === "video" && lastFrameAt === null && (load || rearmHold)
   useEffect(() => { if (holding) showCover() }, [holding, showCover])
+  // Dropout log: one line per re-arm hold on the input on air.
+  const rearmOnAir = rearmHold && onAir && active
+  useEffect(() => {
+    if (!rearmOnAir) return
+    playerDiag("·", lastFrameAt !== null || held ? `holding last frame during re-arm (${label} on air; disarm/arm kicked OBS on purpose: no "Waiting for OBS" for up to 15s)` : `re-arm in progress but no last frame of ${label} to hold (normal rules)`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per hold start
+  }, [rearmOnAir])
   useEffect(() => {
     if (showing.current === shown) return
     const was = showing.current
@@ -435,14 +444,18 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
  * Browsers only allow sound after a tap: the first tap anywhere on the page (or on the button) turns it on
  * when the saved choice is "unmuted".
  */
-export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, className = "" }: { src?: string; ready?: boolean; scope: string; className?: string }) {
+export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, rearmHoldMs, scope, className = "" }: { src?: string; ready?: boolean; /** ms left of a disarm/arm cycle (deck state); polled with `ready` when not given */ rearmHoldMs?: number; scope: string; className?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const polled = usePolledReady(ready === undefined)
-  const isReady = ready ?? polled
+  const isReady = ready ?? polled.ready
   const { notReadySince, readyAt } = useReadiness(isReady, now)
   const activeSince = useActiveSince(true, now)
-  const load = keepLoaded(isReady, notReadySince, now)
+  // Re-arm (auto or Disarm → Arm): OBS kicked on purpose. Keep the player and its last frame
+  // ("reconnecting…" badge) instead of the "Waiting for OBS" card, ≤ 15s.
+  const holdUntil = useHoldUntil(ready === undefined ? polled.rearmHoldMs : rearmHoldMs, now)
+  const rearmHold = holdUntil !== null && now < holdUntil
+  const load = keepLoaded(isReady, notReadySince, now) || rearmHold
   // One user-owned mute state per player (scope); never reset by Main↔Backup, remounts or the WebRTC→HLS swap.
   const audio = usePreviewAudio(videoRef, scope)
   const { pref, audioOn, db } = audio
@@ -468,7 +481,7 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const showRtc = whepPath !== null && !rtcRetired && !rtc.failed && rtc.lastFrameAt !== null && !(hlsLoad && hlsPlaying)
   const lastFrameAt = Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) >= 0 ? Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) : null
   void activeSince; void readyAt
-  const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt })
+  const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt, rearmHold })
   const chrome = useAutoHide()
 
   // The WebRTC element never carries sound: keep it muted whatever happens.
@@ -487,16 +500,28 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   )
 }
 
-/** Desk previews have no deck socket: ask the (operator-readable) public state whether OBS is sending. */
+/** A "ms left" value from the server → the local time it ends (re-anchored whenever a new value arrives). */
+function useHoldUntil(ms: number | undefined, now: number): number | null {
+  const [seen, setSeen] = useState<{ ms: number | undefined; until: number | null }>({ ms: undefined, until: null })
+  const until = ms !== undefined && ms > 0 ? now + ms : null
+  if (seen.ms !== ms) setSeen({ ms, until })
+  return seen.ms === ms ? seen.until : until
+}
+
+/** Desk previews have no deck socket: ask the (operator-readable) public state whether OBS is sending (and whether a re-arm is in progress). */
 function usePolledReady(enabled: boolean) {
-  const [ready, setReady] = useState(false)
+  const [state, setState] = useState<{ ready: boolean; rearmHoldMs: number }>({ ready: false, rearmHoldMs: 0 })
   useEffect(() => {
     if (!enabled) return
     let stop = false
-    const poll = () => fetch("/api/public/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programReady?: unknown } | null) => { if (!stop) setReady(body?.programReady === true) }).catch(() => undefined)
+    const poll = () => fetch("/api/public/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programReady?: unknown; rearmHoldMs?: unknown } | null) => {
+      if (stop) return
+      const next = { ready: body?.programReady === true, rearmHoldMs: typeof body?.rearmHoldMs === "number" ? body.rearmHoldMs : 0 }
+      setState((cur) => (cur.ready === next.ready && cur.rearmHoldMs === next.rearmHoldMs ? cur : next))
+    }).catch(() => undefined)
     void poll()
     const id = window.setInterval(poll, 1500)
     return () => { stop = true; window.clearInterval(id) }
   }, [enabled])
-  return ready
+  return state
 }

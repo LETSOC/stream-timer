@@ -106,6 +106,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [bed, setBed] = useState<StreamBedPlan>(null)
   const [programReady, setProgramReady] = useState(false)
   const [switchBufferMs, setSwitchBufferMs] = useState(SWITCH_BUFFER_MS)
+  /** local time until which a disarm/arm cycle holds the last frame (server sends ms left) */
+  const [rearmHoldUntil, setRearmHoldUntil] = useState<number | null>(null)
   const [sourceReady, setSourceReady] = useState<{ main: boolean; backup: boolean }>({ main: false, backup: false })
 
   useEffect(() => {
@@ -120,7 +122,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { bed?: unknown; switchBufferMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { bed?: unknown; switchBufferMs?: unknown; rearmHoldMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (reloadIfRebuilt(body.build)) return
@@ -129,6 +131,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
           setProgramReady(body.programReady === true)
           if (typeof body.switchBufferMs === "number") setSwitchBufferMs(body.switchBufferMs)
+          setRearmHoldUntil(typeof body.rearmHoldMs === "number" && body.rearmHoldMs > 0 ? Date.now() + body.rearmHoldMs : null)
           setSourceReady((cur) => (cur.main === (body.mainReady === true) && cur.backup === (body.backupReady === true) ? cur : { main: body.mainReady === true, backup: body.backupReady === true }))
           const nextBed = (body.bed && typeof body.bed === "object" ? body.bed : null) as StreamBedPlan
           setBed((cur) => (JSON.stringify(cur) === JSON.stringify(nextBed) ? cur : nextBed))
@@ -247,7 +250,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} />
       })}
       <StreamAudioOverlay />
       {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} viewKey={viewKey} /> : null}
