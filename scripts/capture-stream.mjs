@@ -338,7 +338,8 @@ const GAIN_STEP = 1 / (0.2 * RATE)
 let bedLine = null // delay line (screencast lag + positive trim), created with the feeder
 /** `wallMs` = timeline time of the first frame (beeps of the sync test line up with the flashes). */
 function pcmBlock(n, wallMs) {
-  const programPcm = prog.wanted ? takeProgram(n) : null
+  // Off Program: still drain the warm reader so its queue stays locked at the delay (output unused).
+  const programPcm = prog.wanted ? takeProgram(n) : (prog.reader && takeProgram(n), null)
   const wantBed = Math.max(0, screencastLag() + Math.max(0, sync.trimMs))
   const curBed = bedLine.delayMs()
   bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
@@ -585,8 +586,8 @@ setInterval(async () => {
   const info = await page.evaluate(() => {
     const feed = document.querySelector("[data-testid=program-feed]")
     const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
-    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
-  }).catch(() => ({ source: prog.source, screen: "", lat: null }))
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
+  }).catch(() => ({ source: prog.source, screen: "", loaded: null, lat: null }))
   const screen = info.screen
   // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
   // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
@@ -598,8 +599,13 @@ setInterval(async () => {
   if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) { prog.wantedSince = Date.now(); prog.flowed = false; log("[audio] /stream shows the program: audio follows OBS") } }
   else if (prog.wanted) log("[audio] /stream left the program: audio bed back")
   prog.wanted = wanted
-  if (wanted) { startProgramReader(); startSpare() }
-  else if (prog.reader && Date.now() - prog.lastWantedAt > 10000) { stopProgramReader(); stopSpare() } // keep warm 10s for quick back-and-forth
+  // On-air reader kept warm whenever the on-air input has a publisher (cards/countdown too), so a
+  // card → Program switch has its audio queued at the delay already. Spare: Program only.
+  if (info.loaded || wanted) prog.publisherAt = Date.now()
+  if (wanted || info.loaded) startProgramReader()
+  if (wanted) startSpare()
+  else if (spare.reader && Date.now() - prog.lastWantedAt > 10000) stopSpare() // keep warm 10s for quick back-and-forth
+  if (!wanted && prog.reader && Date.now() - (prog.publisherAt ?? 0) > 10000) stopProgramReader() // no publisher for 10s
 }, 250)
 ticker = setInterval(() => {
   if (!latest || !ffmpeg?.stdin.writable) return
