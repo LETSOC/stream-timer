@@ -21,6 +21,7 @@ import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { failoverText, ProgramSourceSwitch, sourceStatus, useFailoverEvents } from "@/components/program-source-switch"
+import { DropoutLogPanel, markBlackout } from "@/components/dropout-mark"
 import type { FailoverSettings, ProgramSource } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { StreamPlayer } from "@/components/stream-player"
@@ -158,7 +159,7 @@ export function OperatorConsole() {
   }, [])
   const [previewFlash, setPreviewFlash] = useState(false)
   // One toast at a time; each kind has its own title, duration and timer. Polling never touches it.
-  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend" | "failover"; text: string; undo?: () => void }
+  type Toast = { id: number; kind: "copy" | "copy-failed" | "sync" | "conflict" | "error" | "extend" | "failover" | "mark"; text: string; undo?: () => void }
   const [toast, setToastState] = useState<Toast | null>(null)
   const toastTimer = useRef<number | null>(null)
   const toastSeq = useRef(0)
@@ -168,8 +169,9 @@ export function OperatorConsole() {
     toastTimer.current = null
     setToastState(null)
   }, [])
+  const [markSeq, setMarkSeq] = useState(0)
   const showToast = useCallback((kind: Toast["kind"], text: string, undo?: () => void) => {
-    const ms = undo ? TOAST_UNDO_MS : { copy: TOAST_MS, "copy-failed": 6000, sync: TOAST_MS, conflict: 5000, error: 4000, extend: TOAST_MS, failover: 5000 }[kind]
+    const ms = undo ? TOAST_UNDO_MS : { copy: TOAST_MS, "copy-failed": 6000, sync: TOAST_MS, conflict: 5000, error: 4000, extend: TOAST_MS, failover: 5000, mark: TOAST_MS }[kind]
     const id = ++toastSeq.current
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
     setToastState({ id, kind, text, undo })
@@ -1034,7 +1036,8 @@ export function OperatorConsole() {
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
             </div>
-              <div><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} /></div>
+              <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onMark={() => { void markBlackout("desk").then((r) => { if (r.ok) { showToast("mark", `Marked ${r.time}`); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
+                <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "copy" : "copy-failed", text)} /></div>
             {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <p className="font-mono text-[12px] leading-5 text-black/70">
