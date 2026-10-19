@@ -56,3 +56,14 @@ test("preview: 'Waiting for OBS' only after 3s with no publisher; stalls/swaps s
   assert.equal(previewDisplay({ now, ready: false, notReadySince: now - 3500, lastFrameAt: now - 3500 }), "standby")
   assert.equal(previewDisplay({ now, ready: false, notReadySince: now - 3500, lastFrameAt: null }), "standby")
 })
+
+test("WebRTC config caps UDP payload at 1200 (no fragmentation on Wi-Fi/VPN); off = no WebRTC keys", async () => {
+  const { buildMediamtxConfig } = await import("@/lib/relay")
+  const creds = { publishUser: "p", publishPass: "p", readUser: "r", readPass: "r", programUser: "o", programPass: "o", backupUser: "b", backupPass: "b", verticalUser: "v", verticalPass: "v" }
+  const base = { host: "127.0.0.1", ports: { rtmp: 19350, hls: 18888, api: 19997 }, creds }
+  const on = buildMediamtxConfig({ ...base, webrtc: { httpPort: 18889, iceHost: "127.0.0.1", icePort: 8189, additionalHosts: [] } })
+  assert.match(on, /^udpMaxPayloadSize: 1200$/m)
+  assert.match(on, /^webrtcLocalTCPAddress: /m)
+  assert.doesNotMatch(buildMediamtxConfig(base), /udpMaxPayloadSize/)
+  assert.match(on, /^hlsAlwaysRemux: no$/m)
+})

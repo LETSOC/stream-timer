@@ -63,9 +63,11 @@ export function StreamPlayer({ src, inline = false, scope }: { src: string; inli
       if (HlsLib.isSupported()) {
         hls = new HlsLib({
           enableWorker: false,
-          lowLatencyMode: true,
-          liveSyncDurationCount: 2,
-          liveMaxLatencyDurationCount: 6,
+          // Phones/touch (hls.js via ManagedMediaSource on iOS): standard HLS with a ~3s buffer, no
+          // catch-up speed changes (see useProgramHls). Desktop keeps LL-HLS.
+          ...(audio.muteOnly
+            ? { lowLatencyMode: false, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
+            : { lowLatencyMode: true, liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6 }),
         });
         hls.loadSource(src);
         hls.attachMedia(node);
@@ -112,7 +114,7 @@ export function StreamPlayer({ src, inline = false, scope }: { src: string; inli
       video.removeAttribute("src");
       video.load();
     };
-  }, [src, inline, resume, needHls]);
+  }, [src, inline, resume, needHls, audio.muteOnly]);
 
   const vClass = `absolute inset-0 h-full w-full bg-[#111111] object-contain ${inline ? "pointer-events-none" : ""}`;
   const inlineProps = inline ? { "webkit-playsinline": "true", "x-webkit-airplay": "deny" } : {};

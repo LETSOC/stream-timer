@@ -144,12 +144,12 @@ export function AudioBar({ audio, scope, shown, label = "Preview" }: { audio: Re
     <div
       data-autohide-control
       data-testid={`program-controls-${scope}`}
-      className={`absolute right-1.5 bottom-1.5 left-1.5 z-10 flex items-center gap-2 rounded-lg bg-black/70 px-2 py-1 font-mono text-[11px] text-white ${controlsClass(shown || needsTap)}`}
+      className={`absolute right-1.5 bottom-1.5 z-10 flex items-center font-mono text-[11px] text-white ${muteOnly ? "" : "left-1.5 gap-2 rounded-lg bg-black/70 px-2 py-1"} ${controlsClass(shown || needsTap)}`}
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      <button type="button" data-testid={`program-audio-toggle-${scope}`} aria-pressed={!pref.muted} onClick={audio.toggle} className={`min-h-7 shrink-0 rounded-md px-2 font-bold ${needsTap ? "animate-pulse bg-[#D9FF43] text-black" : pref.muted ? "bg-white/15" : "bg-[#128a3e]"}`}>
+      <button type="button" data-testid={`program-audio-toggle-${scope}`} aria-pressed={!pref.muted} onClick={audio.toggle} className={`min-h-7 shrink-0 rounded-md px-2 font-bold ${needsTap ? "animate-pulse bg-[#D9FF43] text-black" : pref.muted ? (muteOnly ? "bg-black/70 shadow" : "bg-white/15") : "bg-[#128a3e]"}`}>
         {needsTap ? "Tap for sound" : pref.muted ? "🔇 Unmute" : "🔊 Mute"}
       </button>
       {muteOnly ? null : <>

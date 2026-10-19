@@ -239,6 +239,8 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
       "webrtcIPsFromInterfaces: yes",
       `webrtcAdditionalHosts: [${input.webrtc.additionalHosts.map((h) => JSON.stringify(h)).join(", ")}]`,
       "webrtcICEServers2: []",
+      // Keep WebRTC packets under typical Wi-Fi/VPN MTUs (no IP fragmentation, which drops whole frames).
+      "udpMaxPayloadSize: 1200",
     ] : ["webrtc: no"]),
     "moq: no",
     "playback: no",

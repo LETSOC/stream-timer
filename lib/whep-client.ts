@@ -13,6 +13,9 @@ export function whepPathFromHls(src: string): string | null {
   return m ? m[1] : null
 }
 
+/** How long a "disconnected" WebRTC preview may try to recover before falling back to HLS. */
+export const DISCONNECT_GRACE_MS = 6000
+
 export async function playWhep(video: HTMLVideoElement, path: string, opts: { timeoutMs?: number; onFail?: () => void } = {}): Promise<WhepSession> {
   if (typeof RTCPeerConnection === "undefined") throw new Error("no WebRTC")
   if (Date.now() < offUntil) throw new Error("fast previews off")
@@ -52,8 +55,15 @@ export async function playWhep(video: HTMLVideoElement, path: string, opts: { ti
       const check = () => (video.readyState >= 2 && video.videoWidth > 0 ? ok() : setTimeout(check, 100))
       check()
     })
+    // "disconnected" is often a Wi-Fi blip that ICE recovers from: give it DISCONNECT_GRACE_MS before
+    // giving up (the HLS underneath takes over then). "failed"/"closed" end it at once.
+    let grace: ReturnType<typeof setTimeout> | null = null
     pc.addEventListener("connectionstatechange", () => {
-      if (!done && (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed")) { stop(); opts.onFail?.() }
+      if (done) return
+      const st = pc.connectionState
+      if (grace && st !== "disconnected") { clearTimeout(grace); grace = null }
+      if (st === "failed" || st === "closed") { stop(); opts.onFail?.() }
+      else if (st === "disconnected" && !grace) grace = setTimeout(() => { if (!done && pc.connectionState !== "connected") { stop(); opts.onFail?.() } }, DISCONNECT_GRACE_MS)
     })
     return { stop }
   } catch (e) {
