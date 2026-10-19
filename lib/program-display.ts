@@ -79,3 +79,12 @@ export function previewDisplay(input: { now: number; ready: boolean; notReadySin
   if (lastFrameAt === null) return "connecting"
   return now - lastFrameAt > PREVIEW_GAP_MS ? "reconnecting" : "video"
 }
+
+/**
+ * /stream's standby input (prewarmed, not on air, not the hand-over target): paused with a warm buffer
+ * in a plain tab (one decode instead of two). Browser capture keeps it playing: it takes each input's
+ * audio from its own element, so a switch must find the other input's audio already flowing.
+ */
+export function holdStandby(i: { onAir: boolean; incoming: boolean; captureTap: boolean }): boolean {
+  return !i.onAir && !i.incoming && !i.captureTap
+}

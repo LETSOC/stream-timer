@@ -49,3 +49,11 @@ test("LL-HLS stall while MediaMTX still has the publisher: keep the last frame, 
   assert.equal(programDisplay({ ...base, now: 100_000 + READY_STALL_TIMEOUT_MS + 1, ready: true, notReadySince: null }), "standby")
   assert.equal(programDisplay({ ...base, now: 108_000, ready: false, notReadySince: 108_000 - NOT_READY_MS - 1 }), "standby")
 })
+
+test("standby input is held (paused, warm) only in a plain tab: never on air, never the hand-over target, never in Browser capture", async () => {
+  const { holdStandby } = await import("@/lib/program-display")
+  assert.equal(holdStandby({ onAir: false, incoming: false, captureTap: false }), true)
+  assert.equal(holdStandby({ onAir: true, incoming: false, captureTap: false }), false)
+  assert.equal(holdStandby({ onAir: false, incoming: true, captureTap: false }), false)
+  assert.equal(holdStandby({ onAir: false, incoming: false, captureTap: true }), false)
+})

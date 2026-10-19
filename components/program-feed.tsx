@@ -9,7 +9,7 @@ import { PreviewBadge } from "@/components/preview-badge"
 import { useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
-import { keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { holdStandby, keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -44,7 +44,7 @@ function useActiveSince(active: boolean, now: number) {
  * Loads LL-HLS into the <video> while `load`, and reports when the picture last advanced.
  * The element is the same for the player's whole life (WebAudio can attach to it once).
  */
-function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean } = {}) {
+function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; hold?: boolean } = {}) {
   // Operator previews pass stallEvents:false: iOS native LL-HLS fires "waiting"/"stalled" on ordinary
   // part waits, and rebuilding on each one (new src) chopped the deck preview's sound.
   const stallEvents = opts.stallEvents ?? true
@@ -53,6 +53,11 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   // Wi-Fi: constant rebuffering, and the rate changes warp the sound. Standard HLS (whole 1s segments),
   // ~3 s buffer, never speed up. WebRTC stays the low-latency picture.
   const gentle = opts.gentle ?? false
+  // hold (/stream's standby input, plain browser tabs only): keep loading so the buffer is warm, but
+  // keep the element paused, so the page decodes one 1080p feed instead of two. Released → jump to
+  // the live edge and play; the hand-over still waits for its first frames (seamless).
+  const hold = opts.hold ?? false
+  const holdRef = useRef(hold)
   const hlsRef = useRef<Hls | null>(null)
   const [lastFrameAt, setLastFrameAt] = useState<number | null>(null)
   const [latency, setLatency] = useState<number | null>(null)
@@ -73,6 +78,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     // React doesn't reliably apply the `muted` attribute (WebKit): set the property before anything plays.
     video.muted = !wantSoundRef.current()
     const play = () => {
+      if (holdRef.current) return
       video.muted = !wantSoundRef.current()
       video.play().catch(() => {
         // Autoplay with sound refused: keep the picture going muted.
@@ -141,6 +147,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     video.addEventListener("error", onStall)
     const id = window.setInterval(() => {
       const t = video.currentTime
+      if (holdRef.current) { advancedAt = Date.now(); last = t; return }
       if (t !== last && t > 0 && !video.paused) { advancedAt = Date.now(); attempt = 0 }
       // Watchdog: OBS is publishing (load) but the picture hasn't moved for 3s → rebuild, with backoff.
       else if (document.visibilityState === "visible" && Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload()
@@ -166,6 +173,25 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       video.removeEventListener("error", onStall)
     }
   }, [videoRef, load, stallEvents])
+  useEffect(() => {
+    holdRef.current = hold
+    const video = videoRef.current
+    if (!video) return
+    if (hold) {
+      // autoplay / hls.js / the browser can start it again: keep it paused while held.
+      const stop = () => { if (holdRef.current && !video.paused) video.pause() }
+      stop()
+      video.addEventListener("play", stop)
+      video.addEventListener("playing", stop)
+      return () => { video.removeEventListener("play", stop); video.removeEventListener("playing", stop) }
+    }
+    if (!video.paused) return
+    // Back on: from the live edge, not from where it was paused.
+    const live = hlsRef.current?.liveSyncPosition ?? (video.seekable.length ? video.seekable.end(video.seekable.length - 1) - 1 : null)
+    if (live !== null && live !== undefined && Number.isFinite(live) && live > video.currentTime) video.currentTime = live
+    video.muted = !wantSoundRef.current()
+    void video.play().catch(() => { video.muted = true; void video.play().catch(() => undefined) })
+  }, [hold, videoRef])
   return { lastFrameAt, latency }
 }
 
@@ -229,7 +255,11 @@ export function ProgramFeed({ ready, active, muted = false, onDisplay, source = 
   const activeSince = useActiveSince(active, now)
   const load = keepLoaded(ready, notReadySince, now)
   const showing = useRef<ProgramDisplay>("under")
-  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted())
+  // Standby input in a plain tab: paused (warm buffer, no decode). Browser capture keeps both playing:
+  // it takes each input's audio from its element (useCaptureAudioTap), so both must run.
+  const [captureTap] = useState(() => typeof window !== "undefined" && "__programPcm" in window)
+  const hold = holdStandby({ onAir, incoming, captureTap })
+  const { lastFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, () => active && !muted && !isViewerMuted(), { hold })
   useCaptureAudioTap(videoRef, source)
   const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
