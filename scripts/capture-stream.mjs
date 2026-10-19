@@ -474,7 +474,12 @@ let lastScreencastAt = 0
 let freshFrame = false
 // Recent frames with arrival time, so a negative A/V trim can show the picture a little later.
 const frameRing = []
+// Self-reload (page hung): the reloading page paints the countdown under the program before its first
+// frame. Hold the last good frame (the writer keeps repeating it at the same rate, so audio/timeline stay
+// in sync) until the reloaded page sets data-stream-ready (program picture or card up).
+let holdLastFrame = false
 cdp.on("Page.screencastFrame", ({ data, sessionId, metadata }) => {
+  if (holdLastFrame) { cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined); return }
   latest = Buffer.from(data, "base64")
   const arrived = Date.now()
   if (lastScreencastAt) win.maxGap = Math.max(win.maxGap, arrived - lastScreencastAt)
@@ -660,11 +665,14 @@ setInterval(async () => {
   reloads.push(now)
   log(`page heartbeat stalled ${Math.round(quiet / 1000)}s (${hb === -2 ? "page not responding" : "no tick"}); reloading /stream`)
   reloading = true
+  holdLastFrame = true
   try {
     await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 })
     sync.test = false // the overlay went with the old page; the poll re-adds it
     await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 })
+    log("/stream reloaded and ready: live frames again (last good frame held during the reload)")
   } catch { log("reload failed"); void shutdown(9) }
+  holdLastFrame = false
   lastHb = -1
   lastHbAt = Date.now()
   reloading = false
