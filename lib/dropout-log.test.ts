@@ -72,3 +72,48 @@ test("operator marks: events 15s before → 5s after each mark", async () => {
   assert.deepEqual(m[0].context.map((e) => e.msg.slice(0, 11)), ["Backup GONE", "blackout ma", "picture bac"])
   assert.match(formatMark(m[0]), /Blackout marked 10:00:00 .*on desk.*−12\.0s ! \[relay\] Backup GONE/s)
 })
+
+test("operator markers: types round-trip; problem marks are incidents, on-purpose ones label relay lines expected", async () => {
+  const { markIncidents, formatMark, formatMarkers, annotateExpected, correlate, isMark, isRealProblem } = await import("@/lib/dropout-log")
+  const { markMessage, parseMarkMessage, cleanNote } = await import("@/lib/marks")
+  assert.equal(parseMarkMessage(markMessage("frozen", "phone", "Backup", "program", "lower third"))?.type, "frozen")
+  assert.equal(parseMarkMessage(markMessage("main-stopped", "deck", "Main", "countdown (x)"))?.screen, "countdown (x)")
+  assert.equal(parseMarkMessage("blackout marked on desk (on air: Main, screen: program)")?.type, "blackout") // 289670b lines
+  assert.equal(parseMarkMessage("something else"), null)
+  assert.equal(cleanNote("a\nb\u0007  c".padEnd(300, "x")).length, 120)
+  const base = Date.UTC(2026, 10, 4, 10, 0, 0)
+  const ev = parseDropoutLog([
+    dropoutLine(base - 10_000, "!", "relay", "Main /program publisher GONE (RTMP publisher of /program (1.2.3.4:5) closed: EOF)"),
+    dropoutLine(base - 9000, "!", "switch", "auto-failover Main → Backup: Main stalled 3s"),
+    dropoutLine(base, "·", "operator", markMessage("main-stopped", "desk", "Main", "program")),
+    dropoutLine(base + 5000, "!", "relay", "Backup /program-backup publisher GONE (closed: EOF)"), // not stopped: real
+    dropoutLine(base + 6000, "!", "operator", markMessage("audio", "phone", "Backup", "program", "out of sync")),
+    dropoutLine(base + 60_000, "·", "operator", markMessage("main-back", "deck", "Backup", "program")),
+    dropoutLine(base + 65_000, "+", "ingest", "Main READY again"),
+    dropoutLine(base + 200_000, "!", "relay", "Main /program publisher GONE (closed: EOF)"), // after back on + 20s: real
+    dropoutLine(base + 300_000, "·", "operator", markMessage("test-start", "desk", "Main", "program")),
+    dropoutLine(base + 310_000, "!", "capture", "screencast gap 2.0s"),
+    dropoutLine(base + 320_000, "·", "operator", markMessage("test-end", "desk", "Main", "program")),
+  ].join("\n"))
+  const a = annotateExpected(ev)
+  const exp = (s: string) => a.find((e) => e.msg.startsWith(s))?.expected
+  assert.equal(exp("Main /program publisher GONE (RTMP"), "operator stopped Main")
+  assert.equal(exp("auto-failover"), "operator stopped Main")
+  assert.equal(exp("Backup /program-backup"), undefined)
+  assert.equal(exp("Main READY"), "operator stopped Main")
+  assert.equal(a.filter((e) => e.msg === "Main /program publisher GONE (closed: EOF)")[0].expected, undefined)
+  assert.equal(exp("screencast gap"), "operator test")
+  assert.deepEqual(a.filter(isRealProblem).map((e) => e.msg.slice(0, 14)), ["Backup /progra", "Main /program "])
+  // Only the audio mark is an incident; stop / back / test are markers.
+  const m = markIncidents(ev)
+  assert.equal(m.length, 1)
+  assert.match(formatMark(m[0]), /^Audio problem \(drop\/out of sync\) marked 10:00:06 \(London\) · on phone .*note: out of sync/)
+  assert.match(formatMark(m[0]), /Main stalled 3s {2}← expected \(operator stopped Main\)/)
+  const markers = formatMarkers(ev)
+  assert.equal(markers.length, 4)
+  assert.match(markers[0], /^10:00:00 · Main stopped on purpose · on desk .* 2 problem line\(s\) labelled expected/)
+  assert.match(markers[2], /Test start .* 1 problem line/)
+  // Incidents skip expected lines.
+  const inc = correlate(a.filter((e) => !isMark(e)))
+  assert.deepEqual(inc.map((i) => i.problems.length), [1, 1])
+})
