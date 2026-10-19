@@ -241,6 +241,16 @@ html:has([data-desk-root]) body {
   min-width: 0;
   max-width: 100%;
 }
+/* min-width: 0 lets a flex row squash a checkbox to the leftover width, so a
+   long label and a short one render different control sizes. */
+[data-desk-root] input[type="checkbox"],
+[data-desk-root] input[type="radio"] {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  min-width: 1rem;
+  max-width: none;
+}
 [data-desk-root] input[type="date"],
 [data-desk-root] input[type="time"],
 [data-desk-root] input[type="datetime-local"] {
