@@ -83,3 +83,13 @@ test("social + countdown stroke options clamp and validate colours", () => {
   assert.equal(s.countdownStrokeColor, "#abc")
   assert.equal(s.socialSpotlight, false)
 })
+
+test("feed-lost standby card: public default text (no technical words), editable, kept on parse", async () => {
+  const { DEFAULT_STAGE: D, parseStage: parse } = await import("@/lib/stage")
+  assert.equal(D.standbyTitle, "We'll be right back")
+  assert.doesNotMatch(`${D.standbyTitle} ${D.standbyMessage}`, /OBS|feed|relay|stream key/i)
+  const s = parse({ standbyTitle: "Back in a moment", standbyMessage: "Hang tight" })
+  assert.equal(s.standbyTitle, "Back in a moment")
+  assert.equal(s.standbyMessage, "Hang tight")
+  assert.equal(parse({}).standbyTitle, D.standbyTitle)
+})
