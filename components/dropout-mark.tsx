@@ -5,7 +5,7 @@
  * after, YouTube runs behind); on-purpose marks (stopped / back on / test) label the relay lines they
  * cause as expected. The desk's "Dropout log" section lists them with a Copy all button.
  */
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { copyText } from "@/lib/copy-text"
 import { MARK_TYPES, NOTE_MAX, type MarkPage, type MarkType } from "@/lib/marks"
 
@@ -34,11 +34,26 @@ const GROUPS: { title: string; types: MarkType[]; problem?: boolean }[] = [
 export function MarkMenu({ onMark, dark = false, disabled = false }: { onMark: (type: MarkType, note: string) => void; dark?: boolean; disabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState("")
+  // Fixed to the viewport (anchored to the pill): the desk cards clip (overflow-hidden), and the menu
+  // is taller than the space under the pill. Opens upward when there is more room above.
+  const pillRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<CSSProperties>({})
+  const place = () => {
+    const r = pillRef.current?.getBoundingClientRect()
+    if (!r) return
+    const below = window.innerHeight - r.bottom
+    const right = Math.max(8, window.innerWidth - r.right)
+    setPos(below >= 420 || below >= r.top ? { top: r.bottom + 4, right, maxHeight: below - 12 } : { bottom: window.innerHeight - r.top + 4, right, maxHeight: r.top - 12 })
+  }
+  const toggle = () => { if (!open) place(); setOpen((o) => !o) }
   useEffect(() => {
     if (!open) return
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false) }
+    // Follow the pill if the page scrolls / resizes (phone keyboard for the note) instead of closing.
     window.addEventListener("keydown", key)
-    return () => window.removeEventListener("keydown", key)
+    window.addEventListener("scroll", place, true)
+    window.addEventListener("resize", place)
+    return () => { window.removeEventListener("keydown", key); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place) }
   }, [open])
   const pick = (type: MarkType) => { onMark(type, note.trim()); setNote(""); setOpen(false) }
   const t = dark
@@ -46,7 +61,7 @@ export function MarkMenu({ onMark, dark = false, disabled = false }: { onMark: (
     : { pill: "border border-black/15 text-black/60", menu: "bg-white text-black ring-1 ring-black/10 shadow-lg", head: "text-black/45", chip: "bg-[#f1f0ec] text-black", bad: "bg-[#b42318]/10 text-[#b42318]", field: "bg-[#f1f0ec] text-black placeholder:text-black/35" }
   return (
     <div className="relative">
-      <button type="button" data-testid="mark-menu" aria-expanded={open} aria-haspopup="menu" disabled={disabled} onClick={() => setOpen((o) => !o)}
+      <button ref={pillRef} type="button" data-testid="mark-menu" aria-expanded={open} aria-haspopup="menu" disabled={disabled} onClick={toggle}
         title="Saw something on YouTube, or stopping something on purpose? Mark the time in the dropout log (npm run dropouts / Dropout log)."
         className={`rounded-full px-2 py-0.5 font-mono text-[11px] disabled:opacity-50 ${t.pill}`}>
         ⚑ Mark
@@ -54,7 +69,7 @@ export function MarkMenu({ onMark, dark = false, disabled = false }: { onMark: (
       {open ? (
         <>
           <button type="button" aria-label="Close" tabIndex={-1} className="fixed inset-0 z-30 cursor-default" onClick={() => setOpen(false)} />
-          <div role="menu" data-testid="mark-menu-panel" className={`absolute top-full right-0 z-40 mt-1 w-64 space-y-2 rounded-xl p-2.5 font-mono text-[11px] ${t.menu}`}>
+          <div role="menu" data-testid="mark-menu-panel" style={pos} className={`fixed z-40 w-72 max-w-[calc(100vw-16px)] space-y-2 overflow-y-auto overscroll-contain rounded-xl p-2.5 font-mono text-[11px] ${t.menu}`}>
             {GROUPS.map((g) => (
               <div key={g.title}>
                 <p className={`mb-1 text-[10px] tracking-[0.1em] uppercase ${t.head}`}>{g.title}</p>
