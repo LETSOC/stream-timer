@@ -107,3 +107,15 @@ export function previewDisplay(input: { now: number; ready: boolean; notReadySin
 export function holdStandby(i: { onAir: boolean; incoming: boolean; captureTap: boolean }): boolean {
   return !i.onAir && !i.incoming && !i.captureTap
 }
+
+/**
+ * Browser capture start (<html data-stream-ready>, which scripts/capture-stream.mjs waits for before its
+ * first screenshot / screencast frame): when the operator has Program up, wait for the program layer to
+ * cover the screen (first frame, or its own standby rules) so a (re)started capture never opens on the
+ * countdown underneath. Capped well under the script's 15s wait.
+ */
+export const CAPTURE_FIRST_FRAME_WAIT_MS = 8000
+export function captureStartReady(i: { capturePage: boolean; blocked: boolean; screen: string; shownScreen: string; waitedMs: number }): boolean {
+  if (!i.capturePage || i.blocked || i.screen !== "program") return true
+  return i.shownScreen === "program" || i.waitedMs >= CAPTURE_FIRST_FRAME_WAIT_MS
+}

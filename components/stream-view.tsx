@@ -2,7 +2,7 @@
 
 import { StreamAudioOverlay } from "@/components/stream-audio-overlay"
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { playerDiag } from "@/lib/player-diag"
+import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EndStreamPage } from "@/app/end/page"
@@ -16,7 +16,7 @@ import { StageGuides } from "@/components/stage-guides"
 import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
-import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
+import { captureStartReady, handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { endInstant } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 import { SyncTestOverlay } from "@/components/sync-test-overlay"
@@ -49,13 +49,13 @@ type Stage = StageOptions
 /**
  * Capture watchdog hooks (scripts/capture-stream.mjs): window.__hb ticks every second even on a
  * static LIVE/end/hold screen (where Chrome may send no repaints), and <html data-stream-ready>
- * marks that the client view has mounted. Harmless for OBS.
+ * marks that the client view has mounted and shows what the operator picked (StreamView: on the
+ * capture page with Program up, only once the program's first frame is up). Harmless for OBS.
  */
 function useCaptureHeartbeat() {
   useEffect(() => {
     const w = window as unknown as { __hb?: number }
     w.__hb = 0
-    document.documentElement.dataset.streamReady = "1"
     const id = window.setInterval(() => { w.__hb = (w.__hb ?? 0) + 1 }, 1000)
     return () => window.clearInterval(id)
   }, [])
@@ -212,6 +212,18 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   if (seen.screen !== screen) setSeen({ screen, lastOther: seen.screen !== "program" ? seen.screen : seen.lastOther })
   const shownScreen = screen === "program" && programDisplay === "under" ? (seen.screen !== "program" ? seen.screen : seen.lastOther) : screen
   const ended = shownScreen === "end"
+  // Browser capture (re)start: its first frame is taken once <html data-stream-ready> is set. With
+  // Program up, wait for the program picture (≤ 8s) so the output never opens on the countdown underneath.
+  const [capturePage] = useState(() => isCapturePage())
+  const [mountedAt] = useState(() => Date.now())
+  const startReady = captureStartReady({ capturePage, blocked, screen, shownScreen, waitedMs: nowMs - mountedAt })
+  useEffect(() => {
+    if (!startReady || document.documentElement.dataset.streamReady) return
+    document.documentElement.dataset.streamReady = "1"
+    const waited = Date.now() - mountedAt
+    if (capturePage && screen === "program") playerDiag("·", `capture start held ${waited}ms for the program picture (${shownScreen !== "program" ? "gave up after 8s" : programDisplay === "video" ? "first frame up" : "no feed: \"Waiting for OBS\" card"}): the output doesn't open on the countdown`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when ready
+  }, [startReady])
   // Browser capture reads this to switch its audio to the OBS program feed (only once its picture is up).
   useEffect(() => {
     document.documentElement.dataset.screen = shownScreen

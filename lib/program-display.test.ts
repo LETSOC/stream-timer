@@ -99,3 +99,15 @@ test("re-arm hold: a disarm/arm cycle (auto re-arm or the desk buttons) freezes 
   assert.equal(rearmHoldLeft(h, 1000 + REARM_HOLD_MS + 1), 0)
   assert.ok(REARM_HOLD_MS >= 10_000 && REARM_HOLD_MS <= 15_000)
 })
+
+test("capture start: with Program up, the (re)started Browser capture waits for the program picture (≤ 8s), never opens on the countdown", async () => {
+  const { captureStartReady, CAPTURE_FIRST_FRAME_WAIT_MS } = await import("@/lib/program-display")
+  const b = { capturePage: true, blocked: false, screen: "program", shownScreen: "countdown", waitedMs: 900 }
+  assert.equal(captureStartReady(b), false) // 14:59:40: countdown under, program's first frame not up yet
+  assert.equal(captureStartReady({ ...b, shownScreen: "program" }), true)
+  assert.equal(captureStartReady({ ...b, waitedMs: CAPTURE_FIRST_FRAME_WAIT_MS }), true)
+  assert.equal(captureStartReady({ ...b, screen: "countdown" }), true)
+  assert.equal(captureStartReady({ ...b, capturePage: false }), true) // OBS Browser Source / plain tab: unchanged
+  assert.equal(captureStartReady({ ...b, blocked: true }), true) // the script must still see "View key required"
+  assert.ok(CAPTURE_FIRST_FRAME_WAIT_MS < 15_000) // capture-stream.mjs waits 15s for the marker
+})
