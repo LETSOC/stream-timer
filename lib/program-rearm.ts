@@ -88,3 +88,22 @@ export function noteProgramDisarm(now = Date.now()) {
 export function rearmHoldLeftMs(now = Date.now()): number {
   return rearmHoldLeft((globalThis as HoldHolder)[HOLD_KEY] ?? NO_REARM_HOLD, now)
 }
+
+// ---------- planned "back on" / manual Arm: no auto re-arm right after ----------
+/** After an operator "Main/Backup back on" mark (that input) or a manual Arm (both), auto re-arm waits this long. */
+export const PLANNED_BACK_MS = 60_000
+export type PlannedBack = Record<"main" | "backup", number | null>
+/** Pure: why auto re-arm of `source` is skipped now (null = not skipped). */
+export function plannedBackSkip(p: PlannedBack, source: "main" | "backup", now: number): { why: string; agoSec: number } | null {
+  const at = p[source]
+  if (at === null || now - at > PLANNED_BACK_MS || now < at) return null
+  return { why: "planned back on / manual arm", agoSec: Math.round((now - at) / 1000) }
+}
+const PLAN_KEY = Symbol.for("stream-timer.planned-back")
+type PlanHolder = { [PLAN_KEY]?: PlannedBack }
+export function notePlannedBack(source: "main" | "backup" | "both", now = Date.now()) {
+  const h = globalThis as PlanHolder
+  const cur = h[PLAN_KEY] ?? { main: null, backup: null }
+  h[PLAN_KEY] = source === "both" ? { main: now, backup: now } : { ...cur, [source]: now }
+}
+export const plannedBack = (): PlannedBack => (globalThis as PlanHolder)[PLAN_KEY] ?? { main: null, backup: null }

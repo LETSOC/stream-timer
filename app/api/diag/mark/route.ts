@@ -4,6 +4,7 @@ import { dlog, londonParts } from "@/lib/dropout-log"
 import { readServerState } from "@/lib/event-server"
 import { cleanNote, isMarkType, isProblemType, MARK_PAGES, MARK_TYPES, markMessage, type MarkPage, type MarkType } from "@/lib/marks"
 import { stageScreen } from "@/lib/stage"
+import { notePlannedBack } from "@/lib/program-rearm"
 
 /**
  * ⚑ Mark (desk / deck / phone): one "[operator]" line in the dropout log with the type, page, what was
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
   last.set(type, now)
   const stage = readServerState().stage
   const onAir = stage.programSource === "backup" ? "Backup" : "Main"
+  if (type === "main-back" || type === "backup-back") notePlannedBack(type === "main-back" ? "main" : "backup", now) // no auto re-arm right after
   dlog(isProblemType(type) ? "!" : "·", "operator", markMessage(type, page, onAir, stageScreen(stage, false), note), now)
   return Response.json({ ok: true, at: now, time: londonParts(now).time.slice(0, 8), type, label: MARK_TYPES[type].label })
 }

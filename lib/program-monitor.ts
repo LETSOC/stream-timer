@@ -10,7 +10,7 @@ import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type Fail
 import fs from "node:fs"
 import path from "node:path"
 import { syncMdns } from "@/lib/mdns"
-import { FRESH_REARM, noteRelayDisruption, rearmStep, relayQuietUntil, type RearmMemory } from "@/lib/program-rearm"
+import { FRESH_REARM, noteRelayDisruption, plannedBack, plannedBackSkip, rearmStep, relayQuietUntil, type RearmMemory } from "@/lib/program-rearm"
 import { armProgram, disarmProgram, programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
@@ -196,6 +196,13 @@ function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: 
   m.downAt = downAt
   if (!fire) return
   const label = SOURCE_LABEL[active]
+  // Operator just brought it back on purpose (back-on mark / manual Arm): the reconnect is planned, don't kick it again.
+  const skip = plannedBackSkip(plannedBack(), active, now)
+  if (skip) {
+    plog(`auto re-arm skipped (${skip.why} ${skip.agoSec}s ago)`)
+    dlog("·", "rearm", `${label}: auto re-arm skipped (${skip.why} ${skip.agoSec}s ago)`)
+    return
+  }
   plog(`${label} reconnected → auto re-arm`)
   dlog("!", "rearm", `${label} reconnected → auto re-arm: disarming /program + /program-backup for ~1.5s (publishers kicked; OBS reconnects; /stream and the previews hold the last frame, "Waiting for OBS" only if OBS is still away after ~15s)`)
   m.rearming = true
