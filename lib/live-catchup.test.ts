@@ -37,7 +37,7 @@ test("settle: after a stall leaves it 1.4s behind, catches up gently and reports
   let started = false
   for (; t < 20000; t += 150) { const s = settleTick(st, 3530, 2, t); if (s.event?.kind === "start") started = true }
   assert.ok(started)
-  assert.ok(st.floorMs! >= 2100 && st.floorMs! < 2200) // floor creeps 1ms/sample while waiting
+  assert.equal(st.floorMs, 2000) // capped at the configured target
   let lat = 3530, done = null as null | number
   for (; t < 80000 && done === null; t += 150) { const s = settleTick(st, lat, 2, t); if (s.rate === SETTLE_RATE) lat -= 150 * 0.05; if (s.event?.kind === "done") done = s.event.toMs }
   assert.ok(done !== null && done <= 2400, `settled at ${done}`)
@@ -56,4 +56,20 @@ test("settle: a short blip doesn't start it; thin buffer aborts", () => {
   let again = false
   for (let t = 70000; t < 95000; t += 150) if (settleTick(st, 3000, 2, t).event?.kind === "start") again = true
   assert.ok(again)
+})
+
+test("settle: a restart that starts at 3.5s never learns 3.5s as normal (target 2s)", () => {
+  const st = newSettle()
+  let t = 0, started = false
+  for (; t < 15000; t += 150) if (settleTick(st, 3500, 2, t).event?.kind === "start") started = true
+  assert.ok(started)
+  assert.ok(st.floorMs! <= 2000)
+})
+
+test("settle: a learned base lower than the target is kept", () => {
+  const st = newSettle()
+  for (let t = 0; t < 5000; t += 150) settleTick(st, 1400, 2, t)
+  assert.equal(st.floorMs, 1400)
+  for (let t = 5000; t < 16000; t += 150) settleTick(st, 2000, 2, t)
+  assert.equal(st.active, true)
 })

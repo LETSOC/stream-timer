@@ -36,6 +36,12 @@ export function liveTarget(liveSync: number | null | undefined, bufferedEnd: num
  * audio follows with its normal small splices. Pure, unit-tested.
  */
 export const SETTLE_OVER_MS = 500
+/**
+ * Configured on-air target (wall-clock, playingDate): hls.js liveSyncDurationCount 1 × 1s MediaMTX
+ * segments + ~1s publish/segmenting = ~2s (2.1s in healthy logs). The learned base is used only when it
+ * is LOWER; a value above this is never "normal" (20:01: a capture restart relearned 3.5s and sat there).
+ */
+export const SETTLE_TARGET_MS = 2000
 export const SETTLE_SUSTAIN_MS = 10000
 export const SETTLE_DONE_MS = 200
 export const SETTLE_RATE = 1.05
@@ -52,12 +58,13 @@ export const newSettle = (): SettleState => ({ floorMs: null, overSince: null, a
 export type SettleStep = { rate: number; event: null | { kind: "start" | "done" | "abort"; fromMs: number; toMs: number; floorMs: number; tookMs: number } }
 
 /** Feed one latency sample (+ seconds buffered ahead); returns the playbackRate to use (mutates `st`). */
-export function settleTick(st: SettleState, latencyMs: number | null, aheadS: number, now: number): SettleStep {
+export function settleTick(st: SettleState, latencyMs: number | null, aheadS: number, now: number, targetMs: number = SETTLE_TARGET_MS): SettleStep {
   if (latencyMs === null) return { rate: st.active ? SETTLE_RATE : 1, event: null }
   // The floor follows the best latency seen, and creeps up slowly (1ms per sample) so a new path that is
   // genuinely slower (e.g. another input) becomes the target instead of being chased forever.
   if (!st.active) st.floorMs = st.floorMs === null ? Math.max(SETTLE_MIN_FLOOR_MS, latencyMs) : Math.max(SETTLE_MIN_FLOOR_MS, Math.min(latencyMs, st.floorMs + 1))
-  const floor = st.floorMs ?? latencyMs
+  if (st.floorMs !== null && st.floorMs > targetMs) st.floorMs = targetMs
+  const floor = Math.min(st.floorMs ?? latencyMs, targetMs)
   if (st.active) {
     if (latencyMs <= floor + SETTLE_DONE_MS) {
       st.active = false; st.overSince = null
