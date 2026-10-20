@@ -16,6 +16,7 @@ import path from "node:path"
 import { ffmpegAvailable, killGroup, pidRunsScript, redact, relayChildEnv } from "@/lib/encoder"
 import { addVerticalForwards, deriveForwardState, ensureRelayServer, findRelayLoops, mediamtxPathStats, reconcileRelay, relayPublishUrl, relayReadUrl, VERTICAL_PATH, type ForwardState } from "@/lib/relay"
 import { listDestinations } from "@/lib/rtmp-destinations"
+import { dlog } from "@/lib/dropout-log"
 import { EMPTY_HEALTH, type HealthStats } from "@/lib/stream-health"
 
 export const VERTICAL_W = 1080
@@ -67,6 +68,11 @@ export function videoArgs(encoder: "libx264" | "videotoolbox"): string[] {
   // VideoToolbox: hardware encode on the Mac (a fraction of libx264's CPU). maxrate/bufsize cap the rate; -realtime keeps up.
   if (encoder === "videotoolbox") return ["-c:v", "h264_videotoolbox", "-realtime", "1", "-allow_sw", "1", "-prio_speed", "1", "-profile:v", "high", ...cbr, "-bf", "0", "-g", gop, "-force_key_frames", `expr:gte(t,n_forced*${VERTICAL_GOP_SEC})`]
   return ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-profile:v", "high", ...cbr, "-x264-params", "nal-hrd=cbr:force-cfr=1", "-g", gop, "-keyint_min", gop, "-sc_threshold", "0", "-force_key_frames", `expr:gte(t,n_forced*${VERTICAL_GOP_SEC})`]
+}
+
+/** Dropout-log line at vertical start: which encoder it really runs. */
+export function verticalEncoderNote(encoder: "libx264" | "videotoolbox", audioCopy: boolean): string {
+  return `encoder (vertical): ${encoder === "videotoolbox" ? "h264_videotoolbox (rate-capped)" : "libx264 (constant bitrate)"}, ${VERTICAL_W}x${VERTICAL_H}@${VERTICAL_FPS}, ${VERTICAL_KBPS}k, audio ${audioCopy ? "copy" : "AAC"}`
 }
 
 export function audioArgs(copy: boolean): string[] {
@@ -214,6 +220,7 @@ export function startVertical(): Promise<VerticalResult> {
     child.unref()
     if (!child.pid) return { ok: false, status: 500, error: "Could not start the vertical ffmpeg." }
     writePrivate(file("vertical.json"), JSON.stringify({ pid: child.pid, startedAt: Date.now(), tag, relay: true, encoder, audioCopy, bg: settings.bg, command: redactCommand(command) } satisfies Pidfile))
+    dlog("·", "capture", verticalEncoderNote(encoder, audioCopy))
     // Ticked /vertical forwards start as soon as the encoder is up (they wait for the path, then connect).
     void reconcileRelay(true).catch(() => undefined)
     return { ok: true, note: `Vertical started → relay /vertical (${encoder}, audio ${audioCopy ? "copy" : "AAC"}). Ticked destinations connect as soon as /vertical is publishing.` }

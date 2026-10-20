@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { correlate, dropoutLine, londonParts, parseDropoutLog, redact } from "@/lib/dropout-log"
-import { avLine, captureChromeNote, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
+import { avLine, captureChromeNote, captureEncoderNote, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
 
 test("dropout lines use London time (BST in October, GMT in November)", () => {
   assert.equal(dropoutLine(Date.UTC(2026, 9, 19, 9, 59, 1, 234), "!", "relay", "Main gone"), "2026-10-19 10:59:01.234 ! [relay] Main gone")
@@ -172,4 +172,11 @@ test("captureChromeNote: planned refresh is info, relaunch is trouble, ready is 
   assert.equal(captureChromeNote("[capture 07:29:14] [chrome] /stream ready in the new browser after 3.9s: live frames again")?.level, "+")
   assert.equal(captureChromeNote("[capture 07:29:14] page heartbeat stalled 15s"), null)
   assert.equal(captureChromeNote("[capture 10:35:41] [chrome] relaunching the capture browser: planned refresh (holding the last good frame)")?.level, "·")
+})
+
+test("capture start line → encoder note", () => {
+  assert.deepEqual(captureEncoderNote("[capture 14:00:01] starting 1920x1080 @ 30fps, 4500k, h264_videotoolbox (constant bitrate), keyframe every 2s"), { level: "·", text: "encoder (HD capture): h264_videotoolbox (constant bitrate), 1920x1080@30, 4500k" })
+  assert.equal(captureEncoderNote("[capture 14:00:01] starting 1280x720 @ 30fps, 3000k, libx264, keyframe every 2s")?.text, "encoder (HD capture): libx264, 1280x720@30, 3000k")
+  assert.equal(captureEncoderNote("[capture 14:00:01] VideoToolbox here can't do constant bitrate (needs FFmpeg 6.1+)")?.level, "!")
+  assert.equal(captureEncoderNote("[capture 14:00:01] something else"), null)
 })

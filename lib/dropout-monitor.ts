@@ -67,6 +67,13 @@ export function pushTrouble(p: { speed: number | null; kbps: number | null }, no
 }
 
 /** Pure: capture "[chrome]" lines (browser relaunch / planned refresh) → dropout note. null = not one. */
+/** The capture's own start lines (scripts/capture-stream.mjs stderr) → "encoder: …" for the dropout log. */
+export function captureEncoderNote(line: string): { level: DropLevel; text: string } | null {
+  const m = /starting (\d+x\d+) @ (\d+)fps, (\d+)k, ([\w-]+)( \((?:constant|average) bitrate\))?/.exec(line)
+  if (m) return { level: "·", text: `encoder (HD capture): ${m[4]}${m[5] ?? ""}, ${m[1]}@${m[2]}, ${m[3]}k` }
+  if (/VideoToolbox here can't do constant bitrate/.test(line)) return { level: "!", text: "encoder (HD capture): VideoToolbox can't do constant bitrate here (average bitrate: a static page may send well under the set rate; libx264 pads to constant)" }
+  return null
+}
 export function captureChromeNote(line: string): { level: DropLevel; text: string } | null {
   const m = /\[chrome\] (.*)$/.exec(line.trim())
   if (!m) return null
@@ -267,7 +274,8 @@ function pollCapture(s: State, now: number) {
   primeTail(files.log, s.capTail)
   for (const line of readNew(files.log, s.capTail)) {
     if (/frame=\s*\d+.*speed=/.test(line) || !line.trim()) continue
-    const chrome = captureChromeNote(line)
+    const enc = captureEncoderNote(line)
+    const chrome = enc ?? captureChromeNote(line)
     if (chrome) dlog(chrome.level, "capture", chrome.text)
     else if (/\[audio\] program audio resync/.test(line)) dlog("·", "capture", line.trim().replace(/^\[capture [^\]]+\] /, "").slice(0, 200))
     else if (/heartbeat stalled|reload|crash|could not|failed|restarting capture|exited|timed out|Broken pipe|Connection (reset|refused)|Error/i.test(line)) dlog("!", "capture", line.trim().slice(0, 220))
