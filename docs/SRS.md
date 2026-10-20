@@ -1,34 +1,53 @@
 # SRS experiment
 
-This branch (`exp/srs`) is for evaluating [SRS](https://github.com/ossrs/srs) (MIT) as a side-by-side or alternative to MediaMTX, mainly for the Backup SRT path.
+This branch (`exp/srs`) is for evaluating [SRS](https://github.com/ossrs/srs) (MIT) as a side-by-side Backup 2 / Backup 3 ingest, mainly for the noisy SRT path.
 
-**Does not touch** the MediaMTX relay in `lib/relay.ts` or the browser capture path. Main / `fix/capture-health` stay unchanged.
+**Does not touch** the MediaMTX relay in `lib/relay.ts` or the browser capture path.
 
-## Why SRS
+## Config
 
-From the 20 Oct logs:
-- Backup SRT is the noisy part (RTT spikes, packet loss, `PIPELINE_ERROR_DECODE`, HLS part-duration changes).
-- Capture + VideoToolbox is otherwise holding real-time.
-- MediaMTX is already MIT and solid for the local relay. SRS is the main peer worth testing for SRT resilience.
+`scripts/srs.conf` — listens on ports that do not collide with MediaMTX.
 
-## Plan
+| Service | Port | MediaMTX equivalent |
+|---------|------|---------------------|
+| RTMP    | 19360 | 19350 |
+| SRT     | 10080/udp | 8890 |
+| HTTP/HLS| 8088 | 18888 |
+| API     | 1985 | 19997 |
 
-1. Run SRS on a different port set (e.g. RTMP 19360, SRT 10080, HTTP 8088) so it does not collide with MediaMTX (19350 / 8890 / 18888).
-2. Point only the Backup OBS (or a test publisher) at the SRS SRT/RTMP listener.
-3. Have SRS output HLS or RTMP that the existing player / capture can optionally consume.
-4. Compare SRT behaviour (latency, loss, reconnect) against the MediaMTX Backup path.
+## OBS (Backup 2 or Backup 3)
 
-## Ports (proposed, unused by stream-timer)
+**RTMP (simplest)**
 
-| Service | Port | Notes |
-|---------|------|-------|
-| RTMP    | 19360 | local only |
-| SRT     | 10080 | Backup test |
-| HTTP/HLS| 8088  | preview |
-| API     | 1985  | SRS default |
+- Server: `rtmp://<show-mac-lan-ip>:19360/live`
+- Stream Key: `backup2` or `backup3`
 
-## Next steps
+**SRT (optional)**
 
-- Add `scripts/srs.conf` (minimal SRT + RTMP + HLS).
-- Optional: a small `scripts/srs-loop.sh` or supervisor entry that starts/stops SRS independently of MediaMTX.
-- Keep MediaMTX as the production relay until SRS proves better on the Backup link.
+```
+srt://<show-mac-lan-ip>:10080?streamid=#!::r=live/backup2,m=publish
+```
+
+## Start SRS
+
+Docker (recommended for a quick test):
+
+```bash
+docker run --rm -it \
+  -p 19360:19360 -p 8088:8088 -p 1985:1985 -p 10080:10080/udp \
+  -v "$PWD/scripts/srs.conf:/usr/local/srs/conf/srs.conf" \
+  ossrs/srs:5 ./objs/srs -c conf/srs.conf
+```
+
+Or a local binary: `./objs/srs -c scripts/srs.conf`
+
+## Test playback
+
+- RTMP: `rtmp://127.0.0.1:19360/live/backup2`
+- HTTP-FLV: `http://127.0.0.1:8088/live/backup2.flv`
+- HLS: `http://127.0.0.1:8088/live/backup2.m3u8`
+- Streams list: `http://127.0.0.1:1985/api/v1/streams/`
+
+## Next
+
+Once a feed is stable on SRS, we can optionally have the existing player or a capture path read from `rtmp://127.0.0.1:19360/live/backup2` instead of (or as a third source beside) MediaMTX `/program-backup`.
