@@ -86,7 +86,7 @@ export function useVertical() {
 }
 
 /** Desk › Encoder: the Vertical (9:16) output card. */
-export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest[]; pillClass: PillClass; onDestsChanged?: () => void }) {
+export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { dests: Dest[]; pillClass: PillClass; onDestsChanged?: () => void; /** opens the desk's Saved destinations editor */ onEdit?: (id: string) => void }) {
   const { view, act } = useVertical()
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
@@ -145,11 +145,14 @@ export function VerticalCard({ dests, pillClass, onDestsChanged }: { dests: Dest
           const blocked = Boolean(reason) && !checked
           return (
             <div key={d.id} data-testid={`vertical-dest-row-${d.id}`} data-blocked={blocked ? "1" : "0"} data-state={fwd?.state ?? "off"} className="space-y-0.5">
-              <label className={`flex items-center gap-2 ${blocked ? "cursor-not-allowed" : "cursor-pointer text-black"}`}>
+              <div className="flex items-center gap-2">
+              <label className={`flex min-w-0 flex-1 items-center gap-2 ${blocked ? "cursor-not-allowed" : "cursor-pointer text-black"}`}>
                 <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || busy === `fwd-${d.id}` || !path} checked={checked} onChange={(e) => void toggle(d.id, e.target.checked)} />
                 <span className="min-w-0"><span className="font-bold">{d.name}</span> · {d.host}</span>
                 {fwd ? <span data-testid={`vertical-fwd-state-${d.id}`} className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${tone(fwd.state)}`}>{FORWARD_STATE_LABEL[fwd.state]}{fwd.reconnects ? ` · ${fwd.reconnects}↻` : ""}</span> : null}
               </label>
+              {onEdit ? <button type="button" data-testid={`vertical-dest-edit-${d.id}`} title="Edit name / server / stream key (Saved destinations, right column)" className="shrink-0 text-[11px] text-black/50 underline underline-offset-2 hover:text-black" onClick={() => onEdit(d.id)}>Edit</button> : null}
+              </div>
               {fwd && fwd.state === "forwarding" && fwd.health.kbps !== null ? <p className="pl-6 text-[11px] text-[#0f6b31]">{fwd.health.fps !== null ? `${fwd.health.fps.toFixed(1)} fps · ` : ""}{fwd.health.kbps}k{fwd.health.speed ? ` · ${fwd.health.speed.toFixed(2)}x` : ""}</p> : null}
               {fwd?.error && fwd.state !== "forwarding" ? <p title={fwd.rawError ?? undefined} data-testid={`vertical-fwd-error-${d.id}`} className={`pl-6 text-[11px] font-bold ${fwd.state === "waiting" ? "text-black/60" : "text-[#8a1c13]"}`}>{fwd.error}</p> : null}
               {blocked ? <p data-testid={`vertical-dest-reason-${d.id}`} className="pl-6 text-[11px] font-bold text-[#8a4b06]">{reason}</p> : null}
