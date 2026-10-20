@@ -60,3 +60,46 @@ test("drawtext detection from ffmpeg -filters", async () => {
   assert.equal(hasDrawtextFilter(" ... drawbox           V->V       Draw a box\n T.C drawtext          V->V       Draw text on top of video frames using libfreetype library.\n"), true)
   assert.equal(hasDrawtextFilter(" ... drawbox           V->V       Draw a box\n ... drawgrid          V->V       Draw a grid\n"), false)
 })
+
+test("edit: new key, keep key when blank, rename only, validation, duplicates, display masking", () => {
+  const a = d.addDestination("YouTube HD", "rtmp://a.rtmp.youtube.com/live2/old-key-1234")
+  const b = d.addDestination("Restream", "rtmp://live.restream.io/live/re_other_5678")
+  assert.ok(a.ok && b.ok)
+  if (!a.ok || !b.ok) return
+  assert.equal(a.value.display, "rtmp://••••••••/live2/••••••••1234")
+  assert.ok(!JSON.stringify(d.listDestinations()).includes("old-key"))
+  const info = d.destinationEditInfo(a.value.id)
+  assert.deepEqual(info, { id: a.value.id, name: "YouTube HD", server: "rtmp://a.rtmp.youtube.com/live2", keyTail: "1234", keyKind: "path" })
+  // new key only
+  const k = d.updateDestination(a.value.id, { name: "YouTube HD", server: "rtmp://a.rtmp.youtube.com/live2", key: " new-key-9999 " })
+  assert.ok(k.ok && k.changed)
+  assert.equal(d.resolveDestination(a.value.id)?.url, "rtmp://a.rtmp.youtube.com/live2/new-key-9999")
+  // blank key keeps it; server change applies; rename only → changed false
+  const s = d.updateDestination(a.value.id, { name: "YouTube HD", server: "rtmps://a.rtmps.youtube.com/live2", key: "" })
+  assert.ok(s.ok && s.changed)
+  assert.equal(d.resolveDestination(a.value.id)?.url, "rtmps://a.rtmps.youtube.com/live2/new-key-9999")
+  const r = d.updateDestination(a.value.id, { name: "YouTube main", server: "", key: "" })
+  assert.ok(r.ok && !r.changed && r.value.name === "YouTube main")
+  // bad inputs
+  for (const server of ["javascript:alert(1)", "http://a.rtmp.youtube.com/live2", "file:///etc/passwd", "srt://a.example:9000"]) {
+    const bad = d.updateDestination(a.value.id, { name: "x", server, key: "k" })
+    assert.equal(bad.ok, false, server)
+  }
+  const srt = d.updateDestination(a.value.id, { name: "x", server: "srt://host:9000", key: "" })
+  assert.ok(!srt.ok && /SRT/.test(srt.error))
+  assert.equal(d.updateDestination(a.value.id, { name: "", server: "", key: "" }).ok, false)
+  assert.equal(d.updateDestination(a.value.id, { name: "x", key: "has space" }).ok, false)
+  assert.equal(d.updateDestination("nope", { name: "x" }).ok, false)
+  const dup = d.updateDestination(a.value.id, { name: "x", server: "rtmp://live.restream.io/live", key: "re_other_5678" })
+  assert.ok(!dup.ok && dup.status === 409)
+  assert.equal(d.resolveDestination(a.value.id)?.url, "rtmps://a.rtmps.youtube.com/live2/new-key-9999", "failed edits change nothing")
+  // ?password= keys
+  const c = d.addDestination("Castr pw", "rtmp://uk.castr.io/static?password=pw-secret-77")
+  assert.ok(c.ok)
+  if (!c.ok) return
+  assert.equal(d.destinationEditInfo(c.value.id)?.keyKind, "query")
+  assert.equal(c.value.display, "rtmp://••••••••/static?••••••••t-77")
+  assert.ok(d.updateDestination(c.value.id, { name: "Castr pw", key: "?password=pw-new-88" }).ok)
+  assert.equal(d.resolveDestination(c.value.id)?.url, "rtmp://uk.castr.io/static?password=pw-new-88")
+  for (const id of [a.value.id, b.value.id, c.value.id]) d.deleteDestination(id)
+})
