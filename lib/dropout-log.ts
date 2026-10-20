@@ -12,7 +12,7 @@ import path from "node:path"
 import { MARK_COVERS, parseMarkMessage, SOURCE_NAME, type MarkSource, type ParsedMark } from "./marks"
 
 export type DropLevel = "!" | "+" | "·"
-export type DropCategory = "relay" | "ingest" | "player" | "switch" | "rearm" | "capture" | "push" | "srt" | "server" | "operator"
+export type DropCategory = "relay" | "ingest" | "player" | "switch" | "rearm" | "capture" | "push" | "srt" | "server" | "operator" | "av"
 export const DROP_ZONE = "Europe/London"
 const MAX_BYTES = 20_000_000
 const KEEP_DAYS = 14

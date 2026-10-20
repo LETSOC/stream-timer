@@ -66,8 +66,19 @@ export function pushTrouble(p: { speed: number | null; kbps: number | null }, no
   return parts.length ? parts.join(", ") : null
 }
 
+export const AV_LINE_MS = 30_000
+export type AvCounters = { corrections: number; jumps: number; resyncs: number }
+/** Pure: the 30s "[av]" dropout line (program audio delay vs picture), and the counters it was counted from. */
+export function avLine(pa: NonNullable<CaptureStats["programAudio"]>, prev: AvCounters | null): { text: string; counters: AvCounters } {
+  const counters = { corrections: pa.corrections ?? 0, jumps: pa.jumps ?? 0, resyncs: pa.resyncs ?? 0 }
+  // Counters restart with the capture process: then the new value is the count since.
+  const d = (k: keyof AvCounters) => (prev === null ? 0 : counters[k] >= prev[k] ? counters[k] - prev[k] : counters[k])
+  const ms = (v: number | null | undefined) => (v === null || v === undefined ? "?" : `${Math.round(v)}ms`)
+  return { counters, text: `program audio target delay ${ms(pa.delayMs)}, queue ${ms(pa.queuedMs)}, player latency ${ms(pa.playerLatencyMs)}; last 30s: ${d("corrections")} corrections, ${d("jumps")} drops/holds, ${d("resyncs")} resyncs` }
+}
+
 /** Capture health (scripts/capture-stream.mjs stats, every 2s) → problems while the program is on air. */
-export type CaptureStats = { at?: number; fps?: number; screencastFps?: number; repeatPct?: number; backpressurePct?: number; heartbeatAgeMs?: number; maxGapMs?: number; programAudio?: { on?: boolean; underruns?: number }; enc?: { fps: number; speed: number; kbps: number; drop?: number } }
+export type CaptureStats = { at?: number; fps?: number; screencastFps?: number; repeatPct?: number; backpressurePct?: number; heartbeatAgeMs?: number; maxGapMs?: number; programAudio?: { on?: boolean; underruns?: number; delayMs?: number; queuedMs?: number | null; playerLatencyMs?: number | null; corrections?: number; jumps?: number; resyncs?: number }; enc?: { fps: number; speed: number; kbps: number; drop?: number } }
 export function captureTrouble(s: CaptureStats): { key: string; text: string }[] {
   const out: { key: string; text: string }[] = []
   const onProgram = s.programAudio?.on === true
@@ -111,6 +122,8 @@ type State = {
   forwards: Map<string, ForwardWatch>
   capTail: Tail
   capStatsAt: number
+  avAt: number
+  avPrev: AvCounters | null
   capTrouble: Map<string, number>
   capStale: boolean
   srt: Record<"main" | "backup", { lost: number | null; spike: boolean; okSince: number | null }>
@@ -118,7 +131,7 @@ type State = {
 const KEY = Symbol.for("stream-timer.dropout-monitor")
 function state(): State {
   const h = globalThis as { [KEY]?: State }
-  h[KEY] ??= { timer: null, paths: new Map(), apiDown: false, mtx: { offset: -1, partial: "" }, conns: new Map(), lastMtx: [], forwards: new Map(), capTail: { offset: -1, partial: "" }, capStatsAt: 0, capTrouble: new Map(), capStale: false, srt: { main: { lost: null, spike: false, okSince: null }, backup: { lost: null, spike: false, okSince: null } } }
+  h[KEY] ??= { timer: null, paths: new Map(), apiDown: false, mtx: { offset: -1, partial: "" }, conns: new Map(), lastMtx: [], forwards: new Map(), capTail: { offset: -1, partial: "" }, capStatsAt: 0, avAt: 0, avPrev: null, capTrouble: new Map(), capStale: false, srt: { main: { lost: null, spike: false, okSince: null }, backup: { lost: null, spike: false, okSince: null } } }
   return h[KEY]
 }
 /** Start tails at the current end (don't replay old logs on server start). */
@@ -256,6 +269,12 @@ function pollCapture(s: State, now: number) {
   s.capStale = !fresh
   if (!fresh || st.at === s.capStatsAt) return
   s.capStatsAt = st.at
+  if (st.programAudio?.on && now - (s.avAt ?? 0) >= AV_LINE_MS) {
+    const a = avLine(st.programAudio, s.avPrev ?? null)
+    dlog("·", "av", a.text, now)
+    s.avAt = now
+    s.avPrev = a.counters
+  }
   const found = captureTrouble(st)
   for (const f of found) {
     if (!s.capTrouble.has(f.key)) dlog("!", "capture", f.text)

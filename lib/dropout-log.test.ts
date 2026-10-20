@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { correlate, dropoutLine, londonParts, parseDropoutLog, redact } from "@/lib/dropout-log"
-import { captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
+import { avLine, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
 
 test("dropout lines use London time (BST in October, GMT in November)", () => {
   assert.equal(dropoutLine(Date.UTC(2026, 9, 19, 9, 59, 1, 234), "!", "relay", "Main gone"), "2026-10-19 10:59:01.234 ! [relay] Main gone")
@@ -155,4 +155,13 @@ test("operator markers: HD capture / Vertical stopped + back on label /capture a
   assert.match(markers[0], /^10:00:00 · HD capture stopped on purpose · on desk .* 5 problem line\(s\) labelled expected/)
   assert.match(markers[1], /HD capture back on · on phone/)
   assert.match(markers[2], /Vertical stopped on purpose · on deck .* 1 problem line/)
+})
+
+test("avLine: 30s program audio line with counts since the last line (and after a capture restart)", () => {
+  const a = avLine({ delayMs: 1234.4, queuedMs: 1250, playerLatencyMs: 1180, corrections: 40, jumps: 2, resyncs: 1 }, null)
+  assert.equal(a.text, "program audio target delay 1234ms, queue 1250ms, player latency 1180ms; last 30s: 0 corrections, 0 drops/holds, 0 resyncs")
+  const b = avLine({ delayMs: 8000, queuedMs: null, playerLatencyMs: 7900, corrections: 52, jumps: 5, resyncs: 3 }, a.counters)
+  assert.match(b.text, /queue \?, player latency 7900ms; last 30s: 12 corrections, 3 drops\/holds, 2 resyncs$/)
+  const c = avLine({ delayMs: 1200, queuedMs: 1200, playerLatencyMs: 1100, corrections: 4, jumps: 0, resyncs: 0 }, b.counters)
+  assert.match(c.text, /4 corrections, 0 drops\/holds, 0 resyncs$/)
 })
