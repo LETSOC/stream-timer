@@ -12,7 +12,7 @@ import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
-import { liveJumpTick, liveTarget, type LiveJumpState } from "@/lib/live-catchup"
+import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -117,10 +117,12 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         // On air: liveSyncOnStallIncrease 0. hls.js's default (1s) raises its target latency by 1s on every
         // buffer stall and never lowers it again (only a new manifest resets it): overnight the picture sat
         // at 3.6 → 4.3 → 4.7 → 6.4s behind in steps at each stall, and "jump to live" landed on that same
-        // raised target. With 0 the 1.15x catch-up brings it back to ~1 segment after a stall.
+        // raised target. maxLiveSyncPlaybackRate 1: hls.js's own 1.15x catch-up needs >1s buffered ahead (rarely
+        // true here) and resets playbackRate to 1 otherwise, so it never caught up (14:07: stuck at 3.5s);
+        // settleTick below owns playbackRate on air instead (1.05x back to the player's healthy latency).
         const tuning = gentle
           ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
-          : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1.15, liveSyncOnStallIncrease: 0 }
+          : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1, liveSyncOnStallIncrease: 0 }
         hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
         hls.loadSource(src)
@@ -177,6 +179,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     const onVideoError = () => { troubleRef.current?.(); reportRef.current("!", `<video> error ${video.error?.code ?? "?"} ${video.error?.message ?? ""}`.trim(), "v-error", 3000) }
     let firstFrameSeen = false
     const jump: LiveJumpState = { overSince: null, lastJumpAt: 0 }
+    const settle = newSettle()
     const reload = (why = "watchdog: picture stuck 3s while OBS publishes") => {
       teardownWhy.current = why
       firstFrameSeen = false
@@ -225,6 +228,17 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
             setResyncGen((g) => g + 1)
           }
         }
+        // On air: drift back to the player's own healthy latency after a stall left it behind (1.05x, gentle).
+        if (diagRef.current?.onAir && !gentle) {
+          const b = video.buffered
+          const ahead = b.length ? b.end(b.length - 1) - t : 0
+          const s = settleTick(settle, lat, ahead, nowMs)
+          if (video.playbackRate !== s.rate) video.playbackRate = s.rate
+          const e = s.event
+          if (e?.kind === "start") reportRef.current("·", `delay settling: ${(e.fromMs / 1000).toFixed(1)}s behind, normal ${(e.floorMs / 1000).toFixed(1)}s → catching up at ${s.rate}x`)
+          else if (e?.kind === "done") reportRef.current("+", `delay settled: ${(e.fromMs / 1000).toFixed(1)}s → ${(e.toMs / 1000).toFixed(1)}s in ${Math.round(e.tookMs / 1000)}s`)
+          else if (e?.kind === "abort") reportRef.current("·", `delay settle paused at ${(e.toMs / 1000).toFixed(1)}s (buffer thin), will retry`)
+        } else if (video.playbackRate !== 1) video.playbackRate = 1
       }
       last = t
     }, 150)
