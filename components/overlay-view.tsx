@@ -8,7 +8,7 @@ import { FacebookIcon, InstagramIcon, LinkedInIcon, XIcon, YouTubeIcon } from "@
 import { asEventConfig, DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { parseStage, socialLook, type StageOptions } from "@/lib/stage"
 import { StageGuides } from "@/components/stage-guides"
-import { clampInset, cornerOffsets, parseCorner, strapVisible, type Corner } from "@/lib/visuals"
+import { clampInset, cornerOffsets, parseCorner, parsePosition, strapVisible, type Corner, type PositionMode } from "@/lib/visuals"
 import { useNow } from "@/lib/use-now"
 
 export type OverlayInitial = { event: EventConfig; stage: Partial<Record<keyof StageOptions, unknown>> } | null
@@ -69,8 +69,8 @@ function Frame({ checker, guides, blocked, children }: { checker: boolean; guide
   )
 }
 
-function anchorStyle(corner: Corner, inset: number): CSSProperties {
-  const o = cornerOffsets(corner, inset)
+function anchorStyle(corner: Corner, inset: number, mode: PositionMode = "safe"): CSSProperties {
+  const o = cornerOffsets(corner, inset, mode)
   const px = (n?: number) => (n === undefined ? undefined : `calc(${n} * var(--px))`)
   return { left: px(o.left), right: px(o.right), top: px(o.top), bottom: px(o.bottom), display: "flex", flexDirection: "column", alignItems: o.right !== undefined ? "flex-end" : "flex-start", justifyContent: o.bottom !== undefined ? "flex-end" : "flex-start" }
 }

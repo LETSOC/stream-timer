@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { copyOrShow } from "@/components/copy-fallback"
 import { OverlayPreview } from "@/components/visuals-deck"
+import { HolderCard } from "@/components/holder-card"
 import { newStrapId, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_STYLE_LABEL, STRAP_STYLES, type Platform, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 type Props = {
@@ -86,6 +87,36 @@ export function VisualsDeskSection({ straps, accent, text, viewKey, onStraps, on
       <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-black/15" data-testid="visuals-desk-preview">
         <OverlayPreview path="/overlay/strap?checker=1" />
       </div>
+
+      <details className="rounded-xl border border-black/15 p-3" data-testid="holders-panel">
+        <summary className="cursor-pointer font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">Holders / standby cards</summary>
+        <div className="mt-3 grid gap-3">
+          <p className="font-mono text-[12px] text-black/70">Full-frame cards for technical difficulties, starting soon, short break and Q&A. Text is editable here (draft until Save). Position and thickness apply to the overlay.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="grid gap-1 font-mono text-[12px] text-black/70 uppercase">Version
+              <select className={input} defaultValue="tech">
+                <option value="tech">Technical difficulties</option>
+                <option value="soon">Starting soon</option>
+                <option value="break">Short break</option>
+                <option value="qa">Q&A</option>
+              </select>
+            </label>
+            <label className="grid gap-1 font-mono text-[12px] text-black/70 uppercase">Position
+              <select className={input} defaultValue="safe">
+                <option value="safe">Safe margin</option>
+                <option value="edge">Pin to edge</option>
+              </select>
+            </label>
+          </div>
+          <label className="flex items-center gap-2 font-mono text-[12px] text-black/70">
+            <input type="checkbox" /> Thick plate
+          </label>
+          <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-black/15">
+            <HolderCard version="tech" thick />
+          </div>
+          <p className="font-mono text-[11px] text-black/50">OBS source: /overlay/holder (1920×1080). Key content stays inside the 608px centre column for 9:16 crops.</p>
+        </div>
+      </details>
     </div>
   )
 }

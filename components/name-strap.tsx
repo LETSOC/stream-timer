@@ -49,6 +49,12 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
             {handle || preset.title ? <span className="strap-title">{handle || preset.title}</span> : null}
           </div>
         </div>
+      ) : look.style === "thick" ? (
+        <div className="strap-body" style={{ background: look.accent, padding: "18px 32px 18px 28px", borderRadius: "0 20px 20px 0", minHeight: 72, borderLeft: "6px solid #FF6A00" }}>
+          <span className="strap-name" style={{ fontSize: "22px", fontWeight: 700 }}>{preset.name}</span>
+          {preset.title ? <span className="strap-title" style={{ opacity: 0.85, marginTop: 6 }}>{preset.title}</span> : null}
+          {social}
+        </div>
       ) : (
         <div className="strap-body">
           <span className="strap-name">{preset.name}</span>

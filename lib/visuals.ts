@@ -2,9 +2,13 @@
  * Visuals overlays (OBS browser sources on transparent pages): name straps (lower thirds) and the
  * social circles on their own. Pure helpers, shared by the server parser, the overlays and the decks.
  */
-export const STRAP_STYLES = ["line", "block", "pill", "gradient"] as const
+export const STRAP_STYLES = ["line", "block", "pill", "gradient", "thick"] as const
 export type StrapStyle = (typeof STRAP_STYLES)[number]
-export const STRAP_STYLE_LABEL: Record<StrapStyle, string> = { line: "Minimal line", block: "Block", pill: "Social pill", gradient: "Event gradient" }
+export const STRAP_STYLE_LABEL: Record<StrapStyle, string> = { line: "Minimal line", block: "Block", pill: "Social pill", gradient: "Event gradient", thick: "Thick plate" }
+
+export const POSITION_MODES = ["safe", "edge"] as const
+export type PositionMode = (typeof POSITION_MODES)[number]
+export const POSITION_LABEL: Record<PositionMode, string> = { safe: "Safe margin", edge: "Pin to edge" }
 
 export const STRAP_MOTIONS = ["slide-left", "slide-up", "wipe"] as const
 export type StrapMotion = (typeof STRAP_MOTIONS)[number]
@@ -41,7 +45,20 @@ export const parseStrapStyle = (v: unknown, f: StrapStyle = "line") => pick(STRA
 export const parseStrapMotion = (v: unknown, f: StrapMotion = "slide-left") => pick(STRAP_MOTIONS, v, f)
 export const parseCorner = (v: unknown, f: Corner = "bottom-left") => pick(CORNERS, v, f)
 export const parseStrapMode = (v: unknown, f: StrapMode = "out") => pick(STRAP_MODES, v, f)
-export const parsePlatform = (v: unknown, f: Platform = "none") => pick(PLATFORMS, v, f)
+export const parsePosition = (v: unknown, f: PositionMode = "safe") => pick(POSITION_MODES, v, f)
+
+/**
+ * Safe zone = the desk preview's "Safe zone" aid (dashed lime box, `inset: 5%`). Overlays sit with their
+ * outer edge exactly on that line when mode is "safe". When mode is "edge" the offsets are 0.
+ */
+export function cornerOffsets(corner: Corner, inset = 0, mode: PositionMode = "safe"): { left?: number; right?: number; top?: number; bottom?: number } {
+  const x = mode === "edge" ? 0 : SAFE_X_PX + clampInset(inset)
+  const y = mode === "edge" ? 0 : SAFE_Y_PX + clampInset(inset)
+  return {
+    ...(corner.endsWith("right") ? { right: x } : { left: x }),
+    ...(corner.startsWith("top") ? { top: y } : { bottom: y }),
+  }
+}
 
 export function clampHold(value: unknown, fallback = 5): number {
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN

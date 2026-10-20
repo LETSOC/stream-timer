@@ -373,3 +373,6 @@ html:has([data-desk-root]) body {
 @media (prefers-reduced-motion: reduce) {
   .strap-body { transition-property: opacity !important; transform: none !important; clip-path: none !important; }
 }
+@keyframes holderBeat { from { opacity: .35; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }
+.holder-thick h1 { font-size: 3.8cqi; }
+.holder-thick .holder-col { width: calc(560 * var(--px)); }
