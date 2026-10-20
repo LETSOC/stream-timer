@@ -12,6 +12,7 @@ import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { liveJumpTick, liveTarget, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -80,6 +81,9 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   // Only real decoded frames (lastFrameAt is also bumped to hold the picture through a rebuild).
   const [realFrameAt, setRealFrameAt] = useState<number | null>(null)
   const [latency, setLatency] = useState<number | null>(null)
+  // Bumped when the picture's delay jumps (first frame after a (re)build, jump to live): the capture
+  // script resyncs the program audio on it (data-resync).
+  const [resyncGen, setResyncGen] = useState(0)
   const wantSoundRef = useRef(wantSound)
   useEffect(() => {
     wantSoundRef.current = wantSound
@@ -168,6 +172,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     }
     const onVideoError = () => { troubleRef.current?.(); reportRef.current("!", `<video> error ${video.error?.code ?? "?"} ${video.error?.message ?? ""}`.trim(), "v-error", 3000) }
     let firstFrameSeen = false
+    const jump: LiveJumpState = { overSince: null, lastJumpAt: 0 }
     const reload = (why = "watchdog: picture stuck 3s while OBS publishes") => {
       teardownWhy.current = why
       firstFrameSeen = false
@@ -199,12 +204,23 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         })
       }
       if (!video.paused && video.readyState >= 2 && t !== last && t > 0) {
-        if (!firstFrameSeen) { firstFrameSeen = true; if (builtAt.current !== null) reportRef.current("+", `first frame ${Date.now() - builtAt.current}ms after the player (re)built`); builtAt.current = null }
+        if (!firstFrameSeen) { firstFrameSeen = true; setResyncGen((g) => g + 1); if (builtAt.current !== null) reportRef.current("+", `first frame ${Date.now() - builtAt.current}ms after the player (re)built`); builtAt.current = null }
         const nowMs = Date.now()
         setLastFrameAt(nowMs)
         setRealFrameAt(nowMs)
         const at = hlsRef.current?.playingDate?.getTime()
-        setLatency(at ? Date.now() - at : null)
+        const lat = at ? nowMs - at : null
+        setLatency(lat)
+        // On air (/stream, LL tuning): more than 3s behind live → jump back to the live edge.
+        if (diagRef.current?.onAir && !gentle && hlsRef.current && liveJumpTick(jump, lat, nowMs)) {
+          const b = video.buffered
+          const to = liveTarget(hlsRef.current.liveSyncPosition, b.length ? b.end(b.length - 1) : null, t)
+          if (to !== null && lat !== null) {
+            video.currentTime = to
+            reportRef.current("·", `jumped to live (was ${(lat / 1000).toFixed(1)}s behind)`)
+            setResyncGen((g) => g + 1)
+          }
+        }
       }
       last = t
     }, 150)
@@ -217,7 +233,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       video.removeEventListener("stalled", onWaiting)
       video.removeEventListener("error", onVideoError)
     }
-  }, [videoRef, load, stallEvents])
+  }, [videoRef, load, stallEvents, gentle])
   useEffect(() => {
     holdRef.current = hold
     const video = videoRef.current
@@ -237,7 +253,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     video.muted = !wantSoundRef.current()
     void video.play().catch(() => { video.muted = true; void video.play().catch(() => undefined) })
   }, [hold, videoRef])
-  return { lastFrameAt, realFrameAt, latency }
+  return { lastFrameAt, realFrameAt, latency, resyncGen }
 }
 
 function Standby({ small = false }: { small?: boolean }) {
@@ -340,7 +356,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // standby input in a plain tab, never on the capture page) does not depend on it.
   const shownRef = useRef<ProgramDisplay>("under")
   const maySound = () => programWantsSound({ active: active && shownRef.current === "video", hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
-  const { lastFrameAt, realFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, diag: { label, onAir }, onTrouble: showCover })
+  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, diag: { label, onAir }, onTrouble: showCover })
   // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
   // a decode error (element already blank) still has a frame to hold.
   const [periodic] = useState(() => isCapturePage())
@@ -431,7 +447,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   const visual: ProgramDisplay = incoming ? "under" : shown
   const hardMute = muted || shown !== "video"
   return (
-    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-hard-mute={hardMute ? "1" : "0"} data-want-sound={maySound() ? "1" : "0"} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
+    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-resync={resyncGen} data-hard-mute={hardMute ? "1" : "0"} data-want-sound={maySound() ? "1" : "0"} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
       <video ref={videoRef} className="h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture />
       <canvas ref={coverRef} data-testid="program-cover" aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ visibility: "hidden" }} />
       {visual === "standby" ? (
