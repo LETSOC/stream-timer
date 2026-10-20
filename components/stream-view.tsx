@@ -12,6 +12,8 @@ import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
 import { clampChecker, effectiveEndTime, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
+import { brandUrl } from "@/lib/brand-asset"
+import { preloadImages, stageImageUrls } from "@/lib/image-preload"
 import { StageGuides } from "@/components/stage-guides"
 import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
@@ -103,6 +105,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [testUntil, setTestUntil] = useState<number | null>(initial?.testUntil ?? null)
   const [pausedAt, setPausedAt] = useState<number | null>(initial?.pausedAt ?? null)
   const [stage, setStage] = useState<Stage>(() => parseStage(initial?.stage ?? {}))
+  // Fetch + decode every image the countdown and cards can show, at start and on every settings change.
+  const imageKey = stageImageUrls(stage, brandUrl).join("\n")
+  useEffect(() => { void preloadImages(imageKey.split("\n").filter(Boolean)) }, [imageKey])
   const [bed, setBed] = useState<StreamBedPlan>(null)
   const [programReady, setProgramReady] = useState(false)
   const [switchBufferMs, setSwitchBufferMs] = useState(SWITCH_BUFFER_MS)
