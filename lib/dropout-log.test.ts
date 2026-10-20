@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { correlate, dropoutLine, londonParts, parseDropoutLog, redact } from "@/lib/dropout-log"
-import { avLine, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
+import { avLine, captureChromeNote, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
 
 test("dropout lines use London time (BST in October, GMT in November)", () => {
   assert.equal(dropoutLine(Date.UTC(2026, 9, 19, 9, 59, 1, 234), "!", "relay", "Main gone"), "2026-10-19 10:59:01.234 ! [relay] Main gone")
@@ -164,4 +164,12 @@ test("avLine: 30s program audio line with counts since the last line (and after 
   assert.match(b.text, /queue \?, player latency 7900ms; last 30s: 12 corrections, 3 drops\/holds, 2 resyncs$/)
   const c = avLine({ delayMs: 1200, queuedMs: 1200, playerLatencyMs: 1100, corrections: 4, jumps: 0, resyncs: 0 }, b.counters)
   assert.match(c.text, /4 corrections, 0 drops\/holds, 0 resyncs$/)
+})
+
+test("captureChromeNote: planned refresh is info, relaunch is trouble, ready is recovery", () => {
+  assert.deepEqual(captureChromeNote("[capture 03:00:01] [chrome] planned Chrome refresh (uptime 3.0h)"), { level: "·", text: "planned Chrome refresh (uptime 3.0h)" })
+  assert.equal(captureChromeNote("[capture 07:29:10] [chrome] relaunching the capture browser: reload failed (holding the last good frame)")?.level, "!")
+  assert.equal(captureChromeNote("[capture 07:29:14] [chrome] /stream ready in the new browser after 3.9s: live frames again")?.level, "+")
+  assert.equal(captureChromeNote("[capture 07:29:14] page heartbeat stalled 15s"), null)
+  assert.equal(captureChromeNote("[capture 10:35:41] [chrome] relaunching the capture browser: planned refresh (holding the last good frame)")?.level, "·")
 })

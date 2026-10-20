@@ -66,6 +66,17 @@ export function pushTrouble(p: { speed: number | null; kbps: number | null }, no
   return parts.length ? parts.join(", ") : null
 }
 
+/** Pure: capture "[chrome]" lines (browser relaunch / planned refresh) → dropout note. null = not one. */
+export function captureChromeNote(line: string): { level: DropLevel; text: string } | null {
+  const m = /\[chrome\] (.*)$/.exec(line.trim())
+  if (!m) return null
+  const text = m[1].slice(0, 200)
+  if (/^planned Chrome refresh|^relaunching the capture browser: planned refresh/.test(text)) return { level: "·", text }
+  if (/ready in the new browser/.test(text)) return { level: "+", text }
+  if (/^relaunching|failed|killed/.test(text)) return { level: "!", text }
+  return { level: "·", text }
+}
+
 export const AV_LINE_MS = 30_000
 export type AvCounters = { corrections: number; jumps: number; resyncs: number }
 /** Pure: the 30s "[av]" dropout line (program audio delay vs picture), and the counters it was counted from. */
@@ -256,7 +267,10 @@ function pollCapture(s: State, now: number) {
   primeTail(files.log, s.capTail)
   for (const line of readNew(files.log, s.capTail)) {
     if (/frame=\s*\d+.*speed=/.test(line) || !line.trim()) continue
-    if (/heartbeat stalled|reload|crash|could not|failed|restarting capture|exited|timed out|Broken pipe|Connection (reset|refused)|Error/i.test(line)) dlog("!", "capture", line.trim().slice(0, 220))
+    const chrome = captureChromeNote(line)
+    if (chrome) dlog(chrome.level, "capture", chrome.text)
+    else if (/\[audio\] program audio resync/.test(line)) dlog("·", "capture", line.trim().replace(/^\[capture [^\]]+\] /, "").slice(0, 200))
+    else if (/heartbeat stalled|reload|crash|could not|failed|restarting capture|exited|timed out|Broken pipe|Connection (reset|refused)|Error/i.test(line)) dlog("!", "capture", line.trim().slice(0, 220))
     else if (/\[audio\] program source|shows the program|left the program/.test(line)) dlog("·", "capture", line.trim().replace(/^\[capture [^\]]+\] /, "").slice(0, 200))
   }
   if (!files.stats) return
