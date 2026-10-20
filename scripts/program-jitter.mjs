@@ -81,3 +81,30 @@ export function splice(raw, n, d, fade = 240) {
   }
   return out
 }
+
+/**
+ * Hard-resync threshold (ms): queue this far off target → drop to target / hold silence at once.
+ * The jitter-widened band is capped at 1s: during a night of 1–2s ingest gaps it grew to 2–3s and
+ * left audio that late, fixed only by ≤5ms splices (~50ms/s).
+ */
+export function resyncThresholdMs(spreadMs) {
+  return Math.min(1000, Math.max(300, spreadMs * 1.5))
+}
+
+/**
+ * What to do with the program-audio queue this block. `force` = the picture just jumped (player rebuilt,
+ * jumped to live, page hung): re-align on the raw queue now instead of waiting for the 2s average.
+ * Returns "drop" (cut to target), "hold" (silence until the queue reaches target) or "none".
+ */
+export function resyncAction({ levelMs, queuedMs, targetMs, spreadMs, force = false }) {
+  if (force) {
+    const e = queuedMs - targetMs
+    return e > 40 ? "drop" : e < -40 ? "hold" : "none"
+  }
+  const t = resyncThresholdMs(spreadMs)
+  const err = levelMs - targetMs
+  return err > t ? "drop" : err < -t ? "hold" : "none"
+}
+
+/** How long after a resync signal the latency is taken raw (no smoothing) and the queue force-aligned. */
+export const RESYNC_WINDOW_MS = 1500

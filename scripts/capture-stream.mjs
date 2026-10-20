@@ -22,7 +22,7 @@ import path from "node:path"
 import { chromium } from "playwright"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 import { captureCodeVersion } from "./code-version.mjs"
-import { createJitterMeter, deadBandMs, splice, spliceFrames } from "./program-jitter.mjs"
+import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
 const pageUrl = process.env.CAPTURE_URL
@@ -88,7 +88,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false, ramp: 1 }
+const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, resyncs: 0, resyncUntil: 0, resyncCounted: false, resyncGen: null, holding: false, ramp: 1 }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -311,15 +311,19 @@ function takeProgram(n) {
   const queuedMs = (prog.bytes / 4 / RATE) * 1000
   const input = inputs[prog.source]
   input.jitter.add(queuedMs, now)
+  if (now < prog.resyncUntil) input.jitter.reset() // the jump itself is not arrival jitter
   const spread = input.jitter.spreadMs()
   // ~2s average: arrival bursts from a remote publisher average out instead of steering the output.
   const alpha = Math.min(1, n / (2 * RATE))
   prog.levelMs = prog.levelMs === null ? queuedMs : prog.levelMs * (1 - alpha) + queuedMs * alpha
   prog.jitterMs = spread
   let err = prog.levelMs - target
-  const jump = Math.max(300, spread * 1.5)
-  if (err > jump) { dropProgram(prog.bytes - targetBytes); prog.levelMs = target; prog.jumps += 1; err = 0 }
-  if (err < -jump || prog.holding) {
+  // Hard resync: off by more than the (≤1s) threshold, or forced right after the picture jumped.
+  const force = now < prog.resyncUntil
+  const act = resyncAction({ levelMs: prog.levelMs, queuedMs, targetMs: target, spreadMs: spread, force })
+  if (act !== "none" && force && !prog.resyncCounted) { prog.resyncs += 1; prog.resyncCounted = true } // once per signal
+  if (act === "drop") { dropProgram(prog.bytes - targetBytes); prog.levelMs = target; prog.jumps += 1; err = 0 }
+  if (act === "hold" || prog.holding) {
     // Hold: silence until the queue is back at the target.
     if (!prog.holding) { prog.holding = true; prog.jumps += 1 }
     if (queuedMs >= target) { prog.holding = false; prog.levelMs = queuedMs }
@@ -579,6 +583,13 @@ function syncTestOverlay(on) {
   }
   requestAnimationFrame(tick)
 }
+// Program audio resync request (picture jumped): see takeProgram / resyncAction.
+let lastAnswerAt = 0
+function armResync(why) {
+  prog.resyncUntil = Date.now() + RESYNC_WINDOW_MS
+  prog.resyncCounted = false
+  log(`[audio] program audio resync: ${why}`)
+}
 // Which screen is /stream on? (set by the page; polled cheaply)
 setInterval(async () => {
   if (stopping || reloading) return
@@ -592,17 +603,27 @@ setInterval(async () => {
     log(`[sync] A/V sync test ${sync.test ? "on: white flash + 1 kHz beep at every second" : "off"}`)
     await page.evaluate(syncTestOverlay, sync.test).catch(() => undefined)
   }
+  const askedAt = Date.now()
   const info = await page.evaluate(() => {
     const feed = document.querySelector("[data-testid=program-feed]")
     const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
-    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null, resync: Number(feed?.getAttribute("data-resync") || 0) }
   }).catch(() => ({ source: prog.source, screen: "", loaded: null, lat: null }))
+  // Page hung (or reloaded): the poll answers late / not at all, the picture froze and resumes behind.
+  if (info.screen !== "") {
+    const quiet = Date.now() - (lastAnswerAt || askedAt)
+    if (lastAnswerAt && quiet > 2000) armResync(`page hung ${(quiet / 1000).toFixed(1)}s`)
+    lastAnswerAt = Date.now()
+    // Player rebuilt / jumped to live (the page bumps data-resync): the picture's delay just changed.
+    if (info.resync !== prog.resyncGen) { if (prog.resyncGen !== null) armResync(info.resync === 0 ? "page reloaded" : "player rebuilt or jumped to live"); prog.resyncGen = info.resync }
+  }
   const screen = info.screen
   // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
   // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
   if (info.source !== prog.source) switchProgramSource(info.source)
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
-  if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.92 + info.lat * 0.08 // ~3s: remote players jitter
+  // Right after a resync signal the latency is taken raw, so the target follows the jump at once.
+  if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null || Date.now() < prog.resyncUntil ? info.lat : prog.latencyMs * 0.92 + info.lat * 0.08 // ~3s: remote players jitter
   // A failed/empty page read (reload, busy page) is not "left the program": keep the last state.
   const wanted = screen === "" ? prog.wanted : screen === "program"
   if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) { prog.wantedSince = Date.now(); prog.flowed = false; log("[audio] /stream shows the program: audio follows OBS") } }
@@ -694,7 +715,7 @@ if (statsFile) {
       maxLagMs: Math.round(win.maxLag),
       maxGapMs: win.maxGap,
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
-      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, via: prog.via ?? null, formats: { main: inputs.main.format, backup: inputs.backup.format }, arrivalExcessMs: { main: Math.round(inputs.main.arrival.excessMs), backup: Math.round(inputs.backup.arrival.excessMs) }, offsetMs: { main: inputs.main.offsetMs, backup: inputs.backup.offsetMs } },
+      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, resyncs: prog.resyncs, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, via: prog.via ?? null, formats: { main: inputs.main.format, backup: inputs.backup.format }, arrivalExcessMs: { main: Math.round(inputs.main.arrival.excessMs), backup: Math.round(inputs.backup.arrival.excessMs) }, offsetMs: { main: inputs.main.offsetMs, backup: inputs.backup.offsetMs } },
       sync: { screencastLagMs: sync.lagMs === null ? null : Math.round(sync.lagMs), trimMs: sync.trimMs, videoDelayMs: Math.round(videoDelayMs()), bedDelayMs: Math.round(bedLine.delayMs()), skippedMs: Math.round(skippedMs), test: sync.test },
       statsLine: lastStatsLine,
     }
