@@ -19,7 +19,7 @@ export const SECTIONS: Record<SectionId, { label: string; event?: (keyof EventCo
   endCard: { label: "End card", stage: ["endTitle", "endSubtitle", "endDate", "endBody", "endQrUrl", "endButton", "endAt"] },
   speakers: { label: "Speakers", stage: ["speakers", "gallerySeconds", "galleryPause", "galleryOffset", "galleryScale"] },
   breakCard: { label: "Break card", stage: ["breakTitle", "breakMessage", "breakImage", "breakFit"] },
-  holdCard: { label: "Hold card", stage: ["holdTitle", "holdMessage", "holdImage", "holdFit"] },
+  holdCard: { label: "Hold card", stage: ["holdTitle", "holdMessage", "holdImage", "holdFit", "standbyTitle", "standbyMessage"] },
   welcomeCard: { label: "Welcome back card", stage: ["welcomeTitle", "welcomeMessage", "welcomeImage", "welcomeFit"] },
   visuals: { label: "Visuals", stage: ["straps", "strapAccent", "strapText"] },
 }

@@ -66,3 +66,44 @@ export function noteRelayDisruption(now = Date.now(), ms = QUIET_MS) {
 export function relayQuietUntil(): number {
   return (globalThis as Holder)[KEY] ?? 0
 }
+
+// ---------- re-arm hold: players keep the last frame instead of "Waiting for OBS" ----------
+/**
+ * A disarm (auto re-arm, or the operator's Disarm → Arm) kicks OBS on purpose; it reconnects a few
+ * seconds later. For REARM_HOLD_MS after a disarm, /stream and the previews hold the last frame instead
+ * of the "Waiting for OBS" card; then the normal rules apply (a disarm that stays off shows the card).
+ */
+export const REARM_HOLD_MS = 15_000
+export type RearmHold = { disarmAt: number | null; until: number }
+export const NO_REARM_HOLD: RearmHold = { disarmAt: null, until: 0 }
+/** Pure: the hold after a disarm (a later Arm keeps that window: never past disarm + REARM_HOLD_MS). */
+export const nextRearmHold = (now: number): RearmHold => ({ disarmAt: now, until: now + REARM_HOLD_MS })
+export const rearmHoldLeft = (s: RearmHold, now: number) => Math.max(0, s.until - now)
+const HOLD_KEY = Symbol.for("stream-timer.rearm-hold")
+type HoldHolder = { [HOLD_KEY]?: RearmHold }
+export function noteProgramDisarm(now = Date.now()) {
+  (globalThis as HoldHolder)[HOLD_KEY] = nextRearmHold(now)
+}
+/** ms left in the re-arm hold (0 = none): what /api/public/state and the deck state carry. */
+export function rearmHoldLeftMs(now = Date.now()): number {
+  return rearmHoldLeft((globalThis as HoldHolder)[HOLD_KEY] ?? NO_REARM_HOLD, now)
+}
+
+// ---------- planned "back on" / manual Arm: no auto re-arm right after ----------
+/** After an operator "Main/Backup back on" mark (that input) or a manual Arm (both), auto re-arm waits this long. */
+export const PLANNED_BACK_MS = 60_000
+export type PlannedBack = Record<"main" | "backup", number | null>
+/** Pure: why auto re-arm of `source` is skipped now (null = not skipped). */
+export function plannedBackSkip(p: PlannedBack, source: "main" | "backup", now: number): { why: string; agoSec: number } | null {
+  const at = p[source]
+  if (at === null || now - at > PLANNED_BACK_MS || now < at) return null
+  return { why: "planned back on / manual arm", agoSec: Math.round((now - at) / 1000) }
+}
+const PLAN_KEY = Symbol.for("stream-timer.planned-back")
+type PlanHolder = { [PLAN_KEY]?: PlannedBack }
+export function notePlannedBack(source: "main" | "backup" | "both", now = Date.now()) {
+  const h = globalThis as PlanHolder
+  const cur = h[PLAN_KEY] ?? { main: null, backup: null }
+  h[PLAN_KEY] = source === "both" ? { main: now, backup: now } : { ...cur, [source]: now }
+}
+export const plannedBack = (): PlannedBack => (globalThis as PlanHolder)[PLAN_KEY] ?? { main: null, backup: null }

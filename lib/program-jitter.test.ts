@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 // @ts-expect-error plain .mjs script module
-import { createJitterMeter, deadBandMs, splice, spliceFrames } from "../scripts/program-jitter.mjs"
+import { createJitterMeter, deadBandMs, resyncAction, resyncThresholdMs, splice, spliceFrames, targetJumped } from "../scripts/program-jitter.mjs"
 
 function tone(frames: number, hz: number, rate = 48000, phase0 = 0) {
   const b = Buffer.alloc(frames * 4)
@@ -62,4 +62,37 @@ test("jitter meter: spread of bursty levels over the window", () => {
   m.reset(); assert.equal(m.spreadMs(), 0)
   for (let t = 0; t < 3000; t += 20) m.add(1000, t)
   assert.equal(m.spreadMs(), 0)
+})
+
+test("resync threshold: jitter widens it, but never past 1s (A/V drift night of Oct 19)", () => {
+  assert.equal(resyncThresholdMs(0), 300)
+  assert.equal(resyncThresholdMs(400), 600)
+  assert.equal(resyncThresholdMs(2000), 1000) // was 3000: audio could sit 3s late
+})
+
+test("resyncAction: queue 1.5s over target with a 2s jitter spread → drop now", () => {
+  assert.equal(resyncAction({ levelMs: 2700, queuedMs: 2700, targetMs: 1200, spreadMs: 2000 }), "drop")
+  assert.equal(resyncAction({ levelMs: 1900, queuedMs: 1900, targetMs: 1200, spreadMs: 2000 }), "none") // within 1s: splices
+  assert.equal(resyncAction({ levelMs: 100, queuedMs: 100, targetMs: 1200, spreadMs: 2000 }), "hold")
+})
+
+test("resyncAction forced (player jumped/rebuilt, page hung): aligns on the raw queue within 40ms", () => {
+  // picture jumped to live: target 8s → 1.2s, the 2s average still says ~8s; the raw queue decides
+  assert.equal(resyncAction({ levelMs: 1300, queuedMs: 8000, targetMs: 1200, spreadMs: 0, force: true }), "drop")
+  // picture fell behind (page hung 9s): target up, queue short → hold silence until it is there
+  assert.equal(resyncAction({ levelMs: 1200, queuedMs: 1200, targetMs: 9000, spreadMs: 0, force: true }), "hold")
+  assert.equal(resyncAction({ levelMs: 900, queuedMs: 1230, targetMs: 1200, spreadMs: 0, force: true }), "none")
+})
+
+test("targetJumped: a >300ms step within ~1s snaps (01:55:22 failover 3160→2123ms); slow drift does not", () => {
+  const h: { at: number; t: number }[] = []
+  assert.equal(targetJumped(h, 0, 3160), false)
+  assert.equal(targetJumped(h, 250, 3150), false)
+  assert.equal(targetJumped(h, 500, 3140), false)
+  assert.equal(targetJumped(h, 750, 2123), true)
+  assert.equal(targetJumped(h, 1000, 2125), false) // history restarted at the snap
+  const d: { at: number; t: number }[] = []
+  let hit = false
+  for (let at = 0, t = 1200; at < 30_000; at += 250, t += 20) hit = targetJumped(d, at, t) || hit // +80ms/s
+  assert.equal(hit, false)
 })

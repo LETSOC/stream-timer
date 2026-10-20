@@ -21,9 +21,14 @@ test("SRT on: srt: yes bound like RTMP ingest (LAN host when LAN ingest), option
   assert.match(lan, /^srtAddress: 0\.0\.0\.0:8890$/m)
   assert.match(lan, /^rtmpAddress: 0\.0\.0\.0:19350$/m) // RTMP unchanged
   assert.match(lan, /program-backup: \{ overridePublisher: yes, srtPublishPassphrase: "correct-horse-1" \}/)
-  // Backup pulled or not armed: no SRT listener.
+  // Backup pulled: no SRT listener (armed or not).
   assert.match(buildMediamtxConfig({ ...base, backupPullUrl: "rtmp://10.0.0.2/live/x", srt: { port: 8890, passphrase: "" } }), /^srt: no$/m)
-  assert.match(buildMediamtxConfig({ ...base, programArmed: false, srt: { port: 8890, passphrase: "" } }), /^srt: no$/m)
+  assert.match(buildMediamtxConfig({ ...base, programArmed: false, backupPullUrl: "rtmp://10.0.0.2/live/x", srt: { port: 8890, passphrase: "" } }), /^srt: no$/m)
+  // Not armed: the SRT listener stays up (toggling it would restart MediaMTX's SRT server and API on every
+  // disarm/arm), but the Backup login is gone, so nobody can publish.
+  const disarmed = buildMediamtxConfig({ ...base, programArmed: false, srt: { port: 8890, passphrase: "" } })
+  assert.match(disarmed, /^srt: yes$/m)
+  assert.doesNotMatch(disarmed, /user: "bak"/)
 })
 
 test("SRT URL for OBS 2 and passphrase rules", () => {

@@ -2,7 +2,7 @@
 
 import { StreamAudioOverlay } from "@/components/stream-audio-overlay"
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { playerDiag } from "@/lib/player-diag"
+import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { useSearchParams } from "next/navigation"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EndStreamPage } from "@/app/end/page"
@@ -12,11 +12,13 @@ import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
 import { clampChecker, effectiveEndTime, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
+import { brandUrl } from "@/lib/brand-asset"
+import { preloadImages, stageImageUrls } from "@/lib/image-preload"
 import { StageGuides } from "@/components/stage-guides"
 import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
-import { handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
+import { captureStartReady, handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { endInstant } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 import { SyncTestOverlay } from "@/components/sync-test-overlay"
@@ -49,13 +51,13 @@ type Stage = StageOptions
 /**
  * Capture watchdog hooks (scripts/capture-stream.mjs): window.__hb ticks every second even on a
  * static LIVE/end/hold screen (where Chrome may send no repaints), and <html data-stream-ready>
- * marks that the client view has mounted. Harmless for OBS.
+ * marks that the client view has mounted and shows what the operator picked (StreamView: on the
+ * capture page with Program up, only once the program's first frame is up). Harmless for OBS.
  */
 function useCaptureHeartbeat() {
   useEffect(() => {
     const w = window as unknown as { __hb?: number }
     w.__hb = 0
-    document.documentElement.dataset.streamReady = "1"
     const id = window.setInterval(() => { w.__hb = (w.__hb ?? 0) + 1 }, 1000)
     return () => window.clearInterval(id)
   }, [])
@@ -103,9 +105,17 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [testUntil, setTestUntil] = useState<number | null>(initial?.testUntil ?? null)
   const [pausedAt, setPausedAt] = useState<number | null>(initial?.pausedAt ?? null)
   const [stage, setStage] = useState<Stage>(() => parseStage(initial?.stage ?? {}))
+  // Background pulses run on the wall clock (ms into the UTC day; every period divides a day), so the
+  // capture's planned Chrome refresh / a reload picks them up mid-pulse instead of restarting them.
+  useEffect(() => { document.documentElement.style.setProperty("--wall-delay", `-${Date.now() % 86_400_000}ms`) }, [])
+  // Fetch + decode every image the countdown and cards can show, at start and on every settings change.
+  const imageKey = stageImageUrls(stage, brandUrl).join("\n")
+  useEffect(() => { void preloadImages(imageKey.split("\n").filter(Boolean)) }, [imageKey])
   const [bed, setBed] = useState<StreamBedPlan>(null)
   const [programReady, setProgramReady] = useState(false)
   const [switchBufferMs, setSwitchBufferMs] = useState(SWITCH_BUFFER_MS)
+  /** local time until which a disarm/arm cycle holds the last frame (server sends ms left) */
+  const [rearmHoldUntil, setRearmHoldUntil] = useState<number | null>(null)
   const [sourceReady, setSourceReady] = useState<{ main: boolean; backup: boolean }>({ main: false, backup: false })
 
   useEffect(() => {
@@ -120,7 +130,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { bed?: unknown; switchBufferMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { bed?: unknown; switchBufferMs?: unknown; rearmHoldMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (reloadIfRebuilt(body.build)) return
@@ -129,6 +139,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
           setProgramReady(body.programReady === true)
           if (typeof body.switchBufferMs === "number") setSwitchBufferMs(body.switchBufferMs)
+          setRearmHoldUntil(typeof body.rearmHoldMs === "number" && body.rearmHoldMs > 0 ? Date.now() + body.rearmHoldMs : null)
           setSourceReady((cur) => (cur.main === (body.mainReady === true) && cur.backup === (body.backupReady === true) ? cur : { main: body.mainReady === true, backup: body.backupReady === true }))
           const nextBed = (body.bed && typeof body.bed === "object" ? body.bed : null) as StreamBedPlan
           setBed((cur) => (JSON.stringify(cur) === JSON.stringify(nextBed) ? cur : nextBed))
@@ -209,6 +220,18 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   if (seen.screen !== screen) setSeen({ screen, lastOther: seen.screen !== "program" ? seen.screen : seen.lastOther })
   const shownScreen = screen === "program" && programDisplay === "under" ? (seen.screen !== "program" ? seen.screen : seen.lastOther) : screen
   const ended = shownScreen === "end"
+  // Browser capture (re)start: its first frame is taken once <html data-stream-ready> is set. With
+  // Program up, wait for the program picture (≤ 8s) so the output never opens on the countdown underneath.
+  const [capturePage] = useState(() => isCapturePage())
+  const [mountedAt] = useState(() => Date.now())
+  const startReady = captureStartReady({ capturePage, blocked, screen, shownScreen, waitedMs: nowMs - mountedAt })
+  useEffect(() => {
+    if (!startReady || document.documentElement.dataset.streamReady) return
+    document.documentElement.dataset.streamReady = "1"
+    const waited = Date.now() - mountedAt
+    if (capturePage && screen === "program") playerDiag("·", `capture start held ${waited}ms for the program picture (${shownScreen !== "program" ? "gave up after 8s" : programDisplay === "video" ? "first frame up" : "no feed: \"Waiting for OBS\" card"}): the output doesn't open on the countdown`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when ready
+  }, [startReady])
   // Browser capture reads this to switch its audio to the OBS program feed (only once its picture is up).
   useEffect(() => {
     document.documentElement.dataset.screen = shownScreen
@@ -247,7 +270,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} />
       })}
       <StreamAudioOverlay />
       {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} viewKey={viewKey} /> : null}

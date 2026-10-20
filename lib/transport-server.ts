@@ -1,6 +1,7 @@
 import { readServerState, RevConflict, writeServerEvent } from "@/lib/event-server"
 import { programReadyCached } from "@/lib/relay"
 import { plog } from "@/lib/program-log"
+import { rearmHoldLeftMs } from "@/lib/program-rearm"
 import { manualSwitchError } from "@/lib/program-source"
 import { noteSourceSwitch, programSourcesView } from "@/lib/program-monitor"
 import { applyTransport, deckState, type DeckState, type TransportAction } from "@/lib/transport"
@@ -15,7 +16,7 @@ function ready(state: ReturnType<typeof readServerState>) {
 }
 export function currentDeckState(now = Date.now()): DeckState {
   const state = readServerState()
-  return deckState(state, now, ready(state), programSourcesView(now))
+  return { ...deckState(state, now, ready(state), programSourcesView(now)), rearmHoldMs: rearmHoldLeftMs(now) }
 }
 
 /**

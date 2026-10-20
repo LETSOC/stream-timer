@@ -4,7 +4,7 @@ import test from "node:test"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { verticalHealth, verticalProgress, audioArgs, cleanBg, decideAudioCopy, legacyDestIds, parseVerticalSettings, resolveEncoder, verticalCommand, verticalFilter, videoArgs, VERTICAL_TAG_RE } from "@/lib/vertical"
+import { verticalHealth, verticalProgress, audioArgs, cleanBg, decideAudioCopy, legacyDestIds, parseVerticalSettings, resolveEncoder, verticalCommand, verticalEncoderNote, verticalFilter, videoArgs, VERTICAL_TAG_RE } from "@/lib/vertical"
 import { buildMediamtxConfig, forwardConflict, friendlyForwardError, isVerticalTag, parseRelayLoops } from "@/lib/relay"
 
 test("vertical filter fits 16:9 into 1080x1920, centred, configurable bars", () => {
@@ -98,4 +98,9 @@ test("relay-loop backs off past LOOP_MAX_DELAY after LOOP_SLOW_AFTER quick failu
   const delays = [...r.stdout.matchAll(/restarting in (\d+)s/g)].map((m) => Number(m[1]))
   assert.deepEqual(delays.slice(0, 3), [1, 1, 2])
   assert.ok(fs.readFileSync(state, "utf8").includes('"nextDelay":'))
+})
+
+test("vertical start line names its encoder", () => {
+  assert.equal(verticalEncoderNote("videotoolbox", true), "encoder (vertical): h264_videotoolbox (rate-capped), 1080x1920@30, 4500k, audio copy")
+  assert.equal(verticalEncoderNote("libx264", false), "encoder (vertical): libx264 (constant bitrate), 1080x1920@30, 4500k, audio AAC")
 })

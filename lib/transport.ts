@@ -47,6 +47,8 @@ export type TransportAction =
 export type ProgramSourcesView = {
   main: SourceHealth & Partial<InputReadout>
   backup: SourceHealth & Partial<InputReadout> & { pull: boolean }
+  /** per-feed OBS login on (per-feed Disarm/Arm) */
+  armed?: { main: boolean; backup: boolean }
   returnStatus?: ReturnStatus | null
   failover: FailoverSettings
   last: FailoverEvent | null
@@ -300,6 +302,8 @@ export type DeckState = {
   programSources: ProgramSourcesView | null
   /** Last known: is OBS publishing to the relay's /program path? null = not known (relay not armed). */
   programReady: boolean | null
+  /** ms left of a disarm/arm cycle (auto re-arm or desk buttons): previews hold the last frame, no "Waiting for OBS". */
+  rearmHoldMs?: number
   overlayAt: number | null
   forceEnd: boolean
   holdCountdown: boolean

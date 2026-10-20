@@ -10,7 +10,7 @@ import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type Fail
 import fs from "node:fs"
 import path from "node:path"
 import { syncMdns } from "@/lib/mdns"
-import { FRESH_REARM, noteRelayDisruption, rearmStep, relayQuietUntil, type RearmMemory } from "@/lib/program-rearm"
+import { FRESH_REARM, noteRelayDisruption, plannedBack, plannedBackSkip, rearmStep, relayQuietUntil, type RearmMemory } from "@/lib/program-rearm"
 import { armProgram, disarmProgram, programSourceHealth, readSettings, relayDir, wantedMdns, refreshProgramSources, verifyMediamtxConfig } from "@/lib/relay"
 import type { ProgramSourcesView } from "@/lib/transport"
 import { runServerTransport } from "@/lib/transport-server"
@@ -20,6 +20,8 @@ import { BACKUP_PATH, PROGRAM_PATH, relayReadUrl } from "@/lib/relay"
 import { readChannelStatus } from "@/lib/encoder"
 import { changeLogger, plog, PROGRAM_LOG_VERBOSE } from "@/lib/program-log"
 import { dlog } from "@/lib/dropout-log"
+import { disarmPlan, FEED_LABEL, other, type ArmScope, type Feed } from "@/lib/program-arm"
+import type { RelayResult } from "@/lib/relay"
 const onChange = changeLogger()
 /** First state after a server start is context, not an incident. */
 const stateSeen = new Set<string>()
@@ -67,6 +69,7 @@ export function programSourcesView(now = Date.now()): ProgramSourcesView | null 
   return {
     main: readout("main"),
     backup: { ...readout("backup"), pull: settings.backupPullUrl !== "" },
+    armed: { main: !settings.disarmed.main, backup: !settings.disarmed.backup },
     returnStatus: monitor().status,
     failover: settings.failover,
     last: monitor().last,
@@ -196,18 +199,55 @@ function autoRearmTick(m: Monitor, active: ProgramSource, now: number, stallMs: 
   m.downAt = downAt
   if (!fire) return
   const label = SOURCE_LABEL[active]
+  // Operator just brought it back on purpose (back-on mark / manual Arm): the reconnect is planned, don't kick it again.
+  const skip = plannedBackSkip(plannedBack(), active, now)
+  if (skip) {
+    plog(`auto re-arm skipped (${skip.why} ${skip.agoSec}s ago)`)
+    dlog("·", "rearm", `${label}: auto re-arm skipped (${skip.why} ${skip.agoSec}s ago)`)
+    return
+  }
   plog(`${label} reconnected → auto re-arm`)
-  dlog("!", "rearm", `${label} reconnected → auto re-arm: disarming /program + /program-backup for ~1.5s (publishers kicked; OBS reconnects; /stream holds the last frame, "Waiting for OBS" if it takes > ~7s)`)
+  dlog("!", "rearm", `${label} reconnected → auto re-arm: disarming ${label} only for ~1.5s (its publisher kicked; OBS reconnects; the other feed is untouched; /stream and the previews hold the last frame, "Waiting for OBS" only if OBS is still away after ~15s)`)
   m.rearming = true
   void (async () => {
     try {
-      await disarmProgram()
+      await disarmProgram(active)
       await new Promise((resolve) => setTimeout(resolve, 1500))
-      const armed = await armProgram()
+      const armed = await armProgram(active)
       if (!armed.ok) { plog(`auto re-arm: arm failed: ${armed.error ?? "unknown"}`); dlog("!", "rearm", `auto re-arm: arm failed: ${armed.error ?? "unknown"}`) }
       noteSourceSwitch({ at: Date.now(), from: active, to: active, reason: `${label} reconnected → auto re-arm (A/V resync)`, auto: true })
     } finally { m.rearming = false }
   })()
+}
+
+/** A feed counts as healthy for a hand-over: publishing, READY, state HEALTHY. */
+function feedHealthy(f: Feed, now: number): boolean {
+  const r = inputReadout(f, now, readSettings().failover.stallSec * 1000)
+  return r.ready && r.readyOk && r.state === "healthy"
+}
+
+/**
+ * Operator Disarm (desk/deck): one feed or both. Standby feed: just that feed. On-air feed with the
+ * other healthy: normal hand-over to the other first (last frame held while it swaps), then disarm.
+ * Otherwise disarm now: the output holds the last frame, then the standby card (the UI warned).
+ */
+export async function disarmFeed(scope: ArmScope, now = Date.now()): Promise<RelayResult> {
+  if (scope === "both") return disarmProgram("both")
+  const active = readServerState().stage.programSource
+  const plan = disarmPlan(scope, active, feedHealthy(other(scope), now))
+  if (plan.handoverTo) {
+    const to = plan.handoverTo
+    const result = runServerTransport({ type: "programSource", source: to }, undefined, now)
+    if (result.ok && readServerState().stage.programSource === to) {
+      noteSourceSwitch({ at: now, from: active, to, reason: `${FEED_LABEL[scope]} disarmed by the operator (hand-over first)`, auto: false })
+      dlog("·", "rearm", `${FEED_LABEL[scope]} on air → hand-over to ${FEED_LABEL[to]} first, then ${FEED_LABEL[scope]} DISARMED`)
+      // Let /stream finish the swap (it keeps the old feed on air until the new one plays) before kicking it.
+      await new Promise((resolve) => setTimeout(resolve, readSettings().failover.switchBufferMs + 2500))
+      return disarmProgram(scope, { hold: false })
+    }
+  }
+  if (plan.affectsAir) dlog("!", "rearm", `${FEED_LABEL[scope]} disarmed while on air: ${plan.warning}`)
+  return disarmProgram(scope, { hold: plan.affectsAir })
 }
 
 export function startProgramMonitor(intervalMs = 500) {

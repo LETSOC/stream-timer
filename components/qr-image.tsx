@@ -1,6 +1,7 @@
 "use client"
 
 import QRCode from "qrcode"
+import { brandUrl } from "@/lib/brand-asset"
 
 /** Module cache so remounts (and /stream reload) paint the same QR instantly. */
 const cache = new Map<string, string>()
@@ -51,7 +52,7 @@ export function QrImage({
   if (!src) {
     return (
       <img
-        src="/brand/rsvp-qr.png"
+        src={brandUrl("/brand/rsvp-qr.png")}
         alt={alt}
         className={className}
         draggable={false}

@@ -68,3 +68,13 @@ test("noteRelayDisruption opens a quiet window", () => {
   noteRelayDisruption(1000, 8000)
   assert.ok(relayQuietUntil() >= 9000)
 })
+
+test("planned back on / manual Arm: auto re-arm of that input is skipped for 60s", async () => {
+  const { plannedBackSkip, PLANNED_BACK_MS } = await import("@/lib/program-rearm")
+  const p = { main: 100_000, backup: null }
+  assert.deepEqual(plannedBackSkip(p, "main", 103_000), { why: "planned back on / manual arm", agoSec: 3 }) // 18:06:51 back on → 18:06:54 re-arm
+  assert.equal(plannedBackSkip(p, "backup", 103_000), null) // other input not covered
+  assert.equal(plannedBackSkip(p, "main", 100_000 + PLANNED_BACK_MS + 1), null)
+  assert.equal(plannedBackSkip({ main: null, backup: null }, "main", 1), null)
+  assert.equal(PLANNED_BACK_MS, 60_000)
+})

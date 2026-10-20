@@ -20,7 +20,8 @@ import { Label } from "@/components/ui/label"
 import { CountdownStage } from "@/components/countdown-stage"
 import { EncodedPreview } from "@/components/encoded-preview"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
-import { failoverText, ProgramSourceSwitch, sourceStatus, useFailoverEvents } from "@/components/program-source-switch"
+import { armFeed, failoverText, ProgramSourceSwitch, sourceStatus, useFailoverEvents } from "@/components/program-source-switch"
+import { FeedStatus } from "@/components/feed-status"
 import { DropoutLogPanel, markDropout, markToast } from "@/components/dropout-mark"
 import type { FailoverSettings, ProgramSource } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
@@ -125,6 +126,8 @@ export function OperatorConsole() {
   const [breakFit, setBreakFit] = useState<ImageFit>("cover")
   const [holdTitle, setHoldTitle] = useState(DEFAULT_STAGE.holdTitle)
   const [holdMessage, setHoldMessage] = useState("")
+  const [standbyTitle, setStandbyTitle] = useState(DEFAULT_STAGE.standbyTitle)
+  const [standbyMessage, setStandbyMessage] = useState(DEFAULT_STAGE.standbyMessage)
   const [holdImage, setHoldImage] = useState("")
   const [holdFit, setHoldFit] = useState<ImageFit>("cover")
   const [welcomeTitle, setWelcomeTitle] = useState(DEFAULT_STAGE.welcomeTitle)
@@ -334,6 +337,8 @@ export function OperatorConsole() {
     if (stage.breakFit === "cover" || stage.breakFit === "contain") setBreakFit(stage.breakFit)
     if (typeof stage.holdTitle === "string") setHoldTitle(stage.holdTitle)
     if (typeof stage.holdMessage === "string") setHoldMessage(stage.holdMessage)
+    if (typeof stage.standbyTitle === "string") setStandbyTitle(stage.standbyTitle)
+    if (typeof stage.standbyMessage === "string") setStandbyMessage(stage.standbyMessage)
     if (typeof stage.holdImage === "string") setHoldImage(stage.holdImage)
     if (stage.holdFit === "cover" || stage.holdFit === "contain") setHoldFit(stage.holdFit)
     if (typeof stage.welcomeTitle === "string") setWelcomeTitle(stage.welcomeTitle)
@@ -347,7 +352,7 @@ export function OperatorConsole() {
     setVisuals((cur) => ({ ...cur, ...Object.fromEntries(VISUAL_KEYS.filter((k) => stage[k] !== undefined).map((k) => [k, stage[k]])) }))
     if (typeof stage.streamProgramAudio === "boolean" || typeof stage.streamBedAudio === "boolean") setStreamAudio((cur) => ({ program: stage.streamProgramAudio ?? cur.program, bed: stage.streamBedAudio ?? cur.bed }))
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
-  }, [setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
+  }, [setStandbyTitle, setStandbyMessage, setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
   useEffect(() => {
     // The server is the source of truth. The browser keeps only section drafts, the RTMP URL and
@@ -394,7 +399,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, standbyTitle, standbyMessage, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -1036,7 +1041,7 @@ export function OperatorConsole() {
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
             </div>
-              <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
+              <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
                 <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
             {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
@@ -1403,6 +1408,7 @@ export function OperatorConsole() {
             )}
             {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
             {previewScreen === "program" ? <ProgramPlayer scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
+            <FeedStatus view={sources} className="absolute top-1.5 left-1.5 z-20" />
           </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-3 [&>*:first-child]:basis-full xl:[&>*:first-child]:basis-0 xl:[&>*:first-child]:grow">
@@ -1473,6 +1479,9 @@ export function OperatorConsole() {
             <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show hold card. Edits here are a draft until you Save.</p>
             <Field label="Title" htmlFor="hold-title"><GrowingText id="hold-title" value={holdTitle} onChange={setHoldTitle} /></Field>
             <Field label="Message (optional)" htmlFor="hold-message"><GrowingText id="hold-message" value={holdMessage} onChange={setHoldMessage} /></Field>
+            <p className="pt-2 font-mono text-[12px] leading-5 text-black/70">Feed-lost card: shown automatically on /stream (and Vertical) when neither Main nor Backup is sending. Public text: no technical words.</p>
+            <Field label="Feed-lost title" htmlFor="standby-title"><GrowingText id="standby-title" value={standbyTitle} onChange={setStandbyTitle} /></Field>
+            <Field label="Feed-lost message (optional)" htmlFor="standby-message"><GrowingText id="standby-message" value={standbyMessage} onChange={setStandbyMessage} /></Field>
             <Field label="Image (optional): URL or upload" htmlFor="hold-image">
               <GrowingText id="hold-image" value={holdImage} onChange={setHoldImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -2063,7 +2072,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
       <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can&apos;t show it.</p>
       <div className="flex flex-wrap gap-2">
         {program?.armed ? (
-          <ConfirmButton data-testid="program-disarm" className={pillClass("danger", "sm")} disabled={busy} confirmLabel="Disarm? OBS gets disconnected · confirm" onConfirm={() => void act({ action: "disarm-program" }, "Disarmed.")}>Disarm</ConfirmButton>
+          <ConfirmButton data-testid="program-disarm" className={pillClass("danger", "sm")} disabled={busy} confirmLabel="Disarm BOTH? Main and Backup get disconnected · confirm" onConfirm={() => void act({ action: "disarm-program", feed: "both" }, "Disarmed.")}>Disarm both</ConfirmButton>
         ) : (
           <Pill size="sm" data-testid="program-arm" disabled={busy || !relay?.installed} onClick={() => void act({ action: "arm-program" }, "Armed: waiting for OBS on /program.")}>Arm receive</Pill>
         )}
@@ -2380,7 +2389,7 @@ function DiagnosisLine({ value, testid }: { value: { level: Level; text: string 
 }
 
 type AudioModeView = "silent" | "tone" | "bed"
-type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; programOffsetMs?: { main: number; backup: number }; syncTest?: boolean }
+type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; programOffsetMs?: { main: number; backup: number }; syncTest?: boolean; chromeRefreshHours?: number }
 type AudioFileView = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string }
 type AudioSettingsView = { rev: number; channels: Record<RtmpChannelId, AudioConfigView> }
 const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aac,audio/mpeg,audio/mp4,audio/wav,audio/aac"
@@ -2488,6 +2497,11 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
                 <label className="flex min-h-7 items-center gap-2">
                   <input type="checkbox" data-testid={tid("sync-test")} checked={cfg.syncTest === true} onChange={(e) => edit(ch, { syncTest: e.target.checked })} />
                   A/V sync test: white flash + beep every second (on air!)
+                </label>
+              ) : null}
+              {ch === "capture" ? (
+                <label className="flex min-h-7 items-center gap-2" title="Relaunches the capture's Chrome fresh every N hours (0 = off) for 24/7 running. Only while the countdown/cards are up, never during the program; the last frame is held so viewers see no change.">
+                  Fresh Chrome every <input type="number" data-testid={tid("chrome-refresh")} min={0} max={24} step={1} value={cfg.chromeRefreshHours ?? 3} onChange={(e) => edit(ch, { chromeRefreshHours: Number(e.target.value) })} className="h-7 w-14 border px-1" /> h <span className="text-black/60">(0 = off; not during the program)</span>
                 </label>
               ) : null}
             </div>

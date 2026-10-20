@@ -16,13 +16,14 @@
 // CAPTURE_ENCODER (auto | libx264 | videotoolbox; auto = h264_videotoolbox on a Mac when it works,
 // else libx264), CAPTURE_STATS_FILE (JSON health every 2s), FFMPEG_BIN. Never prints either URL.
 // Exits non-zero on any failure so rtmp-supervisor.sh restarts it.
-import { spawn, spawnSync } from "node:child_process"
+import { execFileSync, spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { chromium } from "playwright"
+import { plannedRefreshDue, relaunchBackoffMs } from "./chrome-life.mjs"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 import { captureCodeVersion } from "./code-version.mjs"
-import { createJitterMeter, deadBandMs, splice, spliceFrames } from "./program-jitter.mjs"
+import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames, targetJumped } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
 const pageUrl = process.env.CAPTURE_URL
@@ -88,7 +89,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, holding: false, ramp: 1 }
+const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, resyncs: 0, resyncUntil: 0, resyncCounted: false, display: "", resyncGen: null, holding: false, ramp: 1 }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -212,6 +213,9 @@ function switchProgramSource(source) {
   prog.latencyMs = inputs[source].latencyMs // last known for this input (not the other one's), else fallback
   inputs[source].jitter.reset()
   prog.ramp = 0 // ~30ms fade-in on the new input: no click at the splice
+  // Every Main↔Backup switch (failover, back to Main, manual): snap to the new input's delay now,
+  // instead of ~30s of small splices (01:55:22 failover: 3160→2123ms target, 115 corrections, 0 resyncs).
+  armResync(`program source → ${source === "backup" ? "Backup" : "Main"}`)
   if (spare.reader && spare.source === source && spare.bytes > 0) {
     const r = spare.reader
     spare.reader = null
@@ -311,15 +315,19 @@ function takeProgram(n) {
   const queuedMs = (prog.bytes / 4 / RATE) * 1000
   const input = inputs[prog.source]
   input.jitter.add(queuedMs, now)
+  if (now < prog.resyncUntil) input.jitter.reset() // the jump itself is not arrival jitter
   const spread = input.jitter.spreadMs()
   // ~2s average: arrival bursts from a remote publisher average out instead of steering the output.
   const alpha = Math.min(1, n / (2 * RATE))
   prog.levelMs = prog.levelMs === null ? queuedMs : prog.levelMs * (1 - alpha) + queuedMs * alpha
   prog.jitterMs = spread
   let err = prog.levelMs - target
-  const jump = Math.max(300, spread * 1.5)
-  if (err > jump) { dropProgram(prog.bytes - targetBytes); prog.levelMs = target; prog.jumps += 1; err = 0 }
-  if (err < -jump || prog.holding) {
+  // Hard resync: off by more than the (≤1s) threshold, or forced right after the picture jumped.
+  const force = now < prog.resyncUntil
+  const act = resyncAction({ levelMs: prog.levelMs, queuedMs, targetMs: target, spreadMs: spread, force })
+  if (act !== "none" && force && !prog.resyncCounted) { prog.resyncs += 1; prog.resyncCounted = true } // once per signal
+  if (act === "drop") { dropProgram(prog.bytes - targetBytes); prog.levelMs = target; prog.jumps += 1; err = 0 }
+  if (act === "hold" || prog.holding) {
     // Hold: silence until the queue is back at the target.
     if (!prog.holding) { prog.holding = true; prog.jumps += 1 }
     if (queuedMs >= target) { prog.holding = false; prog.levelMs = queuedMs }
@@ -408,63 +416,9 @@ for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => { log(`
 
 log(`starting ${width}x${height} @ ${fps}fps, ${bitrate}k, ${encoder}${encoder === "h264_videotoolbox" ? (vtCbr ? " (constant bitrate)" : " (average bitrate)") : ""}, keyframe every 2s`)
 if (encoder === "h264_videotoolbox" && !vtCbr) log("VideoToolbox here can't do constant bitrate (needs FFmpeg 6.1+ and macOS 13+ on Apple Silicon); a static page may send well under the set bitrate. Pick libx264 for a padded constant bitrate.")
-browser = await chromium.launch({
-  headless: true,
-  handleSIGTERM: false,
-  handleSIGINT: false,
-  handleSIGHUP: false,
-  env: childEnv,
-  args: ["--autoplay-policy=no-user-gesture-required", "--hide-scrollbars", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"],
-}).catch((error) => {
-  log(`browser launch failed: ${error.message.split("\n")[0]} (run: npx playwright install chromium)`)
-  process.exit(4)
-})
-browser.on("disconnected", () => { if (!stopping) { log("browser crashed"); void shutdown(5) } })
-
-const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })
-// Internal capture credential (data/capture-key, 0600), not the OBS view key, so rotating the
-// view key doesn't blank this capture. Sent as a header, and only to this server's own origin
-// (never to third-party images/fonts on the page). Re-read per request so a fresh file is picked up.
 const pageOrigin = new URL(pageUrl).origin
 const captureKeyFile = process.env.CAPTURE_KEY_FILE
 const readCaptureKey = () => { try { return fs.readFileSync(captureKeyFile, "utf8").trim() } catch { return "" } }
-if (captureKeyFile) {
-  if (!readCaptureKey()) log("capture key file missing; /stream will need the view key")
-  await context.route("**/*", (route) => {
-    const req = route.request()
-    let sameOrigin = false
-    try { sameOrigin = new URL(req.url()).origin === pageOrigin } catch { /* data: etc */ }
-    const key = sameOrigin ? readCaptureKey() : ""
-    return key ? route.continue({ headers: { ...req.headers(), "x-stream-capture-key": key } }) : route.continue()
-  })
-}
-const page = await context.newPage()
-// Program audio straight from the on-air /stream player (same element as the picture, so A/V are in
-// sync by construction for Main and Backup, local or remote). The page calls this with s16 stereo PCM.
-if (PAGE_AUDIO) await page.exposeBinding("__programPcm", (_src, source, b64) => {
-  const q = pageAudio[source === "backup" ? "backup" : "main"]
-  const buf = Buffer.from(String(b64), "base64")
-  q.chunks.push(buf); q.bytes += buf.length; q.at = Date.now()
-  const max = Math.round(1.0 * RATE) * 4 // never more than 1s queued
-  if (q.bytes > max) dropFrom(q, q.bytes - max)
-})
-page.on("crash", () => { log("page crashed"); void shutdown(6) })
-// DOM-ready + the page's own ready marker (not "networkidle": /stream polls forever, and slow
-// speaker images would otherwise hold the start for 20s).
-const response = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => null)
-if (!response || !response.ok()) {
-  log(`could not load /stream (status ${response?.status() ?? "none"})`)
-  await shutdown(7)
-}
-await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 }).catch(() => log("/stream ready marker not seen in 15s; capturing anyway"))
-if (await page.getByText("View key required").count()) {
-  log("/stream says the view key is wrong")
-  await shutdown(8)
-}
-// Transparent edition renders over black in the stream (no alpha in H.264).
-const cdp = await context.newCDPSession(page)
-await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 1 } })
-
 let latest = null
 let frames = 0
 // Health counters, reset every stats window.
@@ -474,31 +428,99 @@ let lastScreencastAt = 0
 let freshFrame = false
 // Recent frames with arrival time, so a negative A/V trim can show the picture a little later.
 const frameRing = []
-cdp.on("Page.screencastFrame", ({ data, sessionId, metadata }) => {
-  latest = Buffer.from(data, "base64")
-  const arrived = Date.now()
-  if (lastScreencastAt) win.maxGap = Math.max(win.maxGap, arrived - lastScreencastAt)
-  lastScreencastAt = arrived
-  frameRing.push({ buf: latest, at: arrived })
-  while (frameRing.length > 2 && arrived - frameRing[1].at > 1200) frameRing.shift()
-  // Screencast lag: paint time (CDP, seconds) → arrival here. Smoothed; ignores outliers (GC pauses).
-  const painted = Number(metadata?.timestamp) * 1000
-  if (painted > 0) {
-    const lag = arrived - painted
-    // Typical screencast lag is a few ms; ignore GC/load spikes so the bed delay doesn't leap.
-    if (lag >= 0 && lag < 200) {
-      if (sync.lagMs === null) sync.lagMs = Math.min(60, lag)
-      else if (Math.abs(lag - sync.lagMs) < 80) sync.lagMs = sync.lagMs * 0.95 + lag * 0.05
-    }
+// Self-reload (page hung): the reloading page paints the countdown under the program before its first
+// frame. Hold the last good frame (the writer keeps repeating it at the same rate, so audio/timeline stay
+// in sync) until the reloaded page sets data-stream-ready (program picture or card up).
+let holdLastFrame = false
+// The capture browser (Chrome) and its /stream page. Replaced whole by relaunchBrowser() (hung page,
+// failed reload, crash, planned refresh); ffmpeg, the frame writer and the audio never stop meanwhile.
+let context = null
+let page = null
+let browserGen = 0
+let browserLaunchedAt = Date.now()
+const LAUNCH_ARGS = ["--autoplay-policy=no-user-gesture-required", "--hide-scrollbars", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"]
+/** Launch Chrome, open /stream, wait for its ready marker, start the screencast. Throws on failure (relaunch), exits on first start (as before). */
+async function openBrowser(initial) {
+  const gen = ++browserGen
+  const b = await chromium.launch({ headless: true, handleSIGTERM: false, handleSIGINT: false, handleSIGHUP: false, env: childEnv, args: LAUNCH_ARGS }).catch((error) => {
+    log(`browser launch failed: ${error.message.split("\n")[0]}${initial ? " (run: npx playwright install chromium)" : ""}`)
+    if (initial) process.exit(4)
+    throw error
+  })
+  browser = b
+  browserLaunchedAt = Date.now()
+  b.on("disconnected", () => { if (!stopping && gen === browserGen) void relaunchBrowser("browser crashed") })
+  context = await b.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })
+  if (captureKeyFile) {
+    if (initial && !readCaptureKey()) log("capture key file missing; /stream will need the view key")
+    await context.route("**/*", (route) => {
+      const req = route.request()
+      let sameOrigin = false
+      try { sameOrigin = new URL(req.url()).origin === pageOrigin } catch { /* data: etc */ }
+      const key = sameOrigin ? readCaptureKey() : ""
+      return key ? route.continue({ headers: { ...req.headers(), "x-stream-capture-key": key } }) : route.continue()
+    })
   }
-  frames += 1
-  win.screencast += 1
-  freshFrame = true
-  cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined)
-})
-await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: width, maxHeight: height, everyNthFrame: 1 })
-// The first frame can take a moment; take one screenshot so we never start on nothing.
-latest = await page.screenshot({ type: "jpeg", quality: 85 })
+  page = await context.newPage()
+  // Program audio straight from the on-air /stream player (same element as the picture, so A/V are in
+  // sync by construction for Main and Backup, local or remote). The page calls this with s16 stereo PCM.
+  if (PAGE_AUDIO) await page.exposeBinding("__programPcm", (_src, source, b64) => {
+    const q = pageAudio[source === "backup" ? "backup" : "main"]
+    const buf = Buffer.from(String(b64), "base64")
+    q.chunks.push(buf); q.bytes += buf.length; q.at = Date.now()
+    const max = Math.round(1.0 * RATE) * 4 // never more than 1s queued
+    if (q.bytes > max) dropFrom(q, q.bytes - max)
+  })
+  page.on("crash", () => { if (!stopping && gen === browserGen) void relaunchBrowser("page crashed") })
+  // DOM-ready + the page's own ready marker (not "networkidle": /stream polls forever, and slow
+  // speaker images would otherwise hold the start for 20s).
+  const response = await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => null)
+  if (!response || !response.ok()) {
+    log(`could not load /stream (status ${response?.status() ?? "none"})`)
+    if (initial) await shutdown(7)
+    throw new Error("load failed")
+  }
+  // First start: capture anyway after 15s. Relaunch: the page must be ready (else retry), so the held
+  // frame is only released onto a page showing the right screen.
+  const ready = await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 }).then(() => true, () => false)
+  if (!ready) { if (initial) log("/stream ready marker not seen in 15s; capturing anyway"); else throw new Error("ready marker not seen in 15s") }
+  if (await page.getByText("View key required").count()) {
+    log("/stream says the view key is wrong")
+    if (initial) await shutdown(8)
+    throw new Error("view key")
+  }
+  // Transparent edition renders over black in the stream (no alpha in H.264).
+  const session = await context.newCDPSession(page)
+  await session.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 1 } })
+  session.on("Page.screencastFrame", ({ data, sessionId, metadata }) => {
+    if (holdLastFrame) { session.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined); return }
+    latest = Buffer.from(data, "base64")
+    const arrived = Date.now()
+    if (lastScreencastAt) win.maxGap = Math.max(win.maxGap, arrived - lastScreencastAt)
+    lastScreencastAt = arrived
+    frameRing.push({ buf: latest, at: arrived })
+    while (frameRing.length > 2 && arrived - frameRing[1].at > 1200) frameRing.shift()
+    // Screencast lag: paint time (CDP, seconds) → arrival here. Smoothed; ignores outliers (GC pauses).
+    const painted = Number(metadata?.timestamp) * 1000
+    if (painted > 0) {
+      const lag = arrived - painted
+      // Typical screencast lag is a few ms; ignore GC/load spikes so the bed delay doesn't leap.
+      if (lag >= 0 && lag < 200) {
+        if (sync.lagMs === null) sync.lagMs = Math.min(60, lag)
+        else if (Math.abs(lag - sync.lagMs) < 80) sync.lagMs = sync.lagMs * 0.95 + lag * 0.05
+      }
+    }
+    frames += 1
+    win.screencast += 1
+    freshFrame = true
+    session.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined)
+  })
+  await session.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: width, maxHeight: height, everyNthFrame: 1 })
+  // The first frame can take a moment; take one screenshot so we never start on nothing (first start only:
+  // on a relaunch the held last good frame stays up until the new page's frames flow).
+  if (initial) latest = await page.screenshot({ type: "jpeg", quality: 85 })
+}
+await openBrowser(true)
 
 ffmpeg = spawn(ffmpegBin, [
   "-hide_banner", "-loglevel", "info", "-stats_period", "2",
@@ -574,6 +596,20 @@ function syncTestOverlay(on) {
   }
   requestAnimationFrame(tick)
 }
+// Program audio resync request (picture jumped): see takeProgram / resyncAction.
+let lastAnswerAt = 0
+// For the planned refresh: what /stream shows and when it last switched (screen or Main/Backup).
+let lastScreen = ""
+let lastSwitchAt = Date.now()
+const targetHist = []
+const wantedNow = () => prog.wanted && prog.reader !== null
+function armResync(why) {
+  const already = Date.now() < prog.resyncUntil
+  prog.resyncUntil = Date.now() + RESYNC_WINDOW_MS
+  if (already) return // same resync window: extend it, count/log once
+  prog.resyncCounted = false
+  log(`[audio] program audio resync: ${why}`)
+}
 // Which screen is /stream on? (set by the page; polled cheaply)
 setInterval(async () => {
   if (stopping || reloading) return
@@ -587,17 +623,35 @@ setInterval(async () => {
     log(`[sync] A/V sync test ${sync.test ? "on: white flash + 1 kHz beep at every second" : "off"}`)
     await page.evaluate(syncTestOverlay, sync.test).catch(() => undefined)
   }
+  const askedAt = Date.now()
   const info = await page.evaluate(() => {
     const feed = document.querySelector("[data-testid=program-feed]")
     const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
-    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null }
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null, resync: Number(feed?.getAttribute("data-resync") || 0), display: feed?.getAttribute("data-display") ?? "" }
   }).catch(() => ({ source: prog.source, screen: "", loaded: null, lat: null }))
+  // Page hung (or reloaded): the poll answers late / not at all, the picture froze and resumes behind.
+  if (info.screen !== "") {
+    const quiet = Date.now() - (lastAnswerAt || askedAt)
+    if (lastAnswerAt && quiet > 2000) armResync(`page hung ${(quiet / 1000).toFixed(1)}s`)
+    lastAnswerAt = Date.now()
+    // Player rebuilt / jumped to live (the page bumps data-resync): the picture's delay just changed.
+    // Keyed by input: Main and Backup players count separately (equal counts on a switch ≠ no change).
+    const gen = `${info.source}:${info.resync}`
+    if (gen !== prog.resyncGen) { if (prog.resyncGen !== null && info.source === prog.source) armResync(info.resync === 0 ? "page reloaded" : "player rebuilt or jumped to live"); prog.resyncGen = gen }
+    // Feed back on air after the standby card (no publisher → picture again).
+    if (prog.display === "standby" && info.display === "video") armResync("feed back on air after the standby card")
+    prog.display = info.display
+  }
   const screen = info.screen
+  if (screen !== "" && screen !== lastScreen) { if (lastScreen !== "") lastSwitchAt = Date.now(); lastScreen = screen }
   // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
   // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
-  if (info.source !== prog.source) switchProgramSource(info.source)
+  if (info.source !== prog.source) { switchProgramSource(info.source); lastSwitchAt = Date.now() }
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
-  if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null ? info.lat : prog.latencyMs * 0.92 + info.lat * 0.08 // ~3s: remote players jitter
+  // Right after a resync signal the latency is taken raw, so the target follows the jump at once.
+  // Target delay stepped by >300ms within ~1s (e.g. the other input's latency): snap, don't splice for 30s.
+  if (wantedNow() && targetJumped(targetHist, Date.now(), programTargetMs())) armResync("target delay changed > 300ms")
+  if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null || Date.now() < prog.resyncUntil ? info.lat : prog.latencyMs * 0.92 + info.lat * 0.08 // ~3s: remote players jitter
   // A failed/empty page read (reload, busy page) is not "left the program": keep the last state.
   const wanted = screen === "" ? prog.wanted : screen === "program"
   if (wanted) { prog.lastWantedAt = Date.now(); if (!prog.wanted) { prog.wantedSince = Date.now(); prog.flowed = false; log("[audio] /stream shows the program: audio follows OBS") } }
@@ -644,7 +698,57 @@ ticker = setInterval(() => {
 let lastHb = -1
 let lastHbAt = Date.now()
 let reloading = false
+let relaunching = false
 const reloads = []
+/**
+ * Fresh Chrome: close (or kill) the old one, launch a new process + profile, open /stream, wait for its
+ * ready marker, re-attach the screencast. The last good frame is held to ffmpeg the whole time (the
+ * writer keeps repeating it on the shared timeline: no gap, no countdown/black frames). Retries with
+ * backoff and never gives up.
+ */
+/** Our own Chrome processes (direct children named chrom*), not ffmpeg or the audio readers. */
+function chromeChildren() {
+  try {
+    return execFileSync("pgrep", ["-P", String(process.pid)], { encoding: "utf8" }).split("\n").map(Number).filter((pid) => {
+      try { return pid > 0 && /chrom/i.test(fs.readFileSync(`/proc/${pid}/cmdline`, "utf8")) } catch { return pid > 0 && process.platform === "darwin" && /chrom/i.test(execFileSync("ps", ["-o", "comm=", "-p", String(pid)], { encoding: "utf8" })) }
+    })
+  } catch { return [] }
+}
+async function relaunchBrowser(why) {
+  if (relaunching || stopping) return
+  relaunching = true
+  reloading = true
+  holdLastFrame = true
+  const old = browser
+  const chromePids = chromeChildren() // the old Chrome, to kill if it won't close
+  const t0 = Date.now()
+  log(`[chrome] relaunching the capture browser: ${why} (holding the last good frame)`)
+  for (let attempt = 0; !stopping; attempt++) {
+    const wait = relaunchBackoffMs(attempt)
+    if (wait) { log(`[chrome] relaunch attempt ${attempt + 1} in ${wait / 1000}s`); await new Promise((res) => setTimeout(res, wait)) }
+    if (attempt === 0 && old) {
+      browserGen++ // the old browser's crash/disconnect events no longer count
+      const closed = await Promise.race([old.close().then(() => true, () => false), new Promise((res) => setTimeout(() => res(false), 5000))])
+      log(closed ? "[chrome] old browser closed" : "[chrome] old browser did not close in 5s; killed")
+      if (!closed) for (const pid of chromePids) try { process.kill(pid, "SIGKILL") } catch { /* gone */ }
+    } else if (attempt > 0) { try { await Promise.race([browser?.close(), new Promise((res) => setTimeout(res, 5000))]) } catch { /* gone */ } }
+    try {
+      log(`[chrome] launching a fresh browser (attempt ${attempt + 1})`)
+      await openBrowser(false)
+      sync.test = false // the overlay went with the old page; the poll re-adds it
+      log(`[chrome] /stream ready in the new browser after ${((Date.now() - t0) / 1000).toFixed(1)}s: live frames again`)
+      break
+    } catch (error) {
+      log(`[chrome] relaunch attempt ${attempt + 1} failed: ${String(error?.message ?? error).split("\n")[0]}`)
+    }
+  }
+  holdLastFrame = false
+  lastHb = -1
+  lastHbAt = Date.now()
+  reloads.length = 0
+  reloading = false
+  relaunching = false
+}
 setInterval(async () => {
   if (reloading || stopping) return
   const hb = await Promise.race([
@@ -656,19 +760,37 @@ setInterval(async () => {
   if (quiet < 15000) return
   const now = Date.now()
   while (reloads.length && now - reloads[0] > 120000) reloads.shift()
-  if (reloads.length >= 3) { log(`page heartbeat still stalled after ${reloads.length} reloads in 2 min; restarting capture`); void shutdown(9); return }
+  // A reload already tried in the last 2 min and the page is stuck again: the browser itself is bad.
+  if (reloads.length >= 1) { void relaunchBrowser(`page still unresponsive ${Math.round(quiet / 1000)}s after a reload`); return }
   reloads.push(now)
   log(`page heartbeat stalled ${Math.round(quiet / 1000)}s (${hb === -2 ? "page not responding" : "no tick"}); reloading /stream`)
   reloading = true
+  holdLastFrame = true
+  let ok = false
   try {
     await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 })
     sync.test = false // the overlay went with the old page; the poll re-adds it
     await page.waitForSelector("html[data-stream-ready]", { timeout: 15000 })
-  } catch { log("reload failed"); void shutdown(9) }
+    log("/stream reloaded and ready: live frames again (last good frame held during the reload)")
+    ok = true
+  } catch { log("reload failed: relaunching the browser") }
+  reloading = false
+  if (!ok) { void relaunchBrowser("reload failed"); return }
+  holdLastFrame = false
   lastHb = -1
   lastHbAt = Date.now()
-  reloading = false
 }, 5000)
+/** Box/CI simulation only: planned refresh after this many ms instead of the desk's hours. */
+const refreshTestMs = Number(process.env.CAPTURE_CHROME_REFRESH_TEST_MS) || 0
+// Planned refresh (24/7): a fresh Chrome every N hours (desk › Capture, default 3, 0 = off), only while
+// the countdown/cards are up and nothing switched for 30s. Never during the program (unless hung, above).
+setInterval(() => {
+  if (stopping) return
+  const hours = refreshTestMs > 0 ? refreshTestMs / 3_600_000 : (feeder.sync().chromeRefreshHours ?? 3)
+  if (!plannedRefreshDue({ now: Date.now(), launchedAt: browserLaunchedAt, hours, screen: lastScreen, lastSwitchAt, busy: reloading || relaunching })) return
+  log(`[chrome] planned Chrome refresh (uptime ${((Date.now() - browserLaunchedAt) / 3_600_000).toFixed(1)}h)`)
+  void relaunchBrowser("planned refresh")
+}, 5000).unref()
 const encHist = []
 if (statsFile) {
   setInterval(() => {
@@ -686,7 +808,7 @@ if (statsFile) {
       maxLagMs: Math.round(win.maxLag),
       maxGapMs: win.maxGap,
       fps, encoder, bitrateK: bitrate, size: `${width}x${height}`,
-      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, via: prog.via ?? null, formats: { main: inputs.main.format, backup: inputs.backup.format }, arrivalExcessMs: { main: Math.round(inputs.main.arrival.excessMs), backup: Math.round(inputs.backup.arrival.excessMs) }, offsetMs: { main: inputs.main.offsetMs, backup: inputs.backup.offsetMs } },
+      programAudio: { on: prog.wanted, reading: prog.reader !== null, mixing: prog.wanted && now - prog.mixedAt < 1500, peakDb: prog.peak > 0 ? +(20 * Math.log10(prog.peak / 32768)).toFixed(1) : null, bufferedMs: Math.round((prog.bytes / 4 / RATE) * 1000), underruns: prog.underruns, delayMs: Math.round(prog.targetMs), queuedMs: prog.levelMs === null ? null : Math.round(prog.levelMs), playerLatencyMs: prog.latencyMs === null ? null : Math.round(prog.latencyMs), corrections: prog.corrections, jumps: prog.jumps, resyncs: prog.resyncs, jitterMs: prog.jitterMs == null ? null : Math.round(prog.jitterMs), source: prog.source, via: prog.via ?? null, formats: { main: inputs.main.format, backup: inputs.backup.format }, arrivalExcessMs: { main: Math.round(inputs.main.arrival.excessMs), backup: Math.round(inputs.backup.arrival.excessMs) }, offsetMs: { main: inputs.main.offsetMs, backup: inputs.backup.offsetMs } },
       sync: { screencastLagMs: sync.lagMs === null ? null : Math.round(sync.lagMs), trimMs: sync.trimMs, videoDelayMs: Math.round(videoDelayMs()), bedDelayMs: Math.round(bedLine.delayMs()), skippedMs: Math.round(skippedMs), test: sync.test },
       statsLine: lastStatsLine,
     }

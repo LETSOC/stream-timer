@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { correlate, dropoutLine, londonParts, parseDropoutLog, redact } from "@/lib/dropout-log"
-import { captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
+import { avLine, captureChromeNote, captureEncoderNote, captureHealthLine, verticalHealthLine, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
 
 test("dropout lines use London time (BST in October, GMT in November)", () => {
   assert.equal(dropoutLine(Date.UTC(2026, 9, 19, 9, 59, 1, 234), "!", "relay", "Main gone"), "2026-10-19 10:59:01.234 ! [relay] Main gone")
@@ -116,4 +116,80 @@ test("operator markers: types round-trip; problem marks are incidents, on-purpos
   // Incidents skip expected lines.
   const inc = correlate(a.filter((e) => !isMark(e)))
   assert.deepEqual(inc.map((i) => i.problems.length), [1, 1])
+})
+
+test("operator markers: HD capture / Vertical stopped + back on label /capture and /vertical lines expected", async () => {
+  const { annotateExpected, formatMarkers, isRealProblem, eventSource } = await import("@/lib/dropout-log")
+  const { markMessage, parseMarkMessage } = await import("@/lib/marks")
+  for (const t of ["capture-stopped", "capture-back", "vertical-stopped", "vertical-back"] as const) assert.equal(parseMarkMessage(markMessage(t, "phone", "Main", "program"))?.type, t)
+  const base = Date.UTC(2026, 10, 4, 10, 0, 0)
+  const line = (dt: number, lvl: "!" | "+" | "·", cat: Parameters<typeof dropoutLine>[2], msg: string) => dropoutLine(base + dt, lvl, cat, msg)
+  const ev = parseDropoutLog([
+    line(-3000, "!", "ingest", "Browser capture /capture: no data for 2.0s while the publisher is still connected"),
+    line(-2000, "!", "relay", "Browser capture /capture publisher GONE (RTMP publisher of /capture (127.0.0.1:1) closed: EOF)"),
+    line(-2000, "!", "relay", "Vertical /vertical publisher GONE (RTMP publisher of /vertical (127.0.0.1:2) closed: EOF)"),
+    line(-2000, "!", "push", "live.restream.io vertical (from /capture): exited (code 0 after 282s); restarting in 2s"),
+    line(-2000, "!", "push", "OneStream (from /vertical): exited (code 0 after 276s); restarting in 2s"),
+    line(-1000, "!", "relay", "Main /program publisher GONE (closed: EOF)"), // Main isn't covered by an HD capture stop
+    line(0, "·", "operator", markMessage("capture-stopped", "desk", "Main", "program")),
+    line(6000, "+", "relay", "Browser capture /capture publisher READY (rtmpConn)"),
+    line(8000, "·", "operator", markMessage("capture-back", "phone", "Main", "program")),
+    line(120_000, "!", "relay", "Browser capture /capture publisher GONE (closed: EOF)"), // after back on + 20s: real
+    line(200_000, "·", "operator", markMessage("vertical-stopped", "deck", "Main", "program")),
+    line(201_000, "!", "push", "UPSTREAM TEST (from /vertical): exited (code 0 after 10s)"),
+    line(201_000, "!", "push", "C_HD_TEST LIVE (from /capture): exited (code 0 after 10s)"), // a Vertical stop doesn't explain HD
+    line(205_000, "·", "operator", markMessage("vertical-back", "deck", "Main", "program")),
+  ].join("\n"))
+  assert.equal(eventSource(ev.find((e) => e.msg.startsWith("live.restream.io vertical"))!), "capture")
+  const a = annotateExpected(ev)
+  const exp = (s: string) => a.find((e) => e.msg.startsWith(s))?.expected
+  assert.equal(exp("Browser capture /capture: no data"), "operator stopped HD capture")
+  assert.equal(exp("Vertical /vertical publisher GONE"), "operator stopped HD capture")
+  assert.equal(exp("OneStream"), "operator stopped HD capture")
+  assert.equal(exp("live.restream.io"), "operator stopped HD capture")
+  assert.equal(exp("Browser capture /capture publisher READY"), "operator stopped HD capture")
+  assert.equal(exp("UPSTREAM TEST"), "operator stopped Vertical")
+  assert.deepEqual(a.filter(isRealProblem).map((e) => e.msg.slice(0, 20)), ["Main /program publis", "Browser capture /cap", "C_HD_TEST LIVE (from"])
+  const markers = formatMarkers(ev)
+  assert.equal(markers.length, 4)
+  assert.match(markers[0], /^10:00:00 · HD capture stopped on purpose · on desk .* 5 problem line\(s\) labelled expected/)
+  assert.match(markers[1], /HD capture back on · on phone/)
+  assert.match(markers[2], /Vertical stopped on purpose · on deck .* 1 problem line/)
+})
+
+test("avLine: 30s program audio line with counts since the last line (and after a capture restart)", () => {
+  const a = avLine({ delayMs: 1234.4, queuedMs: 1250, playerLatencyMs: 1180, corrections: 40, jumps: 2, resyncs: 1 }, null)
+  assert.equal(a.text, "program audio target delay 1234ms, queue 1250ms, player latency 1180ms; last 30s: 0 corrections, 0 drops/holds, 0 resyncs")
+  const b = avLine({ delayMs: 8000, queuedMs: null, playerLatencyMs: 7900, corrections: 52, jumps: 5, resyncs: 3 }, a.counters)
+  assert.match(b.text, /queue unprimed, player latency 7900ms; last 30s: 12 corrections, 3 drops\/holds, 2 resyncs$/)
+  const c = avLine({ delayMs: 1200, queuedMs: 1200, playerLatencyMs: 1100, corrections: 4, jumps: 0, resyncs: 0 }, b.counters)
+  assert.match(c.text, /4 corrections, 0 drops\/holds, 0 resyncs$/)
+})
+
+test("captureChromeNote: planned refresh is info, relaunch is trouble, ready is recovery", () => {
+  assert.deepEqual(captureChromeNote("[capture 03:00:01] [chrome] planned Chrome refresh (uptime 3.0h)"), { level: "·", text: "planned Chrome refresh (uptime 3.0h)" })
+  assert.equal(captureChromeNote("[capture 07:29:10] [chrome] relaunching the capture browser: reload failed (holding the last good frame)")?.level, "!")
+  assert.equal(captureChromeNote("[capture 07:29:14] [chrome] /stream ready in the new browser after 3.9s: live frames again")?.level, "+")
+  assert.equal(captureChromeNote("[capture 07:29:14] page heartbeat stalled 15s"), null)
+  assert.equal(captureChromeNote("[capture 10:35:41] [chrome] relaunching the capture browser: planned refresh (holding the last good frame)")?.level, "·")
+})
+
+test("capture start line → encoder note", () => {
+  assert.deepEqual(captureEncoderNote("[capture 14:00:01] starting 1920x1080 @ 30fps, 4500k, h264_videotoolbox (constant bitrate), keyframe every 2s"), { level: "·", text: "encoder (HD capture): h264_videotoolbox (constant bitrate), 1920x1080@30, 4500k" })
+  assert.equal(captureEncoderNote("[capture 14:00:01] starting 1280x720 @ 30fps, 3000k, libx264, keyframe every 2s")?.text, "encoder (HD capture): libx264, 1280x720@30, 3000k")
+  assert.equal(captureEncoderNote("[capture 14:00:01] VideoToolbox here can't do constant bitrate (needs FFmpeg 6.1+)")?.level, "!")
+  assert.equal(captureEncoderNote("[capture 14:00:01] something else"), null)
+})
+
+test("30s capture health line: real fields, ? when missing, Mac load", () => {
+  const load = { one: 3.21, five: 2.5, cores: 10 }
+  const line = captureHealthLine({ size: "1920x1080", encoder: "h264_videotoolbox", bitrateK: 4500, screencastFps: 29.5, writtenFps: 30, repeatPct: 12.5, enc: { fps: 30, speed: 1, kbps: 4480 }, backpressurePct: 0, maxLagMs: 18, maxGapMs: 120, sync: { skippedMs: 0 } }, load)
+  assert.equal(line, "health: 1920x1080 h264_videotoolbox 4500k · screencast 29.5fps · written 30fps (12.5% repeats) · enc 1.00x 4480kbps · pipe backpressure 0% · maxLag 18ms · maxGap 120ms · skipped 0ms · Mac load 3.21/2.50 (cores 10)")
+  assert.match(captureHealthLine({}, load), /^health: \? \? \? · screencast \? · written \? \(\? repeats\) · enc \? \? ·/)
+  assert.equal(verticalHealthLine({ encoder: "libx264", fps: 30, speed: 1.01, drop: 0, dup: 2 }, load), "health (vertical): 1080x1920 libx264 4500k · enc 1.01x 30fps · drop 0 · dup 2 · Mac load 3.21/2.50 (cores 10)")
+})
+
+test("[av] line says unprimed when the queue has no level; speed line carries load", () => {
+  assert.match(avLine({ delayMs: 2000, queuedMs: null, playerLatencyMs: 2100 }, null).text, /queue unprimed,/)
+  assert.match(captureTrouble({ enc: { fps: 28, speed: 0.8, kbps: 4000 } }, { one: 9, five: 7, cores: 8 })[0].text, /0\.8x.*Mac load 9\.00\/7\.00 \(cores 8\)/)
 })

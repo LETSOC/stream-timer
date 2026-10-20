@@ -2,7 +2,8 @@
  * What the OBS program layer shows. Pure, so /stream, the desk and the deck agree (and it is unit-tested).
  * - "video": frames are advancing (or stalled for less than STALL_HOLD_MS: hold the last frame).
  * - "standby": "Waiting for OBS". Only after a grace: not ready for > NOT_READY_MS, no first frame
- *   within FIRST_FRAME_GRACE_MS of switching, or a stall longer than STALL_HOLD_MS.
+ *   within FIRST_FRAME_GRACE_MS of switching, or a stall longer than STALL_HOLD_MS. While the relay
+ *   reports the publisher (ready), only after READY_STALL_TIMEOUT_MS without a frame.
  * - "under": not covering anything yet, so the previous screen (countdown/card) stays visible.
  */
 export const NOT_READY_MS = 3000
@@ -25,11 +26,18 @@ export type ProgramDisplayInput = {
   notReadySince: number | null
   /** Last time the picture advanced (null = no frame since the player (re)loaded). */
   lastFrameAt: number | null
+  /** A last good frame is available to hold on top (the player's cover canvas). */
+  held?: boolean
+  /** A disarm/arm cycle is in progress (auto re-arm or the desk buttons, ≤ REARM_HOLD_MS): OBS was kicked on purpose. */
+  rearmHold?: boolean
 }
 
 export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
   const { now, activeSince, ready, notReadySince, lastFrameAt } = input
   if (activeSince === null) return "under"
+  // Re-arm in progress: OBS was kicked on purpose and is reconnecting. Freeze on the last frame (the
+  // element's, or the cover canvas after a teardown) instead of "Waiting for OBS"; afterwards, the rules below.
+  if (input.rearmHold && (lastFrameAt !== null || input.held)) return "video"
   const gone = !ready && (notReadySince === null || now - notReadySince > NOT_READY_MS)
   if (lastFrameAt !== null) {
     const stalled = now - lastFrameAt
@@ -39,6 +47,14 @@ export function programDisplay(input: ProgramDisplayInput): ProgramDisplay {
     return "standby"
   }
   if (gone && now - activeSince > Math.min(NOT_READY_MS, FIRST_FRAME_GRACE_MS)) return "standby"
+  // No frame yet but the relay reports the publisher (OBS just reconnected after a disarm/arm or a drop;
+  // the rebuilt player needs a few seconds for its first frame): never "Waiting for OBS". Hold the last
+  // frame if there is one, else keep the previous screen; standby only if it never plays.
+  if (ready) {
+    const waiting = now - Math.max(activeSince, input.readyAt ?? activeSince)
+    if (waiting <= READY_STALL_TIMEOUT_MS) return input.held ? "video" : "under"
+    return "standby"
+  }
   if (now - activeSince > FIRST_FRAME_GRACE_MS) return "standby"
   return "under"
 }
@@ -70,14 +86,14 @@ export function handoverDone(input: { screenIsProgram: boolean; pendingSince: nu
 
 /**
  * Operator previews (desk/deck players, not /stream): "Waiting for OBS" only once the path has had no
- * publisher for NOT_READY_MS — never for a player stall, a reload or a WebRTC→HLS swap. Short gaps
+ * publisher for NOT_READY_MS — never for a player stall, a reload, a WebRTC→HLS swap or a re-arm. Short gaps
  * keep the last frame with a small "reconnecting" badge.
  */
 export type PreviewDisplay = "video" | "connecting" | "reconnecting" | "standby"
 export const PREVIEW_GAP_MS = 1500
-export function previewDisplay(input: { now: number; ready: boolean; notReadySince: number | null; lastFrameAt: number | null }): PreviewDisplay {
+export function previewDisplay(input: { now: number; ready: boolean; notReadySince: number | null; lastFrameAt: number | null; /** disarm/arm cycle in progress: "reconnecting", never the card */ rearmHold?: boolean }): PreviewDisplay {
   const { now, ready, notReadySince, lastFrameAt } = input
-  const gone = !ready && notReadySince !== null && now - notReadySince > NOT_READY_MS
+  const gone = !ready && notReadySince !== null && now - notReadySince > NOT_READY_MS && !input.rearmHold
   if (gone) return "standby"
   if (lastFrameAt === null) return "connecting"
   return now - lastFrameAt > PREVIEW_GAP_MS ? "reconnecting" : "video"
@@ -90,4 +106,16 @@ export function previewDisplay(input: { now: number; ready: boolean; notReadySin
  */
 export function holdStandby(i: { onAir: boolean; incoming: boolean; captureTap: boolean }): boolean {
   return !i.onAir && !i.incoming && !i.captureTap
+}
+
+/**
+ * Browser capture start (<html data-stream-ready>, which scripts/capture-stream.mjs waits for before its
+ * first screenshot / screencast frame): when the operator has Program up, wait for the program layer to
+ * cover the screen (first frame, or its own standby rules) so a (re)started capture never opens on the
+ * countdown underneath. Capped well under the script's 15s wait.
+ */
+export const CAPTURE_FIRST_FRAME_WAIT_MS = 8000
+export function captureStartReady(i: { capturePage: boolean; blocked: boolean; screen: string; shownScreen: string; waitedMs: number }): boolean {
+  if (!i.capturePage || i.blocked || i.screen !== "program") return true
+  return i.shownScreen === "program" || i.waitedMs >= CAPTURE_FIRST_FRAME_WAIT_MS
 }

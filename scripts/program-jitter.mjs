@@ -81,3 +81,49 @@ export function splice(raw, n, d, fade = 240) {
   }
   return out
 }
+
+/**
+ * Hard-resync threshold (ms): queue this far off target → drop to target / hold silence at once.
+ * The jitter-widened band is capped at 1s: during a night of 1–2s ingest gaps it grew to 2–3s and
+ * left audio that late, fixed only by ≤5ms splices (~50ms/s).
+ */
+export function resyncThresholdMs(spreadMs) {
+  return Math.min(1000, Math.max(300, spreadMs * 1.5))
+}
+
+/**
+ * What to do with the program-audio queue this block. `force` = the picture just jumped (player rebuilt,
+ * jumped to live, page hung): re-align on the raw queue now instead of waiting for the 2s average.
+ * Returns "drop" (cut to target), "hold" (silence until the queue reaches target) or "none".
+ */
+export function resyncAction({ levelMs, queuedMs, targetMs, spreadMs, force = false }) {
+  if (force) {
+    const e = queuedMs - targetMs
+    return e > 40 ? "drop" : e < -40 ? "hold" : "none"
+  }
+  const t = resyncThresholdMs(spreadMs)
+  const err = levelMs - targetMs
+  return err > t ? "drop" : err < -t ? "hold" : "none"
+}
+
+/** How long after a resync signal the latency is taken raw (no smoothing) and the queue force-aligned. */
+export const RESYNC_WINDOW_MS = 1500
+
+/** Snap when the target delay moves more than this between samples (~1s apart). */
+export const TARGET_SNAP_MS = 300
+
+/**
+ * Pure: feed one target-delay sample (ms) at `now`; true when it differs from the sample ~1s earlier
+ * by more than TARGET_SNAP_MS (a stepwise latency change the slow splices would take ~30s to follow).
+ * `hist` is mutated (kept to the last ~1.5s).
+ */
+export function targetJumped(hist, now, targetMs, windowMs = 1000) {
+  hist.push({ at: now, t: targetMs })
+  while (hist.length > 1 && now - hist[1].at >= windowMs) hist.shift()
+  const ref = hist[0]
+  if (now - ref.at < windowMs * 0.5) return false
+  if (Math.abs(targetMs - ref.t) <= TARGET_SNAP_MS) return false
+  hist.length = 0
+  hist.push({ at: now, t: targetMs })
+  return true
+}

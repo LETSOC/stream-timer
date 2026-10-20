@@ -1,8 +1,9 @@
 "use client"
 
 import { VerticalDeckTile } from "@/components/vertical-output"
-import { failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
+import { armFeed, failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
 import { markDropout, markToast } from "@/components/dropout-mark"
+import { FeedStatus } from "@/components/feed-status"
 import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
@@ -193,7 +194,8 @@ export function StreamDeck() {
             onClick={() => setBig(!big)}
             className={`relative mx-auto mt-2 block touch-manipulation overflow-hidden rounded-xl bg-black transition-[width] duration-200 ${preview === "vertical" ? `aspect-[9/16] ${big ? "w-[70%] max-w-[calc(62dvh*9/16)]" : "w-[34%] max-w-[calc(30dvh*9/16)]"}` : `aspect-video ${big ? "w-full max-w-[calc(62dvh*16/9)]" : "w-[78%] max-w-[calc(30dvh*16/9)]"}`}`}
           >
-            {preview === "stream" && screen === "program" ? <ProgramPlayer scope="deck" src={programOperatorSrc(state?.programSource === "backup" ? "program-backup" : "program")} ready={state?.programReady === true} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
+            <FeedStatus view={state?.programSources} className="absolute top-1.5 left-1.5 z-20" />
+            {preview === "stream" && screen === "program" ? <ProgramPlayer scope="deck" src={programOperatorSrc(state?.programSource === "backup" ? "program-backup" : "program")} ready={state?.programReady === true} rearmHoldMs={state?.rearmHoldMs ?? 0} /> : preview === "stream" ? <StreamFrame /> : relayReady[preview] ? (
               <span data-testid="deck-preview-hls"><StreamPlayer key={preview} inline src={`/api/relay/hls/${preview}/index.m3u8`} />
               </span>
             ) : (
@@ -270,7 +272,7 @@ export function StreamDeck() {
         {state?.programSources ? (
           <div className="col-span-2 mt-1">
             <h2 className="mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Program source</h2>
-            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
+            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => setToast({ tone: r.ok ? "ok" : "error", text: r.text })) }} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
           </div>
         ) : null}
         {state?.programSources ? <LanIngestInfo /> : null}

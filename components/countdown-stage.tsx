@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   formatBannerDate,
   formatTimeRange,
@@ -16,6 +16,8 @@ import type { EventConfig } from "@/lib/event"
 import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { safeUrl } from "@/lib/event"
+import { brandUrl } from "@/lib/brand-asset"
+import { imageReady, useImagesReady, waitForImage } from "@/lib/image-preload"
 import { QrImage } from "@/components/qr-image"
 import { SocialCircles, type SocialLook } from "@/components/social-circles"
 
@@ -56,10 +58,15 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
   const divisions = clampChecker(checker)
   const second = now ? Math.floor(now.getTime() / 1000) : 0
   const live = Boolean(remaining?.done)
+  const logoSrc = safeUrl(logoUrl, brandUrl("/brand/hyphen-emerald.png"), { relative: true, dataImage: true })
+  // Text waits for its pictures (decoded, max ~2s): no countdown text without the logo / QR.
+  const imagesUp = useImagesReady([logoSrc, brandUrl("/brand/rsvp-qr.png")])
+  const gate = imagesUp ? undefined : ({ visibility: "hidden" } as const)
 
   return (
     <div
       className={cn("countdown-stage relative isolate overflow-visible text-white", className)}
+      data-images-ready={imagesUp ? "1" : "0"}
       style={{ aspectRatio: "16 / 9", ["--cd-stroke" as string]: countdownStrokePx, ["--cd-stroke-color" as string]: countdownStrokeColor }}
     >
       <div
@@ -69,7 +76,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       {live && !transparent ? <div className="live-wash pointer-events-none absolute inset-0" /> : null}
       <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
 
-      <div data-testid="stage-content" className="relative z-10 h-full" style={{ padding: "var(--inset) var(--safe) var(--safe) var(--inset)" }}>
+      <div data-testid="stage-content" className="relative z-10 h-full" style={{ padding: "var(--inset) var(--safe) var(--safe) var(--inset)", ...gate }}>
         <div className="flex min-w-0 max-w-[58%] flex-col justify-start">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
             <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
@@ -121,9 +128,9 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           />
         </div>
       </div>
-      <div className="pointer-events-none absolute top-1/2 right-[6%] z-10 flex w-[34%] -translate-y-1/2 flex-col items-center">
+      <div className="pointer-events-none absolute top-1/2 right-[6%] z-10 flex w-[34%] -translate-y-1/2 flex-col items-center" style={gate}>
         <img
-          src={safeUrl(logoUrl, "/brand/hyphen-emerald.png", { relative: true, dataImage: true })}
+          src={logoSrc}
           alt="hyphen. Cultures, communities, connections. Presented with Emerald."
           className="h-auto w-[90%] select-none"
           draggable={false}
@@ -162,6 +169,8 @@ function SpeakerGallery({
   const cards = speakers.filter((item) => item.image || item.name)
   const [index, setIndex] = useState(0)
   const [visible, setVisible] = useState(false)
+  const photos = useRef<string[]>([])
+  useEffect(() => { photos.current = cards.map((c) => safeUrl(c.image, "", { relative: true, dataImage: true })) })
   useEffect(() => {
     if (!active || cards.length === 0) return
     let cancelled = false
@@ -173,6 +182,17 @@ function SpeakerGallery({
         let step = 0
         const show = () => {
           if (cancelled) return
+          // The slide (name + photo) appears only once its photo is decoded. Still loading after ~2s
+          // (slow network): skip it this round (it keeps loading) rather than show a name without a face.
+          const photo = photos.current[step] ?? ""
+          void waitForImage(photo).then(() => {
+          if (cancelled) return
+          if (!imageReady(photo)) {
+            step += 1
+            if (step >= cards.length) run()
+            else show()
+            return
+          }
           setIndex(step)
           setVisible(true)
           timer = window.setTimeout(() => {
@@ -180,6 +200,7 @@ function SpeakerGallery({
             if (step >= cards.length) run()
             else show()
           }, seconds * 1000)
+          })
         }
         show()
       }, pause * 1000)
@@ -332,7 +353,7 @@ function QrSlot({ label, url }: { label: string; url: string }) {
         {url ? (
           <QrImage key={url} url={url} className="size-full object-cover" alt="" />
         ) : (
-          <img src="/brand/rsvp-qr.png" alt="" className="size-full object-cover" draggable={false} />
+          <img src={brandUrl("/brand/rsvp-qr.png")} alt="" className="size-full object-cover" draggable={false} />
         )}
       </div>
       <span className="font-[Arial,Helvetica,sans-serif] text-[0.72cqi] font-bold tracking-[0.12em] text-white uppercase">

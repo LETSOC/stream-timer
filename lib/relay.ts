@@ -10,7 +10,8 @@
  */
 import { dlog } from "@/lib/dropout-log"
 import type { SrtLink } from "@/lib/rtt"
-import { noteRelayDisruption } from "@/lib/program-rearm"
+import { noteProgramDisarm, noteRelayDisruption } from "@/lib/program-rearm"
+import { FEED_LABEL, nextArmState, parseDisarmed, type ArmScope, type FeedDisarmed } from "@/lib/program-arm"
 import os from "node:os"
 import { cleanMdnsName, DEFAULT_MDNS_NAME, mdnsStatus, type MdnsConfig, type MdnsState } from "@/lib/mdns"
 import { parseFailover, pullUrlError, type FailoverSettings, type ProgramSource, type SourceHealth as ProgramSourceHealth } from "@/lib/program-source"
@@ -122,6 +123,8 @@ export type RelaySettings = {
   forwards: Record<RelayPath, string[]>
   /** OBS program feed armed: MediaMTX stays up and accepts OBS on /program (and the backup on /program-backup). */
   programArmed: boolean
+  /** While armed: which feed's OBS login is off (per-feed Disarm). Both off = programArmed false. */
+  disarmed: FeedDisarmed
   /** Backup input pulled by MediaMTX from this RTMP/RTSP/HLS/SRT URL instead of a publisher ("" = publish). */
   backupPullUrl: string
   failover: FailoverSettings
@@ -153,7 +156,7 @@ export function validPullUrl(url: string): boolean {
 export function readSettings(): RelaySettings {
   const raw = readJson<Partial<RelaySettings>>(file("settings.json"))
   const list = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [])
-  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture), vertical: list(raw?.forwards?.vertical) }, programArmed: raw?.programArmed === true,
+  return { enabled: raw?.enabled === true, forwards: { slate: list(raw?.forwards?.slate), capture: list(raw?.forwards?.capture), vertical: list(raw?.forwards?.vertical) }, programArmed: raw?.programArmed === true, disarmed: raw?.programArmed === true ? parseDisarmed(raw?.disarmed) : { main: false, backup: false },
     backupPullUrl: typeof raw?.backupPullUrl === "string" && validPullUrl(raw.backupPullUrl) ? raw.backupPullUrl : "",
     failover: parseFailover(raw?.failover),
     lanIngest: raw?.lanIngest === true,
@@ -204,21 +207,31 @@ export function rotateProgramCredentials(which: "main" | "backup" = "main"): Pro
 /**
  * Pure: the MediaMTX config. Only RTMP (publish/read), LL-HLS (preview) and the API, all on `host`.
  * Internal publishers may publish to slate/capture only; OBS's login (only while `programArmed`)
- * may publish to /program only.
+ * may publish to /program only. Arming changes only the logins (and the Backup pull path): see below.
  */
-export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string; /** SRT for the Backup publisher (bound like RTMP ingest) */ srt?: { port: number; passphrase: string }; /** WHEP read-only previews */ webrtc?: { httpPort: number; iceHost: string; icePort: number; additionalHosts: string[] } }): string {
+export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; /** per-feed disarm while armed */ disarmed?: FeedDisarmed; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string; /** SRT for the Backup publisher (bound like RTMP ingest) */ srt?: { port: number; passphrase: string }; /** WHEP read-only previews */ webrtc?: { httpPort: number; iceHost: string; icePort: number; additionalHosts: string[] } }): string {
   const { host, ports, creds } = input
   // LAN ingest: only the RTMP listener moves; HLS and the API stay on `host`. Only the program/backup
   // publish logins may connect from other addresses, and only to publish their own path. Reads,
   // the API and the internal slate/capture publishers stay loopback-only.
-  const lan = Boolean(input.programArmed && input.ingestHost && input.ingestHost !== host)
+  //
+  // Arm/disarm must only touch /program and /program-backup. MediaMTX (v1.21.2 core.closeResources)
+  // hot-reloads authInternalUsers (ReloadInternalUsers) and per-path confs (only changed paths are
+  // recreated), but a change to rtmpAddress / srt / srtAddress restarts that whole listener and
+  // terminates EVERY connection on it (/capture, /vertical, all readers and forwards). So the listener
+  // lines depend only on the LAN-ingest / SRT settings, never on `programArmed`; arming only adds the
+  // OBS logins (and the Backup pull source). Disarmed + LAN: the listener stays on the LAN address but
+  // no login may connect from there (internal logins are loopback-only).
+  const lan = Boolean(input.ingestHost && input.ingestHost !== host)
   const obsIps = lan ? "['0.0.0.0/0', '::/0']" : null
-  const program = input.programArmed && creds.programUser && creds.programPass
-  const pull = input.programArmed && input.backupPullUrl && validPullUrl(input.backupPullUrl) ? input.backupPullUrl : ""
-  const backup = input.programArmed && !pull && creds.backupUser && creds.backupPass
+  const program = input.programArmed && !input.disarmed?.main && creds.programUser && creds.programPass
+  const pullUrl = input.backupPullUrl && validPullUrl(input.backupPullUrl) ? input.backupPullUrl : ""
+  const backupOn = input.programArmed && !input.disarmed?.backup
+  const pull = backupOn ? pullUrl : ""
+  const backup = backupOn && !pull && creds.backupUser && creds.backupPass
   const local = "['127.0.0.1/32', '::1/128']"
-  // SRT only when asked for and the Backup takes a publisher; otherwise the config is exactly as before.
-  const srt = backup && input.srt ? input.srt : null
+  // SRT (Backup publisher) whenever it is turned on and the Backup isn't pulled, armed or not (see above).
+  const srt = !pullUrl && input.srt ? input.srt : null
   return [
     "# Generated by stream-timer (lib/relay.ts) on every relay start. Do not edit; do not commit.",
     "logLevel: info",
@@ -487,7 +500,7 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
 }
 
 function desiredConfig() {
-  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined, srt: readSettings().srtBackup ? { port: srtPort(), passphrase: readSettings().srtPassphrase } : undefined, webrtc: webrtcConfig() })
+  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, disarmed: readSettings().disarmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined, srt: readSettings().srtBackup ? { port: srtPort(), passphrase: readSettings().srtPassphrase } : undefined, webrtc: webrtcConfig() })
 }
 function webrtcConfig() {
   if (!readSettings().webrtcPreview) return undefined
@@ -581,29 +594,43 @@ async function kickProgramUnlocked(paths: string[] = [PROGRAM_PATH, BACKUP_PATH]
   }
 }
 
-/** Arm receive: MediaMTX up (independent of forwards and channels) and OBS may publish to /program. */
-export function armProgram(): Promise<RelayResult> {
+const scopePaths = (scope: ArmScope) => (scope === "main" ? [PROGRAM_PATH] : scope === "backup" ? [BACKUP_PATH] : [PROGRAM_PATH, BACKUP_PATH])
+const scopeLabel = (scope: ArmScope) => (scope === "both" ? "Main + Backup" : FEED_LABEL[scope])
+
+/** Arm receive (both, or one feed): MediaMTX up (independent of forwards and channels) and OBS may publish. */
+export function armProgram(scope: ArmScope = "both"): Promise<RelayResult> {
   return withLock(async () => {
     noteRelayDisruption() // OBS (re)connecting after an arm isn't a Wi-Fi drop
-    dlog("·", "rearm", "program input ARMED (OBS may publish to /program and /program-backup)")
-    writeSettings({ ...readSettings(), programArmed: true })
+    const cur = readSettings()
+    const next = nextArmState(cur, "arm", scope)
+    dlog("·", "rearm", `${scopeLabel(scope)} ARMED (OBS may publish to ${scopePaths(scope).map((p) => `/${p}`).join(" and ")})`)
+    writeSettings({ ...cur, ...next })
     const up = await ensureServerUnlocked()
     if (!up.ok) return up
-    return { ok: true, note: "Armed: waiting for OBS on /program." }
+    if (relayRunning()) writeConfigIfChanged()
+    return { ok: true, note: `${scopeLabel(scope)} armed: waiting for OBS.` }
   })
 }
 
-/** Disarm: OBS login removed and kicked; the server stops only if nothing else uses it. */
-export function disarmProgram(): Promise<RelayResult> {
+/**
+ * Disarm (both, or one feed): that OBS login removed and its publisher kicked; the other feed keeps
+ * publishing. `hold`: players keep the last frame for 15s (on-air feed dropped on purpose). The server
+ * stops only when everything is disarmed and nothing else uses it. Hand-over is the caller's job.
+ */
+export function disarmProgram(scope: ArmScope = "both", opts: { hold?: boolean } = {}): Promise<RelayResult> {
   return withLock(async () => {
     noteRelayDisruption()
-    dlog("!", "rearm", "program input DISARMED: OBS logins removed and publishers kicked (Main and Backup drop)")
-    writeSettings({ ...readSettings(), programArmed: false })
+    if (opts.hold ?? true) noteProgramDisarm() // players hold the last frame (no "Waiting for OBS") while OBS reconnects
+    const cur = readSettings()
+    const next = nextArmState(cur, "disarm", scope)
+    dlog("!", "rearm", `${scopeLabel(scope)} DISARMED: OBS login removed and publisher kicked (${scope === "both" ? "Main and Backup drop" : `${FEED_LABEL[scope]} drops; the other feed stays`})`)
+    writeSettings({ ...cur, ...next })
     if (relayRunning()) writeConfigIfChanged()
-    await kickProgramUnlocked()
-    const stopped = await stopServerIfIdleUnlocked()
-    programCache.ready = false; sourceCache.at = 0
-    return { ok: true, note: stopped ? "Disarmed; relay server stopped (nothing else uses it)." : "Disarmed. The relay keeps running for the channels/forwards." }
+    await kickProgramUnlocked(scopePaths(scope))
+    const stopped = next.programArmed ? false : await stopServerIfIdleUnlocked()
+    if (scope !== "backup") programCache.ready = false
+    sourceCache.at = 0
+    return { ok: true, note: stopped ? "Disarmed; relay server stopped (nothing else uses it)." : `${scopeLabel(scope)} disarmed.` }
   })
 }
 
@@ -786,7 +813,7 @@ export function programReadyCached(source: ProgramSource = "main"): boolean | nu
   return readSettings().programArmed ? sourceCache[source].ready : null
 }
 
-export type ProgramStatus = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; fps: number | null; video: string | null; audio: string | null; /** What MediaMTX says OBS sends as audio (null = no audio track). */ audioTrack: { codec: string; channels: number | null; sampleRate: number | null } | null; readers: number; since: string | null }
+export type ProgramStatus = { armed: boolean; /** per-feed OBS login on */ feeds: { main: boolean; backup: boolean }; ready: boolean; tracks: string[]; kbps: number | null; fps: number | null; video: string | null; audio: string | null; /** What MediaMTX says OBS sends as audio (null = no audio track). */ audioTrack: { codec: string; channels: number | null; sampleRate: number | null } | null; readers: number; since: string | null }
 
 /** Channel start (destination "relay"): make sure the MediaMTX server is up. Does not touch forwards. */
 export function ensureRelayServer(): Promise<RelayResult> {
@@ -1110,7 +1137,7 @@ export async function relayStatus(): Promise<RelayStatus> {
   const v = prog?.tracks2?.find((t) => t.codecProps?.width)
   const a = prog?.tracks2?.find((t) => t.codecProps?.sampleRate)
   const program: ProgramStatus = {
-    armed: settings.programArmed, ready: prog?.ready === true, tracks: prog?.tracks ?? [],
+    armed: settings.programArmed, feeds: { main: settings.programArmed && !settings.disarmed.main, backup: settings.programArmed && !settings.disarmed.backup }, ready: prog?.ready === true, tracks: prog?.tracks ?? [],
     kbps: prog?.ready ? programCache.kbps : null, fps: prog?.ready ? programCache.fps : null,
     video: v ? `${v.codec} ${v.codecProps?.width}×${v.codecProps?.height}` : null,
     audio: a ? `${a.codec === "MPEG-4 Audio" ? "AAC" : a.codec} ${Math.round((a.codecProps?.sampleRate ?? 0) / 1000)}k ${a.codecProps?.channelCount === 1 ? "mono" : "stereo"}` : null,

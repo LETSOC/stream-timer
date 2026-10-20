@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { handoverDone, keepLoaded, programDisplay } from "@/lib/program-display"
+import { handoverDone, keepLoaded, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
 
 const base = { now: 10_000, activeSince: 10_000, readyAt: 1000, ready: true, notReadySince: null, lastFrameAt: null }
 
@@ -9,7 +9,21 @@ test("program layer stays under the previous screen until the first frame", () =
   assert.equal(programDisplay(base), "under")
   assert.equal(programDisplay({ ...base, now: 14_000 }), "under")
   assert.equal(programDisplay({ ...base, now: 10_400, lastFrameAt: 10_350 }), "video")
-  assert.equal(programDisplay({ ...base, now: 15_500 }), "standby")
+  // publisher there (ready) but no first frame yet: never "Waiting for OBS" before the ready timeout
+  assert.equal(programDisplay({ ...base, now: 15_500 }), "under")
+  assert.equal(programDisplay({ ...base, now: 10_000 + READY_STALL_TIMEOUT_MS + 1 }), "standby")
+  // not ready (no publisher) and no first frame: standby after the grace as before
+  assert.equal(programDisplay({ ...base, ready: false, notReadySince: 9000, now: 15_500 }), "standby")
+})
+
+test("OBS reconnected after a disarm/arm: relay says READY, rebuilt player has no frame yet → hold the last frame, no 'Waiting for OBS'", () => {
+  // the user's log: publisher back 14:32:27, player rebuilt 14:32:28, first frame 14:32:33; card shown 14:32:30
+  const t = { activeSince: 0, readyAt: 27_000, ready: true, notReadySince: null, lastFrameAt: null, held: true }
+  for (const now of [27_100, 30_000, 33_000, 27_000 + READY_STALL_TIMEOUT_MS]) assert.equal(programDisplay({ ...t, now }), "video", String(now))
+  assert.equal(programDisplay({ ...t, held: false, now: 30_000 }), "under") // nothing to hold: previous screen, still no card
+  assert.equal(programDisplay({ ...t, now: 27_000 + READY_STALL_TIMEOUT_MS + 1 }), "standby") // never plays: card after the timeout
+  // publisher gone: the card as before
+  assert.equal(programDisplay({ ...t, ready: false, notReadySince: 30_000, now: 33_100 }), "standby")
 })
 
 test("stalls hold the last frame, then standby", () => {
@@ -64,4 +78,36 @@ test("hand-over: a dead/frozen on-air input is cut at the new input's first fram
   assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: 1000, airAlive: false }), true)
   assert.equal(handoverDone({ ...base, now: 1200, incomingVideoSince: null, airAlive: false }), false) // nothing to cut to yet: hold
   assert.equal(handoverDone({ ...base, now: 6100, incomingVideoSince: 1000, airAlive: true }), true)
+})
+
+test("re-arm hold: a disarm/arm cycle (auto re-arm or the desk buttons) freezes on the last frame, never 'Waiting for OBS'", async () => {
+  const { previewDisplay, NOT_READY_MS } = await import("@/lib/program-display")
+  const { nextRearmHold, rearmHoldLeft, REARM_HOLD_MS } = await import("@/lib/program-rearm")
+  // 15:00:53 replay: OBS kicked (not ready), player torn down (no frame in the element), cover holds the last frame.
+  const gone = { ...base, now: 20_000, ready: false, notReadySince: 20_000 - NOT_READY_MS - 500, lastFrameAt: null, held: true }
+  assert.equal(programDisplay(gone), "standby") // before: the card
+  assert.equal(programDisplay({ ...gone, rearmHold: true }), "video") // now: the held frame
+  assert.equal(programDisplay({ ...gone, lastFrameAt: 14_000, held: false, rearmHold: true }), "video") // element still has its frame
+  assert.equal(programDisplay({ ...gone, held: false, rearmHold: true }), "standby") // nothing to hold: normal rules
+  // previews: "reconnecting" with the last frame instead of the card
+  const p = { now: 20_000, ready: false, notReadySince: 10_000, lastFrameAt: 15_000 }
+  assert.equal(previewDisplay(p), "standby")
+  assert.equal(previewDisplay({ ...p, rearmHold: true }), "reconnecting")
+  // the hold lasts REARM_HOLD_MS from the disarm, then the normal rules apply
+  const h = nextRearmHold(1000)
+  assert.equal(rearmHoldLeft(h, 1000), REARM_HOLD_MS)
+  assert.equal(rearmHoldLeft(h, 1000 + REARM_HOLD_MS + 1), 0)
+  assert.ok(REARM_HOLD_MS >= 10_000 && REARM_HOLD_MS <= 15_000)
+})
+
+test("capture start: with Program up, the (re)started Browser capture waits for the program picture (≤ 8s), never opens on the countdown", async () => {
+  const { captureStartReady, CAPTURE_FIRST_FRAME_WAIT_MS } = await import("@/lib/program-display")
+  const b = { capturePage: true, blocked: false, screen: "program", shownScreen: "countdown", waitedMs: 900 }
+  assert.equal(captureStartReady(b), false) // 14:59:40: countdown under, program's first frame not up yet
+  assert.equal(captureStartReady({ ...b, shownScreen: "program" }), true)
+  assert.equal(captureStartReady({ ...b, waitedMs: CAPTURE_FIRST_FRAME_WAIT_MS }), true)
+  assert.equal(captureStartReady({ ...b, screen: "countdown" }), true)
+  assert.equal(captureStartReady({ ...b, capturePage: false }), true) // OBS Browser Source / plain tab: unchanged
+  assert.equal(captureStartReady({ ...b, blocked: true }), true) // the script must still see "View key required"
+  assert.ok(CAPTURE_FIRST_FRAME_WAIT_MS < 15_000) // capture-stream.mjs waits 15s for the marker
 })

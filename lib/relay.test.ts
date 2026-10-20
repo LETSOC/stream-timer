@@ -10,7 +10,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [], vertical: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true }, lanIngest: false, mdnsName: "hyphen-stream", srtBackup: false, srtPassphrase: "", webrtcPreview: true })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [], vertical: [] }, programArmed: false, disarmed: { main: false, backup: false }, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true }, lanIngest: false, mdnsName: "hyphen-stream", srtBackup: false, srtPassphrase: "", webrtcPreview: true })
 })
 
 test("credentials are random, stable, and stored 0600", () => {
@@ -119,8 +119,12 @@ test("LAN ingest: RTMP on the ingest host, only OBS logins from anywhere (publis
   assert.match(lan, /user: "bak"\n.*\n    ips: \['0\.0\.0\.0\/0', '::\/0'\]\n    permissions: \[\{ action: publish, path: program-backup \}\]/)
   assert.match(lan, /user: "r"\n.*\n    ips: \['127\.0\.0\.1\/32', '::1\/128'\]/)
   assert.match(lan, /user: "p"\n.*\n    ips: \['127\.0\.0\.1\/32', '::1\/128'\]/)
-  // Not armed: ingest stays local even with the setting on
-  assert.match(buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: false, ingestHost: "0.0.0.0" }), /rtmpAddress: 127\.0\.0\.1:19350/)
+  // Not armed: the listener stays where LAN ingest put it (moving it would restart MediaMTX's RTMP server
+  // and drop /capture, /vertical and every forward), but no login may connect from the LAN.
+  const disarmed = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: false, ingestHost: "0.0.0.0" })
+  assert.match(disarmed, /rtmpAddress: 0\.0\.0\.0:19350/)
+  assert.doesNotMatch(disarmed, /user: "(obs|bak)"/)
+  assert.doesNotMatch(disarmed, /0\.0\.0\.0\/0/)
   assert.doesNotMatch(buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true }), /0\.0\.0\.0/)
   assert.equal(pickLanIp({ lo0: [{ family: "IPv4", address: "127.0.0.1", internal: true }], utun3: [{ family: "IPv4", address: "10.8.0.2", internal: false }], en0: [{ family: "IPv6", address: "fe80::1", internal: false }, { family: "IPv4", address: "192.168.1.23", internal: false }] }), "192.168.1.23")
   assert.equal(pickLanIp({ lo: [{ family: 4, address: "127.0.0.1", internal: true }] }), null)
@@ -165,4 +169,44 @@ test("liveConfigMatches: catches a missed MediaMTX reload (old bind or old key)"
   assert.ok(liveConfigMatches(yml, { rtmpAddress: "0.0.0.0:19350", authInternalUsers: users }))
   assert.ok(!liveConfigMatches(yml, { rtmpAddress: "127.0.0.1:19350", authInternalUsers: users }))
   assert.ok(!liveConfigMatches(yml, { rtmpAddress: "0.0.0.0:19350", authInternalUsers: ["p", "obs_old", "bak", "r"].map((user) => ({ user })) }))
+})
+
+test("arm/disarm only changes the OBS logins (+ Backup pull source): never a listener line MediaMTX would restart", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", verticalUser: "v", verticalPass: "vv", programUser: "obs", programPass: "op", backupUser: "bak", backupPass: "bp" }
+  const ports = { rtmp: 19350, hls: 18888, api: 19997 }
+  const webrtc = { httpPort: 18889, iceHost: "127.0.0.1", icePort: 18189, additionalHosts: [] }
+  // Lines that restart a whole MediaMTX server/listener on change (core.closeResources, v1.21.2).
+  const restartLines = (yml: string) => yml.split("\n").filter((l) => /^[a-zA-Z]/.test(l) && !/^(authInternalUsers|paths):/.test(l))
+  const authBlock = (yml: string) => yml.slice(yml.indexOf("authInternalUsers:"), yml.indexOf("paths:"))
+  const pathsBlock = (yml: string) => yml.slice(yml.indexOf("paths:")).split("\n")
+  for (const variant of [{}, { ingestHost: "0.0.0.0" }, { srt: { port: 8890, passphrase: "" } }, { ingestHost: "192.168.1.5", srt: { port: 8890, passphrase: "abcdefghij" } }, { backupPullUrl: "rtmp://example.com/live/x" }, { webrtc }]) {
+    const on = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, ...variant })
+    const off = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: false, ...variant })
+    assert.deepEqual(restartLines(off), restartLines(on), JSON.stringify(variant))
+    // internal logins identical; only the OBS logins come and go
+    for (const user of ["p", "v", "r"]) {
+      const block = (yml: string) => new RegExp(`  - user: "${user}"\\n(    .*\\n)+`).exec(authBlock(yml))?.[0]
+      assert.equal(block(off), block(on), `${user} ${JSON.stringify(variant)}`)
+    }
+    assert.match(authBlock(on), /user: "obs"/)
+    assert.doesNotMatch(authBlock(off), /user: "(obs|bak)"/)
+    // paths: only program-backup may differ (pull source while armed); /capture, /vertical, /program untouched
+    const diff = pathsBlock(on).filter((l, i) => l !== pathsBlock(off)[i])
+    assert.ok(diff.every((l) => /^  program-backup:/.test(l)), `${JSON.stringify(variant)}: ${diff.join(" | ")}`)
+  }
+})
+
+test("per-feed disarm: only that feed's login goes; listeners unchanged", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", programUser: "obs", programPass: "op", backupUser: "bak", backupPass: "bp" }
+  const ports = { rtmp: 19350, hls: 18888, api: 19997 }
+  const both = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true })
+  const noBackup = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, disarmed: { main: false, backup: true } })
+  const noMain = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, disarmed: { main: true, backup: false } })
+  assert.match(noBackup, /user: "obs"/)
+  assert.doesNotMatch(noBackup, /user: "bak"/)
+  assert.match(noMain, /user: "bak"/)
+  assert.doesNotMatch(noMain, /user: "obs"/)
+  const listeners = (y: string) => y.split("\n").filter((l) => /^(rtmp|srt)/.test(l)).join("\n")
+  assert.equal(listeners(noBackup), listeners(both))
+  assert.equal(listeners(noMain), listeners(both))
 })

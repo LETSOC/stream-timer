@@ -70,6 +70,9 @@ export type StageOptions = {
   breakImage: string
   breakFit: ImageFit
   holdTitle: string
+  /** Branded card on /stream when the program feed is lost (replaces the technical "Waiting for OBS"). */
+  standbyTitle: string
+  standbyMessage: string
   holdMessage: string
   holdImage: string
   holdFit: ImageFit
@@ -144,6 +147,8 @@ export const DEFAULT_STAGE: StageOptions = {
   breakImage: "",
   breakFit: "cover",
   holdTitle: "Please stand by",
+  standbyTitle: "We'll be right back",
+  standbyMessage: "The stream will continue in a moment.",
   holdMessage: "",
   holdImage: "",
   holdFit: "cover",
@@ -256,6 +261,8 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     breakImage: pick("breakImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
     breakFit: pick("breakFit", (v) => (v === "contain" ? "contain" : "cover")),
     holdTitle: pick("holdTitle", (v) => text(v, DEFAULT_STAGE.holdTitle)),
+    standbyTitle: pick("standbyTitle", (v) => text(v, DEFAULT_STAGE.standbyTitle)),
+    standbyMessage: pick("standbyMessage", (v) => (typeof v === "string" ? v.slice(0, BODY_MAX) : DEFAULT_STAGE.standbyMessage)),
     holdMessage: pick("holdMessage", (v) => (typeof v === "string" ? v.slice(0, BODY_MAX) : "")),
     holdImage: pick("holdImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
     holdFit: pick("holdFit", (v) => (v === "contain" ? "contain" : "cover")),

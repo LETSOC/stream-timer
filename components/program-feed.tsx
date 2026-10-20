@@ -6,11 +6,13 @@ import { stallBackoffMs, useResumeGeneration } from "@/lib/use-resume"
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type Hls from "hls.js"
 import { PreviewBadge } from "@/components/preview-badge"
+import { OverlayCard } from "@/components/overlay-card"
 import { useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -79,6 +81,9 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   // Only real decoded frames (lastFrameAt is also bumped to hold the picture through a rebuild).
   const [realFrameAt, setRealFrameAt] = useState<number | null>(null)
   const [latency, setLatency] = useState<number | null>(null)
+  // Bumped when the picture's delay jumps (first frame after a (re)build, jump to live): the capture
+  // script resyncs the program audio on it (data-resync).
+  const [resyncGen, setResyncGen] = useState(0)
   const wantSoundRef = useRef(wantSound)
   useEffect(() => {
     wantSoundRef.current = wantSound
@@ -109,9 +114,15 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       const { default: HlsLib } = await import("hls.js")
       if (cancelled) return
       if (HlsLib.isSupported()) {
+        // On air: liveSyncOnStallIncrease 0. hls.js's default (1s) raises its target latency by 1s on every
+        // buffer stall and never lowers it again (only a new manifest resets it): overnight the picture sat
+        // at 3.6 → 4.3 → 4.7 → 6.4s behind in steps at each stall, and "jump to live" landed on that same
+        // raised target. maxLiveSyncPlaybackRate 1: hls.js's own 1.15x catch-up needs >1s buffered ahead (rarely
+        // true here) and resets playbackRate to 1 otherwise, so it never caught up (14:07: stuck at 3.5s);
+        // settleTick below owns playbackRate on air instead (1.05x back to the player's healthy latency).
         const tuning = gentle
           ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
-          : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1.15 }
+          : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1, liveSyncOnStallIncrease: 0 }
         hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
         hls.loadSource(src)
@@ -167,6 +178,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     }
     const onVideoError = () => { troubleRef.current?.(); reportRef.current("!", `<video> error ${video.error?.code ?? "?"} ${video.error?.message ?? ""}`.trim(), "v-error", 3000) }
     let firstFrameSeen = false
+    const jump: LiveJumpState = { overSince: null, lastJumpAt: 0 }
+    const settle = newSettle()
     const reload = (why = "watchdog: picture stuck 3s while OBS publishes") => {
       teardownWhy.current = why
       firstFrameSeen = false
@@ -198,12 +211,34 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         })
       }
       if (!video.paused && video.readyState >= 2 && t !== last && t > 0) {
-        if (!firstFrameSeen) { firstFrameSeen = true; if (builtAt.current !== null) reportRef.current("+", `first frame ${Date.now() - builtAt.current}ms after the player (re)built`); builtAt.current = null }
+        if (!firstFrameSeen) { firstFrameSeen = true; setResyncGen((g) => g + 1); if (builtAt.current !== null) reportRef.current("+", `first frame ${Date.now() - builtAt.current}ms after the player (re)built`); builtAt.current = null }
         const nowMs = Date.now()
         setLastFrameAt(nowMs)
         setRealFrameAt(nowMs)
         const at = hlsRef.current?.playingDate?.getTime()
-        setLatency(at ? Date.now() - at : null)
+        const lat = at ? nowMs - at : null
+        setLatency(lat)
+        // On air (/stream, LL tuning): more than 3s behind live → jump back to the live edge.
+        if (diagRef.current?.onAir && !gentle && hlsRef.current && liveJumpTick(jump, lat, nowMs)) {
+          const b = video.buffered
+          const to = liveTarget(hlsRef.current.liveSyncPosition, b.length ? b.end(b.length - 1) : null, t)
+          if (to !== null && lat !== null) {
+            video.currentTime = to
+            reportRef.current("·", `jumped to live (was ${(lat / 1000).toFixed(1)}s behind)`)
+            setResyncGen((g) => g + 1)
+          }
+        }
+        // On air: drift back to the player's own healthy latency after a stall left it behind (1.05x, gentle).
+        if (diagRef.current?.onAir && !gentle) {
+          const b = video.buffered
+          const ahead = b.length ? b.end(b.length - 1) - t : 0
+          const s = settleTick(settle, lat, ahead, nowMs)
+          if (video.playbackRate !== s.rate) video.playbackRate = s.rate
+          const e = s.event
+          if (e?.kind === "start") reportRef.current("·", `delay settling: ${(e.fromMs / 1000).toFixed(1)}s behind, normal ${(e.floorMs / 1000).toFixed(1)}s → catching up at ${s.rate}x`)
+          else if (e?.kind === "done") reportRef.current("+", `delay settled: ${(e.fromMs / 1000).toFixed(1)}s → ${(e.toMs / 1000).toFixed(1)}s in ${Math.round(e.tookMs / 1000)}s`)
+          else if (e?.kind === "abort") reportRef.current("·", `delay settle paused at ${(e.toMs / 1000).toFixed(1)}s (buffer thin), will retry`)
+        } else if (video.playbackRate !== 1) video.playbackRate = 1
       }
       last = t
     }, 150)
@@ -216,7 +251,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       video.removeEventListener("stalled", onWaiting)
       video.removeEventListener("error", onVideoError)
     }
-  }, [videoRef, load, stallEvents])
+  }, [videoRef, load, stallEvents, gentle])
   useEffect(() => {
     holdRef.current = hold
     const video = videoRef.current
@@ -236,7 +271,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     video.muted = !wantSoundRef.current()
     void video.play().catch(() => { video.muted = true; void video.play().catch(() => undefined) })
   }, [hold, videoRef])
-  return { lastFrameAt, realFrameAt, latency }
+  return { lastFrameAt, realFrameAt, latency, resyncGen }
 }
 
 function Standby({ small = false }: { small?: boolean }) {
@@ -292,12 +327,13 @@ function useCaptureAudioTap(videoRef: RefObject<HTMLVideoElement | null>, source
   }, [videoRef, source])
 }
 
-export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false }: { /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
+export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false, rearmHoldUntil = null, standbyTitle = "We'll be right back", standbyMessage = "" }: { /** branded feed-lost card text (desk › Hold card); public, no technical words */ standbyTitle?: string; standbyMessage?: string; /** a disarm/arm cycle (auto re-arm / desk buttons) holds the last frame until this local time (null = none) */ rearmHoldUntil?: number | null; /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
   const activeSince = useActiveSince(active, now)
   const load = keepLoaded(ready, notReadySince, now)
+  const rearmHold = rearmHoldUntil !== null && now < rearmHoldUntil
   const showing = useRef<ProgramDisplay>("under")
   // Standby input in a plain tab: paused (warm buffer, no decode). Browser capture keeps both playing:
   // it takes each input's audio from its element (useCaptureAudioTap), so both must run.
@@ -310,6 +346,8 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // is drawn on a canvas on top until the element shows a new frame, so the output freezes, never blacks.
   const coverRef = useRef<HTMLCanvasElement>(null)
   const coverOn = useRef(false)
+  /** the cover canvas holds a good frame (state, so render can read it) */
+  const [hasHeld, setHasHeld] = useState(false)
   const snapshot = useCallback((): boolean => {
     const video = videoRef.current
     const canvas = coverRef.current
@@ -318,6 +356,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) { canvas.width = video.videoWidth; canvas.height = video.videoHeight }
       canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height)
       canvas.dataset.has = "1"
+      setHasHeld(true)
       return true
     } catch { return false }
   }, [])
@@ -335,7 +374,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // standby input in a plain tab, never on the capture page) does not depend on it.
   const shownRef = useRef<ProgramDisplay>("under")
   const maySound = () => programWantsSound({ active: active && shownRef.current === "video", hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
-  const { lastFrameAt, realFrameAt, latency } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, diag: { label, onAir }, onTrouble: showCover })
+  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, diag: { label, onAir }, onTrouble: showCover })
   // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
   // a decode error (element already blank) still has a frame to hold.
   const [periodic] = useState(() => isCapturePage())
@@ -355,13 +394,27 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
     return () => window.clearInterval(id)
   }, [periodic, onAir, snapshot])
   // Off air / unloaded: the cover goes with it (the hand-over or the standby card takes over).
+  // Not during a re-arm: OBS was kicked on purpose, the cover holds the last frame until it is back.
   useEffect(() => {
-    if ((!onAir || !load) && coverRef.current) { coverOn.current = false; coverRef.current.style.visibility = "hidden" }
-  }, [onAir, load])
+    if ((!onAir || (!load && !rearmHold)) && coverRef.current) { coverOn.current = false; coverRef.current.style.visibility = "hidden" }
+  }, [onAir, load, rearmHold])
   useCaptureAudioTap(videoRef, source)
-  const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt })
+  // A held last frame (cover canvas) lets a reconnecting OBS (relay READY, rebuilt player not playing yet)
+  // freeze on the last picture instead of the "Waiting for OBS" card.
+  const held = onAir && hasHeld
+  const natural = programDisplay({ now, activeSince, ready, readyAt, notReadySince, lastFrameAt, held, rearmHold })
   const shown: ProgramDisplay = holdFrame > 0 && natural === "standby" && lastFrameAt !== null && now - lastFrameAt < STALL_HOLD_MS + holdFrame ? "video" : natural
   shownRef.current = shown
+  // Holding with no frame in the element yet: put the last frame on top (hidden again by the first new frame).
+  const holding = shown === "video" && lastFrameAt === null && (load || rearmHold)
+  useEffect(() => { if (holding) showCover() }, [holding, showCover])
+  // Dropout log: one line per re-arm hold on the input on air.
+  const rearmOnAir = rearmHold && onAir && active
+  useEffect(() => {
+    if (!rearmOnAir) return
+    playerDiag("·", lastFrameAt !== null || held ? `holding last frame during re-arm (${label} on air; disarm/arm kicked OBS on purpose: no "Waiting for OBS" for up to 15s)` : `re-arm in progress but no last frame of ${label} to hold (normal rules)`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per hold start
+  }, [rearmOnAir])
   useEffect(() => {
     if (showing.current === shown) return
     const was = showing.current
@@ -412,10 +465,15 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   const visual: ProgramDisplay = incoming ? "under" : shown
   const hardMute = muted || shown !== "video"
   return (
-    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-hard-mute={hardMute ? "1" : "0"} data-want-sound={maySound() ? "1" : "0"} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
+    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-resync={resyncGen} data-hard-mute={hardMute ? "1" : "0"} data-want-sound={maySound() ? "1" : "0"} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
       <video ref={videoRef} className="h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture />
       <canvas ref={coverRef} data-testid="program-cover" aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ visibility: "hidden" }} />
-      {visual === "standby" ? <Standby /> : null}
+      {visual === "standby" ? (
+        // Public output (YouTube, Vertical): the branded feed-lost card, not the operator "Waiting for OBS".
+        <div data-testid="program-standby" data-branded="1" className="absolute inset-0 flex items-center justify-center bg-black">
+          <OverlayCard kind="standby" title={standbyTitle} message={standbyMessage} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -426,14 +484,18 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
  * Browsers only allow sound after a tap: the first tap anywhere on the page (or on the button) turns it on
  * when the saved choice is "unmuted".
  */
-export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, className = "" }: { src?: string; ready?: boolean; scope: string; className?: string }) {
+export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, rearmHoldMs, scope, className = "" }: { src?: string; ready?: boolean; /** ms left of a disarm/arm cycle (deck state); polled with `ready` when not given */ rearmHoldMs?: number; scope: string; className?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const polled = usePolledReady(ready === undefined)
-  const isReady = ready ?? polled
+  const isReady = ready ?? polled.ready
   const { notReadySince, readyAt } = useReadiness(isReady, now)
   const activeSince = useActiveSince(true, now)
-  const load = keepLoaded(isReady, notReadySince, now)
+  // Re-arm (auto or Disarm → Arm): OBS kicked on purpose. Keep the player and its last frame
+  // ("reconnecting…" badge) instead of the "Waiting for OBS" card, ≤ 15s.
+  const holdUntil = useHoldUntil(ready === undefined ? polled.rearmHoldMs : rearmHoldMs, now)
+  const rearmHold = holdUntil !== null && now < holdUntil
+  const load = keepLoaded(isReady, notReadySince, now) || rearmHold
   // One user-owned mute state per player (scope); never reset by Main↔Backup, remounts or the WebRTC→HLS swap.
   const audio = usePreviewAudio(videoRef, scope)
   const { pref, audioOn, db } = audio
@@ -459,7 +521,7 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   const showRtc = whepPath !== null && !rtcRetired && !rtc.failed && rtc.lastFrameAt !== null && !(hlsLoad && hlsPlaying)
   const lastFrameAt = Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) >= 0 ? Math.max(hlsFrameAt ?? -1, rtc.lastFrameAt ?? -1) : null
   void activeSince; void readyAt
-  const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt })
+  const shown = previewDisplay({ now, ready: isReady, notReadySince, lastFrameAt, rearmHold })
   const chrome = useAutoHide()
 
   // The WebRTC element never carries sound: keep it muted whatever happens.
@@ -478,16 +540,28 @@ export function ProgramPlayer({ src = PROGRAM_OPERATOR_SRC, ready, scope, classN
   )
 }
 
-/** Desk previews have no deck socket: ask the (operator-readable) public state whether OBS is sending. */
+/** A "ms left" value from the server → the local time it ends (re-anchored whenever a new value arrives). */
+function useHoldUntil(ms: number | undefined, now: number): number | null {
+  const [seen, setSeen] = useState<{ ms: number | undefined; until: number | null }>({ ms: undefined, until: null })
+  const until = ms !== undefined && ms > 0 ? now + ms : null
+  if (seen.ms !== ms) setSeen({ ms, until })
+  return seen.ms === ms ? seen.until : until
+}
+
+/** Desk previews have no deck socket: ask the (operator-readable) public state whether OBS is sending (and whether a re-arm is in progress). */
 function usePolledReady(enabled: boolean) {
-  const [ready, setReady] = useState(false)
+  const [state, setState] = useState<{ ready: boolean; rearmHoldMs: number }>({ ready: false, rearmHoldMs: 0 })
   useEffect(() => {
     if (!enabled) return
     let stop = false
-    const poll = () => fetch("/api/public/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programReady?: unknown } | null) => { if (!stop) setReady(body?.programReady === true) }).catch(() => undefined)
+    const poll = () => fetch("/api/public/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programReady?: unknown; rearmHoldMs?: unknown } | null) => {
+      if (stop) return
+      const next = { ready: body?.programReady === true, rearmHoldMs: typeof body?.rearmHoldMs === "number" ? body.rearmHoldMs : 0 }
+      setState((cur) => (cur.ready === next.ready && cur.rearmHoldMs === next.rearmHoldMs ? cur : next))
+    }).catch(() => undefined)
     void poll()
     const id = window.setInterval(poll, 1500)
     return () => { stop = true; window.clearInterval(id) }
   }, [enabled])
-  return ready
+  return state
 }
