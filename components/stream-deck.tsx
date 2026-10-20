@@ -1,7 +1,7 @@
 "use client"
 
 import { VerticalDeckTile } from "@/components/vertical-output"
-import { failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
+import { armFeed, failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
 import { markDropout, markToast } from "@/components/dropout-mark"
 import { FeedStatus } from "@/components/feed-status"
 import type { FailoverSettings } from "@/lib/program-source"
@@ -272,7 +272,7 @@ export function StreamDeck() {
         {state?.programSources ? (
           <div className="col-span-2 mt-1">
             <h2 className="mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Program source</h2>
-            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
+            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => setToast({ tone: r.ok ? "ok" : "error", text: r.text })) }} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
           </div>
         ) : null}
         {state?.programSources ? <LanIngestInfo /> : null}

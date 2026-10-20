@@ -6,6 +6,7 @@ import { rttLabel } from "@/lib/rtt"
 import { useEffect, useRef, useState } from "react"
 import { PROGRAM_SOURCES, SOURCE_LABEL, type FailoverEvent, type FailoverSettings, type ProgramSource, type SourceHealth, hasSignal } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
+import { disarmPlan, FEED_LABEL, other, type ArmScope, type Feed } from "@/lib/program-arm"
 
 /** "publishing · 3.2 Mb/s · 0.2s" / "stalled 4s" / "not publishing" for one input. */
 export function sourceStatus(h: SourceHealth | undefined): { tone: "ok" | "warn" | "off"; text: string } {
@@ -72,7 +73,9 @@ export function useFailoverEvents(last: FailoverEvent | null | undefined, onEven
  * Main / Backup toggle with live status of each input and the auto-failover settings.
  * Used by the desk (Transport) and the phone deck (dark).
  */
-export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark, dark = false, disabled = false }: {
+export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark, onArm, dark = false, disabled = false }: {
+  /** Per-feed Disarm/Arm (two taps; on-air disarm warns when the other feed isn't healthy) */
+  onArm?: (op: "arm" | "disarm", feed: ArmScope) => void
   /** "⚑ Mark" menu (dropout log markers) next to the inputs */
   onMark?: (type: MarkType, note: string) => void
   view: ProgramSourcesView | null
@@ -142,6 +145,7 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
           )
         })}
       </div>
+      {onArm ? <ArmControls view={view} active={active} onArm={onArm} dark={dark} disabled={disabled} /> : null}
       {onMark ? <div className="flex justify-end"><MarkMenu onMark={onMark} dark={dark} /></div> : null}
       {view?.returnStatus?.askReturn && active === "backup" ? (
         <button type="button" data-testid="return-now" disabled={disabled} onClick={() => onSwitch("main")} className="w-full rounded-xl bg-[#12b76a] px-3 py-2 text-[15px] font-black text-black">Main ready · Return now</button>
@@ -193,6 +197,53 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
           </ol>
         </details>
       ) : null}
+    </div>
+  )
+}
+
+/** POST the per-feed arm/disarm (desk + deck). */
+export async function armFeed(op: "arm" | "disarm", feed: ArmScope): Promise<{ ok: boolean; text: string }> {
+  const r = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: op === "arm" ? "arm-program" : "disarm-program", feed }) }).catch(() => null)
+  const body = (await r?.json().catch(() => null)) as { note?: string | null; error?: string } | null
+  return r?.ok ? { ok: true, text: body?.note ?? "Done" } : { ok: false, text: body?.error ?? "Failed" }
+}
+
+/** Healthy for a hand-over: publishing, READY, HEALTHY (same rule as the server). */
+const healthy = (h: Readout | undefined) => Boolean(h?.ready && h.readyOk && h.state === "healthy")
+
+/** Pure: the second-tap label of a disarm (the warning when it will hit the output). */
+export function disarmConfirmText(scope: ArmScope, active: Feed, view: ProgramSourcesView | null): string {
+  const plan = disarmPlan(scope, active, scope === "both" ? false : healthy(view?.[other(scope)]))
+  if (plan.warning) return `${plan.warning} · tap again`
+  if (plan.handoverTo) return `Switch to ${FEED_LABEL[plan.handoverTo]}, then disarm ${FEED_LABEL[scope as Feed]} · tap again`
+  return `Disarm ${scope === "both" ? "both" : FEED_LABEL[scope]} (standby, no on-air effect) · tap again`
+}
+
+/** Main / Backup / Both Disarm–Arm row, two taps each. */
+function ArmControls({ view, active, onArm, dark, disabled }: { view: ProgramSourcesView | null; active: Feed; onArm: (op: "arm" | "disarm", feed: ArmScope) => void; dark: boolean; disabled: boolean }) {
+  const [armed, setArmed] = useState<string | null>(null)
+  useEffect(() => {
+    if (!armed) return
+    const id = window.setTimeout(() => setArmed(null), 3000)
+    return () => window.clearTimeout(id)
+  }, [armed])
+  const on = { main: view !== null && view.armed?.main !== false, backup: view !== null && view.armed?.backup !== false }
+  const base = `min-h-11 rounded-xl px-2 py-1.5 text-[13px] font-bold leading-tight disabled:opacity-40`
+  const tone = (danger: boolean, warn: boolean) => (warn ? "bg-[#fdb022] text-black" : danger ? (dark ? "bg-[#b42318] text-white" : "bg-[#b42318] text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black")
+  const btn = (key: string, op: "arm" | "disarm", scope: ArmScope, label: string) => {
+    const isArmed = armed === key
+    const confirm = op === "disarm" ? disarmConfirmText(scope, active, view) : `Arm ${scope === "both" ? "both" : FEED_LABEL[scope]} · tap again`
+    return (
+      <button key={key} type="button" data-testid={`program-${op}-${scope}`} data-armed={isArmed ? "1" : undefined} disabled={disabled}
+        onClick={() => { if (!isArmed) { setArmed(key); return } setArmed(null); onArm(op, scope) }}
+        onBlur={() => { if (isArmed) setArmed(null) }}
+        className={`${base} ${tone(op === "disarm" && !isArmed, isArmed)}`}>{isArmed ? confirm : label}</button>
+    )
+  }
+  return (
+    <div data-testid="program-arm-controls" className="grid grid-cols-3 gap-2">
+      {(["main", "backup"] as const).map((f) => (on[f] ? btn(`d-${f}`, "disarm", f, `Disarm ${FEED_LABEL[f]}`) : btn(`a-${f}`, "arm", f, `Arm ${FEED_LABEL[f]}`)))}
+      {on.main || on.backup ? btn("d-both", "disarm", "both", "Disarm both") : btn("a-both", "arm", "both", "Arm both")}
     </div>
   )
 }
