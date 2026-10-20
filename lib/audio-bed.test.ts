@@ -66,3 +66,10 @@ test("serializePlan + audioHash", () => {
   assert.equal(audioHash(DEFAULT_AUDIO), audioHash({ ...DEFAULT_AUDIO }))
   assert.notEqual(audioHash(DEFAULT_AUDIO), audioHash({ ...DEFAULT_AUDIO, mode: "tone" }))
 })
+
+test("chromeRefreshHours: default 3, 0 = off, clamped to 24", () => {
+  assert.equal(normalizeAudio({}).chromeRefreshHours, 3)
+  assert.equal(normalizeAudio({ chromeRefreshHours: 0 }).chromeRefreshHours, 0)
+  assert.equal(normalizeAudio({ chromeRefreshHours: 99 }).chromeRefreshHours, 24)
+  assert.equal(normalizeAudio({ chromeRefreshHours: -2 }).chromeRefreshHours, 0)
+})

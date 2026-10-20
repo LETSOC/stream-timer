@@ -2389,7 +2389,7 @@ function DiagnosisLine({ value, testid }: { value: { level: Level; text: string 
 }
 
 type AudioModeView = "silent" | "tone" | "bed"
-type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; programOffsetMs?: { main: number; backup: number }; syncTest?: boolean }
+type AudioConfigView = { mode: AudioModeView; toneHz: number; toneDb: number; files: string[]; order: "inOrder" | "shuffle"; volumeDb: number; fadeInSec: number; avOffsetMs?: number; programOffsetMs?: { main: number; backup: number }; syncTest?: boolean; chromeRefreshHours?: number }
 type AudioFileView = { id: string; name: string; ext: string; bytes: number; durationSec: number; codec: string }
 type AudioSettingsView = { rev: number; channels: Record<RtmpChannelId, AudioConfigView> }
 const AUDIO_ACCEPT = ".mp3,.m4a,.wav,.aac,audio/mpeg,audio/mp4,audio/wav,audio/aac"
@@ -2497,6 +2497,11 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
                 <label className="flex min-h-7 items-center gap-2">
                   <input type="checkbox" data-testid={tid("sync-test")} checked={cfg.syncTest === true} onChange={(e) => edit(ch, { syncTest: e.target.checked })} />
                   A/V sync test: white flash + beep every second (on air!)
+                </label>
+              ) : null}
+              {ch === "capture" ? (
+                <label className="flex min-h-7 items-center gap-2" title="Relaunches the capture's Chrome fresh every N hours (0 = off) for 24/7 running. Only while the countdown/cards are up, never during the program; the last frame is held so viewers see no change.">
+                  Fresh Chrome every <input type="number" data-testid={tid("chrome-refresh")} min={0} max={24} step={1} value={cfg.chromeRefreshHours ?? 3} onChange={(e) => edit(ch, { chromeRefreshHours: Number(e.target.value) })} className="h-7 w-14 border px-1" /> h <span className="text-black/60">(0 = off; not during the program)</span>
                 </label>
               ) : null}
             </div>

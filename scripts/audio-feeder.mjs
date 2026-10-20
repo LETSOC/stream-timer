@@ -256,7 +256,7 @@ export function createAudioFeeder({ liveFile, appliedFile, ffmpegBin = "ffmpeg",
   function stop() { clearInterval(pollTimer); clearInterval(statTimer); for (const v of voices) v.src.stop(); pending?.voice.src.stop() }
   /** Live sync settings from the desk: A/V offset trim (ms, + = audio later) and the sync test switch. */
   const clampMs = (v) => Math.max(-500, Math.min(500, Number(v) || 0))
-  const sync = () => ({ avOffsetMs: clampMs(wanted?.avOffsetMs), programOffsetMs: { main: clampMs(wanted?.programOffsetMs?.main), backup: clampMs(wanted?.programOffsetMs?.backup) }, syncTest: wanted?.syncTest === true })
+  const sync = () => ({ avOffsetMs: clampMs(wanted?.avOffsetMs), programOffsetMs: { main: clampMs(wanted?.programOffsetMs?.main), backup: clampMs(wanted?.programOffsetMs?.backup) }, syncTest: wanted?.syncTest === true, chromeRefreshHours: Number.isFinite(Number(wanted?.chromeRefreshHours)) ? Math.max(0, Math.min(24, Number(wanted.chromeRefreshHours))) : 3 })
   return { read, readFloat, stop, sync, status: () => ({ ...applied, ...sync(), voices: voices.length, pending: pending !== null }) }
 }
 
