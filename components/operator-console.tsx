@@ -43,6 +43,7 @@ import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
+import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
 import { DEFAULT_STAGE, localClock, parseStage, serverClock, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
@@ -470,6 +471,11 @@ export function OperatorConsole() {
       return
     }
     await revealDest(id)
+  }
+  // Left lists' "Edit": open the right column's Saved destinations panel on that destination's form.
+  function openDestEdit(id: string) {
+    setSectionOpen("destinations", true)
+    requestDestinationEdit(id)
   }
   function forgetLegacy() {
     window.localStorage.removeItem("hyphen-countdown-rtmp")
@@ -1206,8 +1212,8 @@ export function OperatorConsole() {
                     }} />
                 )
               })}
-              <RelayCard dests={dests.items} />
-              <VerticalCard dests={dests.items} pillClass={pillClass} onDestsChanged={() => void loadDests()} />
+              <RelayCard dests={dests.items} onEdit={openDestEdit} />
+              <VerticalCard dests={dests.items} pillClass={pillClass} onDestsChanged={() => void loadDests()} onEdit={openDestEdit} />
               <AudioCard routing={streamAudio} onRouting={(patch) => void saveStreamAudio(patch)} />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
@@ -1237,6 +1243,7 @@ export function OperatorConsole() {
                   <Pill size="sm" tone="outline" data-testid="dest-add" onClick={() => setDestForm({ mode: destForm.mode === "add" ? null : "add", name: "", url: "" })}>+ Add destination</Pill>
                   {selectedDest ? (
                     <>
+                      <Pill size="sm" tone="outline" data-testid="dest-edit" onClick={() => openDestEdit(selectedDest.id)}>Edit…</Pill>
                       <Pill size="sm" tone="outline" data-testid="dest-rename" onClick={() => setDestForm({ mode: destForm.mode === "rename" ? null : "rename", name: selectedDest.name, url: "" })}>Rename</Pill>
                       <Pill size="sm" tone="outline" data-testid="dest-reveal" aria-pressed={revealed?.id === selectedDest.id} onClick={() => void revealDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? "Hide" : "Reveal"}</Pill>
                       <Pill size="sm" tone="outline" data-testid="dest-copy" onClick={() => void copyDest(selectedDest.id)}>{revealed?.id === selectedDest.id ? (copied === "dest" ? "Copied" : "Tap to copy") : "Copy"}</Pill>
@@ -1550,6 +1557,11 @@ export function OperatorConsole() {
             <Pill data-testid="add-speaker" onClick={() => setSpeakers((items) => [...items, { image: "", name: "", description: "" }])}>+ Add speaker</Pill>
 
           </Panel>
+          <Panel id="destinations" title="Saved destinations" pill={`${dests.items.length} saved`}>
+            <DestinationsPanel dests={dests.items} selected={{ slate: dests.selectedId, capture: dests.selectedCaptureId }}
+              liveIds={[rtmpChannels.slate.running ? dests.selectedId : null, rtmpChannels.capture.running ? dests.selectedCaptureId : null].filter((x): x is string => Boolean(x))}
+              pillClass={pillClass} onChanged={() => void loadDests()} onNote={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text.split(/(?<=\.) /)[0])} />
+          </Panel>
         </section>
       </main>
       <footer
@@ -1843,7 +1855,7 @@ function BackToTop() {
   )
 }
 
-type Dest = { id: string; name: string; host: string; masked: string; createdAt: number }
+type Dest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number }
 
 function hostOf(url: string, fallback: string): string {
   try {
@@ -2240,7 +2252,7 @@ function MdnsRow({ relay, busy, act }: { relay: RelayView | null; busy: boolean;
   )
 }
 
-function RelayCard({ dests }: { dests: Dest[] }) {
+function RelayCard({ dests, onEdit }: { dests: Dest[]; onEdit?: (id: string) => void }) {
   const [relay, setRelay] = useState<RelayView | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
@@ -2307,10 +2319,13 @@ function RelayCard({ dests }: { dests: Dest[] }) {
                 return (
                   <li key={dest.id} className="space-y-1 font-mono text-[12px]">
                     {/* Always stacked: name on its own line (wraps), status + stats below, so a narrow column never truncates names. */}
-                    <label className="flex min-w-0 items-start gap-2">
+                    <div className="flex min-w-0 items-start gap-2">
+                    <label className="flex min-w-0 flex-1 items-start gap-2">
                       <input type="checkbox" className="mt-0.5 shrink-0" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked })} />
                       <span data-testid={`relay-fwd-name-${name}-${dest.name}`} className="min-w-0 break-words [overflow-wrap:anywhere]"><span className="font-bold">{dest.name}</span> <span className="text-black/60">· {dest.host}</span></span>
                     </label>
+                    {onEdit ? <button type="button" data-testid={`relay-fwd-edit-${name}-${dest.name}`} title="Edit name / server / stream key (Saved destinations, right column)" className="shrink-0 text-[11px] text-black/50 underline underline-offset-2 hover:text-black" onClick={() => onEdit(dest.id)}>Edit</button> : null}
+                    </div>
                     {fwd ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6">
                     {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}</span> : null}
                     {fwd && fwd.reconnects > 0 ? <span data-testid={`relay-fwd-reconnects-${name}-${dest.name}`} title={`A working connection to ${dest.name} dropped and was re-made ${fwd.reconnects}×. Total relaunches incl. quick retries: ${fwd.restarts}.`} className="font-mono text-[11px] text-[#8a4b06]">{fwd.reconnects} {fwd.reconnects === 1 ? "reconnect" : "reconnects"}</span> : fwd && fwd.restarts > 0 && fwd.state !== "forwarding" ? <span title="Quick retries: the forward could not connect (or the source was not publishing) and was started again." className="font-mono text-[11px] text-black/60">{fwd.restarts} {fwd.restarts === 1 ? "retry" : "retries"}</span> : null}
