@@ -108,3 +108,22 @@ export function resyncAction({ levelMs, queuedMs, targetMs, spreadMs, force = fa
 
 /** How long after a resync signal the latency is taken raw (no smoothing) and the queue force-aligned. */
 export const RESYNC_WINDOW_MS = 1500
+
+/** Snap when the target delay moves more than this between samples (~1s apart). */
+export const TARGET_SNAP_MS = 300
+
+/**
+ * Pure: feed one target-delay sample (ms) at `now`; true when it differs from the sample ~1s earlier
+ * by more than TARGET_SNAP_MS (a stepwise latency change the slow splices would take ~30s to follow).
+ * `hist` is mutated (kept to the last ~1.5s).
+ */
+export function targetJumped(hist, now, targetMs, windowMs = 1000) {
+  hist.push({ at: now, t: targetMs })
+  while (hist.length > 1 && now - hist[1].at >= windowMs) hist.shift()
+  const ref = hist[0]
+  if (now - ref.at < windowMs * 0.5) return false
+  if (Math.abs(targetMs - ref.t) <= TARGET_SNAP_MS) return false
+  hist.length = 0
+  hist.push({ at: now, t: targetMs })
+  return true
+}

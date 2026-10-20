@@ -22,7 +22,7 @@ import path from "node:path"
 import { chromium } from "playwright"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 import { captureCodeVersion } from "./code-version.mjs"
-import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames } from "./program-jitter.mjs"
+import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames, targetJumped } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
 const pageUrl = process.env.CAPTURE_URL
@@ -88,7 +88,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, resyncs: 0, resyncUntil: 0, resyncCounted: false, resyncGen: null, holding: false, ramp: 1 }
+const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, resyncs: 0, resyncUntil: 0, resyncCounted: false, display: "", resyncGen: null, holding: false, ramp: 1 }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -212,6 +212,9 @@ function switchProgramSource(source) {
   prog.latencyMs = inputs[source].latencyMs // last known for this input (not the other one's), else fallback
   inputs[source].jitter.reset()
   prog.ramp = 0 // ~30ms fade-in on the new input: no click at the splice
+  // Every Main↔Backup switch (failover, back to Main, manual): snap to the new input's delay now,
+  // instead of ~30s of small splices (01:55:22 failover: 3160→2123ms target, 115 corrections, 0 resyncs).
+  armResync(`program source → ${source === "backup" ? "Backup" : "Main"}`)
   if (spare.reader && spare.source === source && spare.bytes > 0) {
     const r = spare.reader
     spare.reader = null
@@ -585,8 +588,12 @@ function syncTestOverlay(on) {
 }
 // Program audio resync request (picture jumped): see takeProgram / resyncAction.
 let lastAnswerAt = 0
+const targetHist = []
+const wantedNow = () => prog.wanted && prog.reader !== null
 function armResync(why) {
+  const already = Date.now() < prog.resyncUntil
   prog.resyncUntil = Date.now() + RESYNC_WINDOW_MS
+  if (already) return // same resync window: extend it, count/log once
   prog.resyncCounted = false
   log(`[audio] program audio resync: ${why}`)
 }
@@ -607,7 +614,7 @@ setInterval(async () => {
   const info = await page.evaluate(() => {
     const feed = document.querySelector("[data-testid=program-feed]")
     const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
-    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null, resync: Number(feed?.getAttribute("data-resync") || 0) }
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null, resync: Number(feed?.getAttribute("data-resync") || 0), display: feed?.getAttribute("data-display") ?? "" }
   }).catch(() => ({ source: prog.source, screen: "", loaded: null, lat: null }))
   // Page hung (or reloaded): the poll answers late / not at all, the picture froze and resumes behind.
   if (info.screen !== "") {
@@ -615,7 +622,12 @@ setInterval(async () => {
     if (lastAnswerAt && quiet > 2000) armResync(`page hung ${(quiet / 1000).toFixed(1)}s`)
     lastAnswerAt = Date.now()
     // Player rebuilt / jumped to live (the page bumps data-resync): the picture's delay just changed.
-    if (info.resync !== prog.resyncGen) { if (prog.resyncGen !== null) armResync(info.resync === 0 ? "page reloaded" : "player rebuilt or jumped to live"); prog.resyncGen = info.resync }
+    // Keyed by input: Main and Backup players count separately (equal counts on a switch ≠ no change).
+    const gen = `${info.source}:${info.resync}`
+    if (gen !== prog.resyncGen) { if (prog.resyncGen !== null && info.source === prog.source) armResync(info.resync === 0 ? "page reloaded" : "player rebuilt or jumped to live"); prog.resyncGen = gen }
+    // Feed back on air after the standby card (no publisher → picture again).
+    if (prog.display === "standby" && info.display === "video") armResync("feed back on air after the standby card")
+    prog.display = info.display
   }
   const screen = info.screen
   // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
@@ -623,6 +635,8 @@ setInterval(async () => {
   if (info.source !== prog.source) switchProgramSource(info.source)
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
   // Right after a resync signal the latency is taken raw, so the target follows the jump at once.
+  // Target delay stepped by >300ms within ~1s (e.g. the other input's latency): snap, don't splice for 30s.
+  if (wantedNow() && targetJumped(targetHist, Date.now(), programTargetMs())) armResync("target delay changed > 300ms")
   if (info.lat !== null && info.lat > 0 && info.lat < 10000) prog.latencyMs = prog.latencyMs === null || Date.now() < prog.resyncUntil ? info.lat : prog.latencyMs * 0.92 + info.lat * 0.08 // ~3s: remote players jitter
   // A failed/empty page read (reload, busy page) is not "left the program": keep the last state.
   const wanted = screen === "" ? prog.wanted : screen === "program"
