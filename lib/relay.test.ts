@@ -10,7 +10,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "st-relay-"))
 process.env.STREAM_DATA_DIR = dir
 
 test("relay is off by default with no forwards", () => {
-  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [], vertical: [] }, programArmed: false, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true }, lanIngest: false, mdnsName: "hyphen-stream", srtBackup: false, srtPassphrase: "", webrtcPreview: true })
+  assert.deepEqual(readSettings(), { enabled: false, forwards: { slate: [], capture: [], vertical: [] }, programArmed: false, disarmed: { main: false, backup: false }, backupPullUrl: "", failover: { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true }, lanIngest: false, mdnsName: "hyphen-stream", srtBackup: false, srtPassphrase: "", webrtcPreview: true })
 })
 
 test("credentials are random, stable, and stored 0600", () => {
@@ -194,4 +194,19 @@ test("arm/disarm only changes the OBS logins (+ Backup pull source): never a lis
     const diff = pathsBlock(on).filter((l, i) => l !== pathsBlock(off)[i])
     assert.ok(diff.every((l) => /^  program-backup:/.test(l)), `${JSON.stringify(variant)}: ${diff.join(" | ")}`)
   }
+})
+
+test("per-feed disarm: only that feed's login goes; listeners unchanged", () => {
+  const creds = { publishUser: "p", publishPass: "pp", readUser: "r", readPass: "rr", programUser: "obs", programPass: "op", backupUser: "bak", backupPass: "bp" }
+  const ports = { rtmp: 19350, hls: 18888, api: 19997 }
+  const both = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true })
+  const noBackup = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, disarmed: { main: false, backup: true } })
+  const noMain = buildMediamtxConfig({ host: "127.0.0.1", ports, creds, programArmed: true, disarmed: { main: true, backup: false } })
+  assert.match(noBackup, /user: "obs"/)
+  assert.doesNotMatch(noBackup, /user: "bak"/)
+  assert.match(noMain, /user: "bak"/)
+  assert.doesNotMatch(noMain, /user: "obs"/)
+  const listeners = (y: string) => y.split("\n").filter((l) => /^(rtmp|srt)/.test(l)).join("\n")
+  assert.equal(listeners(noBackup), listeners(both))
+  assert.equal(listeners(noMain), listeners(both))
 })
