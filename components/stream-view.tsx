@@ -105,6 +105,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [testUntil, setTestUntil] = useState<number | null>(initial?.testUntil ?? null)
   const [pausedAt, setPausedAt] = useState<number | null>(initial?.pausedAt ?? null)
   const [stage, setStage] = useState<Stage>(() => parseStage(initial?.stage ?? {}))
+  // Background pulses run on the wall clock (ms into the UTC day; every period divides a day), so the
+  // capture's planned Chrome refresh / a reload picks them up mid-pulse instead of restarting them.
+  useEffect(() => { document.documentElement.style.setProperty("--wall-delay", `-${Date.now() % 86_400_000}ms`) }, [])
   // Fetch + decode every image the countdown and cards can show, at start and on every settings change.
   const imageKey = stageImageUrls(stage, brandUrl).join("\n")
   useEffect(() => { void preloadImages(imageKey.split("\n").filter(Boolean)) }, [imageKey])

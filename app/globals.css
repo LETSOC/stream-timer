@@ -159,6 +159,8 @@
   opacity: 0.5;
   will-change: opacity;
   animation: stage-bg-pulse 9s ease-in-out infinite alternate;
+  /* Phase locked to the wall clock (set by /stream): a page reload / fresh Chrome continues mid-pulse. */
+  animation-delay: var(--wall-delay, 0s);
 }
 @keyframes stage-bg-pulse {
   from { opacity: 0; }
@@ -171,6 +173,8 @@
 .countdown-stage .live-wash {
   background: linear-gradient(115deg, rgba(255, 60, 0, 0.51), rgba(143, 34, 0, 0.55));
   animation: live-wash 4.5s ease-in-out infinite;
+  /* Phase locked to the wall clock (set by /stream): a page reload / fresh Chrome continues mid-pulse. */
+  animation-delay: var(--wall-delay, 0s);
 }
 
 @keyframes live-wash {
@@ -208,6 +212,8 @@
   border-radius: 6px;
   padding: 0.95em 1.35em;
   animation: rsvp-pulse 4.8s ease-in-out infinite;
+  /* Phase locked to the wall clock (set by /stream): a page reload / fresh Chrome continues mid-pulse. */
+  animation-delay: var(--wall-delay, 0s);
 }
 
 .countdown-stage .stage-rsvp:hover,

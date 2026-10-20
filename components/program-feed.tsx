@@ -114,9 +114,13 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       const { default: HlsLib } = await import("hls.js")
       if (cancelled) return
       if (HlsLib.isSupported()) {
+        // On air: liveSyncOnStallIncrease 0. hls.js's default (1s) raises its target latency by 1s on every
+        // buffer stall and never lowers it again (only a new manifest resets it): overnight the picture sat
+        // at 3.6 → 4.3 → 4.7 → 6.4s behind in steps at each stall, and "jump to live" landed on that same
+        // raised target. With 0 the 1.15x catch-up brings it back to ~1 segment after a stall.
         const tuning = gentle
           ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
-          : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1.15 }
+          : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1.15, liveSyncOnStallIncrease: 0 }
         hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
         hls.loadSource(src)
