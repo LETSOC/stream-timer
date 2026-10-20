@@ -47,6 +47,8 @@ export type TransportAction =
 export type ProgramSourcesView = {
   main: SourceHealth & Partial<InputReadout>
   backup: SourceHealth & Partial<InputReadout> & { pull: boolean }
+  /** per-feed OBS login on (per-feed Disarm/Arm) */
+  armed?: { main: boolean; backup: boolean }
   returnStatus?: ReturnStatus | null
   failover: FailoverSettings
   last: FailoverEvent | null

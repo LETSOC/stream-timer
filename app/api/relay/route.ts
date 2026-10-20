@@ -1,9 +1,12 @@
 import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
 import { notePlannedBack } from "@/lib/program-rearm"
-import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, disarmProgram, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { disarmFeed } from "@/lib/program-monitor"
+import type { ArmScope } from "@/lib/program-arm"
+import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
 
 const NO_STORE = { "Cache-Control": "no-store" }
+const scopeOf = (v: unknown): ArmScope => (v === "main" || v === "backup" ? v : "both")
 
 /** Operator only. Relay state, per-path publisher and per-forward status. Never a URL or key. */
 export async function GET(request: Request) {
@@ -18,7 +21,7 @@ export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
   if (denied) return denied
-  const body = (await request.json().catch(() => null)) as { action?: unknown; path?: unknown; destinationId?: unknown; on?: unknown; url?: unknown; failover?: unknown; name?: unknown; passphrase?: unknown } | null
+  const body = (await request.json().catch(() => null)) as { action?: unknown; path?: unknown; destinationId?: unknown; on?: unknown; url?: unknown; failover?: unknown; name?: unknown; passphrase?: unknown; feed?: unknown } | null
   const reply = async (result: { ok: true; note?: string } | { ok: false; error: string; status: number }) =>
     result.ok ? Response.json({ ...(await relayStatus()), note: result.note ?? null }, { headers: NO_STORE }) : Response.json({ ...(await relayStatus()), error: result.error }, { status: result.status, headers: NO_STORE })
   switch (body?.action) {
@@ -31,11 +34,13 @@ export async function POST(request: Request) {
       if (!RELAY_PATHS.includes(body.path as RelayPath) || typeof body.destinationId !== "string") return Response.json({ error: "Expected { path: slate|capture, destinationId, on }." }, { status: 400 })
       return reply(await setForward(body.path as RelayPath, body.destinationId, body.on === true))
     }
-    case "arm-program":
-      notePlannedBack("both") // manual Arm: no auto re-arm right after
-      return reply(await armProgram())
+    case "arm-program": {
+      const feed = scopeOf(body.feed)
+      notePlannedBack(feed) // manual Arm: no auto re-arm of that feed right after
+      return reply(await armProgram(feed))
+    }
     case "disarm-program":
-      return reply(await disarmProgram())
+      return reply(await disarmFeed(scopeOf(body.feed)))
     case "rotate-backup":
       return reply(await rotateProgramCredentials("backup"))
     case "rotate-program":
