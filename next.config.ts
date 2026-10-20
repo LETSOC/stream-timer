@@ -6,6 +6,13 @@ const nextConfig: NextConfig = {
   env: { APP_BUILD: process.env.APP_BUILD ?? String(Date.now()), APP_VERSION: process.env.npm_package_version ?? "" },
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   devIndicators: false,
+  // Built-in /brand images: immutable when versioned (?v=<build>, lib/brand-asset), else revalidate hourly.
+  async headers() {
+    return [
+      { source: "/brand/:file*", headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }] },
+      { source: "/brand/:file*", has: [{ type: "query", key: "v" }], headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }] },
+    ]
+  },
   turbopack: {
     rules: {
       "*.css": {
