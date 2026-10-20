@@ -261,6 +261,14 @@ function logAgeMs(): number | null {
   try { return Date.now() - fs.statSync(file("vertical.log")).mtimeMs } catch { return null }
 }
 
+/** Sync snapshot for the 30s dropout health line: null unless vertical runs and its progress is fresh. */
+export function verticalSnapshot(): { encoder: string; fps: number | null; speed: number | null; drop: number | null; dup: number | null } | null {
+  const meta = readJson<Pidfile>(file("vertical.json"))
+  const age = logAgeMs()
+  if (!meta || age === null || age > 15000) return null
+  return { encoder: meta.encoder === "videotoolbox" ? "h264_videotoolbox" : meta.encoder === "libx264" ? "libx264" : "?", ...verticalProgress(tail()) }
+}
+
 export type VerticalStatus = {
   running: boolean
   state: ForwardState

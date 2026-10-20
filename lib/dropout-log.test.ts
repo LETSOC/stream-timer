@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { correlate, dropoutLine, londonParts, parseDropoutLog, redact } from "@/lib/dropout-log"
-import { avLine, captureChromeNote, captureEncoderNote, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
+import { avLine, captureChromeNote, captureEncoderNote, captureHealthLine, verticalHealthLine, captureTrouble, mediamtxNote, parseProgress, pushTrouble } from "@/lib/dropout-monitor"
 
 test("dropout lines use London time (BST in October, GMT in November)", () => {
   assert.equal(dropoutLine(Date.UTC(2026, 9, 19, 9, 59, 1, 234), "!", "relay", "Main gone"), "2026-10-19 10:59:01.234 ! [relay] Main gone")
@@ -161,7 +161,7 @@ test("avLine: 30s program audio line with counts since the last line (and after 
   const a = avLine({ delayMs: 1234.4, queuedMs: 1250, playerLatencyMs: 1180, corrections: 40, jumps: 2, resyncs: 1 }, null)
   assert.equal(a.text, "program audio target delay 1234ms, queue 1250ms, player latency 1180ms; last 30s: 0 corrections, 0 drops/holds, 0 resyncs")
   const b = avLine({ delayMs: 8000, queuedMs: null, playerLatencyMs: 7900, corrections: 52, jumps: 5, resyncs: 3 }, a.counters)
-  assert.match(b.text, /queue \?, player latency 7900ms; last 30s: 12 corrections, 3 drops\/holds, 2 resyncs$/)
+  assert.match(b.text, /queue unprimed, player latency 7900ms; last 30s: 12 corrections, 3 drops\/holds, 2 resyncs$/)
   const c = avLine({ delayMs: 1200, queuedMs: 1200, playerLatencyMs: 1100, corrections: 4, jumps: 0, resyncs: 0 }, b.counters)
   assert.match(c.text, /4 corrections, 0 drops\/holds, 0 resyncs$/)
 })
@@ -179,4 +179,17 @@ test("capture start line → encoder note", () => {
   assert.equal(captureEncoderNote("[capture 14:00:01] starting 1280x720 @ 30fps, 3000k, libx264, keyframe every 2s")?.text, "encoder (HD capture): libx264, 1280x720@30, 3000k")
   assert.equal(captureEncoderNote("[capture 14:00:01] VideoToolbox here can't do constant bitrate (needs FFmpeg 6.1+)")?.level, "!")
   assert.equal(captureEncoderNote("[capture 14:00:01] something else"), null)
+})
+
+test("30s capture health line: real fields, ? when missing, Mac load", () => {
+  const load = { one: 3.21, five: 2.5, cores: 10 }
+  const line = captureHealthLine({ size: "1920x1080", encoder: "h264_videotoolbox", bitrateK: 4500, screencastFps: 29.5, writtenFps: 30, repeatPct: 12.5, enc: { fps: 30, speed: 1, kbps: 4480 }, backpressurePct: 0, maxLagMs: 18, maxGapMs: 120, sync: { skippedMs: 0 } }, load)
+  assert.equal(line, "health: 1920x1080 h264_videotoolbox 4500k · screencast 29.5fps · written 30fps (12.5% repeats) · enc 1.00x 4480kbps · pipe backpressure 0% · maxLag 18ms · maxGap 120ms · skipped 0ms · Mac load 3.21/2.50 (cores 10)")
+  assert.match(captureHealthLine({}, load), /^health: \? \? \? · screencast \? · written \? \(\? repeats\) · enc \? \? ·/)
+  assert.equal(verticalHealthLine({ encoder: "libx264", fps: 30, speed: 1.01, drop: 0, dup: 2 }, load), "health (vertical): 1080x1920 libx264 4500k · enc 1.01x 30fps · drop 0 · dup 2 · Mac load 3.21/2.50 (cores 10)")
+})
+
+test("[av] line says unprimed when the queue has no level; speed line carries load", () => {
+  assert.match(avLine({ delayMs: 2000, queuedMs: null, playerLatencyMs: 2100 }, null).text, /queue unprimed,/)
+  assert.match(captureTrouble({ enc: { fps: 28, speed: 0.8, kbps: 4000 } }, { one: 9, five: 7, cores: 8 })[0].text, /0\.8x.*Mac load 9\.00\/7\.00 \(cores 8\)/)
 })

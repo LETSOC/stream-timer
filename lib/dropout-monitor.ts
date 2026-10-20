@@ -4,11 +4,13 @@
  * It never changes anything: no restarts, no config, no ffmpeg arguments.
  */
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { dlog, type DropLevel } from "@/lib/dropout-log"
 import { relayDir, relayPathsSnapshot } from "@/lib/relay"
 import { rtmpFiles } from "@/lib/encoder"
 import { rttView } from "@/lib/rtt-monitor"
+import { verticalSnapshot, VERTICAL_KBPS, VERTICAL_W, VERTICAL_H } from "@/lib/vertical"
 
 const PATH_LABEL: Record<string, string> = { program: "Main /program", "program-backup": "Backup /program-backup", capture: "Browser capture /capture", slate: "Slate /slate", vertical: "Vertical /vertical" }
 /** Publisher connected but no new bytes for this long = the ingest is starving (weak Wi-Fi). */
@@ -92,19 +94,33 @@ export function avLine(pa: NonNullable<CaptureStats["programAudio"]>, prev: AvCo
   // Counters restart with the capture process: then the new value is the count since.
   const d = (k: keyof AvCounters) => (prev === null ? 0 : counters[k] >= prev[k] ? counters[k] - prev[k] : counters[k])
   const ms = (v: number | null | undefined) => (v === null || v === undefined ? "?" : `${Math.round(v)}ms`)
-  return { counters, text: `program audio target delay ${ms(pa.delayMs)}, queue ${ms(pa.queuedMs)}, player latency ${ms(pa.playerLatencyMs)}; last 30s: ${d("corrections")} corrections, ${d("jumps")} drops/holds, ${d("resyncs")} resyncs` }
+  return { counters, text: `program audio target delay ${ms(pa.delayMs)}, queue ${pa.queuedMs === null || pa.queuedMs === undefined ? "unprimed" : ms(pa.queuedMs)}, player latency ${ms(pa.playerLatencyMs)}; last 30s: ${d("corrections")} corrections, ${d("jumps")} drops/holds, ${d("resyncs")} resyncs` }
 }
 
 /** Capture health (scripts/capture-stream.mjs stats, every 2s) → problems while the program is on air. */
-export type CaptureStats = { at?: number; fps?: number; screencastFps?: number; repeatPct?: number; backpressurePct?: number; heartbeatAgeMs?: number; maxGapMs?: number; programAudio?: { on?: boolean; underruns?: number; delayMs?: number; queuedMs?: number | null; playerLatencyMs?: number | null; corrections?: number; jumps?: number; resyncs?: number }; enc?: { fps: number; speed: number; kbps: number; drop?: number } }
-export function captureTrouble(s: CaptureStats): { key: string; text: string }[] {
+export type CaptureStats = { at?: number; fps?: number; size?: string; encoder?: string; bitrateK?: number; writtenFps?: number; maxLagMs?: number; sync?: { skippedMs?: number }; screencastFps?: number; repeatPct?: number; backpressurePct?: number; heartbeatAgeMs?: number; maxGapMs?: number; programAudio?: { on?: boolean; underruns?: number; delayMs?: number; queuedMs?: number | null; playerLatencyMs?: number | null; corrections?: number; jumps?: number; resyncs?: number }; enc?: { fps: number; speed: number; kbps: number; drop?: number } }
+
+export type Load = { one: number; five: number; cores: number }
+export function macLoad(): Load { const [one, five] = os.loadavg(); return { one, five, cores: os.cpus().length } }
+export const loadText = (l: Load) => `Mac load ${l.one.toFixed(2)}/${l.five.toFixed(2)} (cores ${l.cores})`
+
+const q = (v: number | string | null | undefined, unit = "") => (v === null || v === undefined || (typeof v === "number" && !Number.isFinite(v)) ? "?" : `${v}${unit}`)
+/** Calm 30s health line from the capture stats (only fields the stats really carry; ? when missing). */
+export function captureHealthLine(s: CaptureStats, load: Load): string {
+  const speed = s.enc ? `${s.enc.speed.toFixed(2)}x` : "?"
+  return `health: ${q(s.size)} ${q(s.encoder)} ${q(s.bitrateK, "k")} · screencast ${q(s.screencastFps, "fps")} · written ${q(s.writtenFps, "fps")} (${q(s.repeatPct, "%")} repeats) · enc ${speed} ${q(s.enc?.kbps, "kbps")} · pipe backpressure ${q(s.backpressurePct, "%")} · maxLag ${q(s.maxLagMs, "ms")} · maxGap ${q(s.maxGapMs, "ms")} · skipped ${q(s.sync?.skippedMs, "ms")} · ${loadText(load)}`
+}
+export function verticalHealthLine(v: NonNullable<ReturnType<typeof verticalSnapshot>>, load: Load): string {
+  return `health (vertical): ${VERTICAL_W}x${VERTICAL_H} ${v.encoder} ${VERTICAL_KBPS}k · enc ${v.speed === null ? "?" : `${v.speed.toFixed(2)}x`} ${q(v.fps, "fps")} · drop ${q(v.drop)} · dup ${q(v.dup)} · ${loadText(load)}`
+}
+export function captureTrouble(s: CaptureStats, load?: Load): { key: string; text: string }[] {
   const out: { key: string; text: string }[] = []
   const onProgram = s.programAudio?.on === true
   const fps = s.fps ?? 30
   if (onProgram && (s.maxGapMs ?? 0) > SCREENCAST_GAP_MS) out.push({ key: "gap", text: `screencast gap ${s.maxGapMs}ms on the program (page didn't repaint: output repeats the last frame = frozen)` })
   if (onProgram && (s.repeatPct ?? 0) > 50) out.push({ key: "repeat", text: `${s.repeatPct}% repeated frames on the program (picture frozen in the output; screencast ${s.screencastFps} fps)` })
   if ((s.backpressurePct ?? 0) > 0) out.push({ key: "backpressure", text: `encoder behind: ${s.backpressurePct}% frames skipped (CPU) → stutter` })
-  if (s.enc && s.enc.speed < 0.95) out.push({ key: "speed", text: `capture encoder speed ${s.enc.speed}x, ${s.enc.fps} fps (below realtime → stutter/buffering downstream)` })
+  if (s.enc && s.enc.speed < 0.95) out.push({ key: "speed", text: `capture encoder speed ${s.enc.speed}x, ${s.enc.fps} fps (below realtime → stutter/buffering downstream)${load ? `; ${loadText(load)}` : ""}` })
   else if (s.enc && s.enc.fps < fps * 0.85) out.push({ key: "fps", text: `capture encoder ${s.enc.fps} fps (target ${fps})` })
   // The capture samples the heartbeat every 5s, so up to ~5s is normal; > 9s = two missed ticks.
   if ((s.heartbeatAgeMs ?? 0) > 9000) out.push({ key: "hb", text: `/stream page not ticking for ${Math.round((s.heartbeatAgeMs ?? 0) / 1000)}s (page hung: frozen output, reload next)` })
@@ -141,6 +157,7 @@ type State = {
   capTail: Tail
   capStatsAt: number
   avAt: number
+  healthAt: number
   avPrev: AvCounters | null
   capTrouble: Map<string, number>
   capStale: boolean
@@ -149,7 +166,7 @@ type State = {
 const KEY = Symbol.for("stream-timer.dropout-monitor")
 function state(): State {
   const h = globalThis as { [KEY]?: State }
-  h[KEY] ??= { timer: null, paths: new Map(), apiDown: false, mtx: { offset: -1, partial: "" }, conns: new Map(), lastMtx: [], forwards: new Map(), capTail: { offset: -1, partial: "" }, capStatsAt: 0, avAt: 0, avPrev: null, capTrouble: new Map(), capStale: false, srt: { main: { lost: null, spike: false, okSince: null }, backup: { lost: null, spike: false, okSince: null } } }
+  h[KEY] ??= { timer: null, paths: new Map(), apiDown: false, mtx: { offset: -1, partial: "" }, conns: new Map(), lastMtx: [], forwards: new Map(), capTail: { offset: -1, partial: "" }, capStatsAt: 0, avAt: 0, healthAt: 0, avPrev: null, capTrouble: new Map(), capStale: false, srt: { main: { lost: null, spike: false, okSince: null }, backup: { lost: null, spike: false, okSince: null } } }
   return h[KEY]
 }
 /** Start tails at the current end (don't replay old logs on server start). */
@@ -297,7 +314,15 @@ function pollCapture(s: State, now: number) {
     s.avAt = now
     s.avPrev = a.counters
   }
-  const found = captureTrouble(st)
+  if (now - (s.healthAt ?? 0) >= AV_LINE_MS) {
+    s.healthAt = now
+    const load = macLoad()
+    dlog("·", "capture", captureHealthLine(st, load), now)
+    let v: ReturnType<typeof verticalSnapshot> = null
+    try { v = verticalSnapshot() } catch { v = null }
+    if (v) dlog("·", "capture", verticalHealthLine(v, load), now)
+  }
+  const found = captureTrouble(st, st.enc && st.enc.speed < 0.95 ? macLoad() : undefined)
   for (const f of found) {
     if (!s.capTrouble.has(f.key)) dlog("!", "capture", f.text)
     s.capTrouble.set(f.key, now)
