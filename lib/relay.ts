@@ -1205,7 +1205,7 @@ async function checkDestinationTimers() {
     try {
       await setForward(path, dest.id, true)
       setDestinationTimer(dest.id, null)
-      dlog("relay", `timer fired: ${dest.name} on /${path}`)
+      dlog("+", "relay", `timer fired: ${dest.name} on /${path}`)
     } catch { /* next tick */ }
   }
 }
