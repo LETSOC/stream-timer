@@ -1,14 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { ConfirmButton } from "@/components/confirm-button"
 import { StreamPlayer } from "@/components/stream-player"
-import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { handleUnauthorized } from "@/lib/use-operator"
 
 type Tone = "solid" | "outline" | "danger" | "live"
 type PillClass = (tone?: Tone, size?: "sm" | "md") => string
-type Dest = { id: string; name: string; host: string; activateAt?: number | null; timerPath?: "slate" | "capture" | "vertical" | null }
 type Health = { fps: number | null; kbps: number | null; speed?: number | null; level?: string; warnings?: string[] }
 export type VerticalView = {
   running: boolean
@@ -86,14 +84,12 @@ export function useVertical() {
 }
 
 /** Desk › Encoder: the Vertical (9:16) output card. */
-export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { dests: Dest[]; pillClass: PillClass; onDestsChanged?: () => void; /** opens the desk's Saved destinations editor */ onEdit?: (id: string) => void }) {
+export function VerticalCard({ pillClass }: { pillClass: PillClass }) {
   const { view, act } = useVertical()
   const [busy, setBusy] = useState<string | null>(null)
-  const [pendingFwd, setPendingFwd] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
-  const [form, setForm] = useState<{ open: boolean; name: string; server: string; key: string }>({ open: false, name: "", server: "", key: "" })
   const [preview, setPreview] = useState(false)
-  const { path, setForward } = useVerticalPath()
+  const { path } = useVerticalPath()
   const relayReady = path ? path.ready : null
   const live = view?.running === true
   const s = view?.settings
@@ -105,24 +101,6 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
     return r.error === null
   }
   const save = (patch: Partial<VerticalView["settings"]>) => void run("settings", { action: "settings", settings: patch })
-  const toggle = async (id: string, on: boolean) => {
-    setPendingFwd((s) => new Set(s).add(id))
-    const error = await setForward(id, on)
-    setPendingFwd((s) => { const n = new Set(s); n.delete(id); return n })
-    setMessage(error ? { tone: "error", text: error } : null)
-  }
-  async function addDest() {
-    setBusy("add")
-    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add", name: form.name, url: joinRtmpServerAndKey(form.server, form.key) }) }).catch(() => null)
-    setBusy(null)
-    if (!response) return setMessage({ tone: "error", text: "Could not reach the server." })
-    if (handleUnauthorized(response)) return
-    const body = (await response.json().catch(() => null)) as { item?: { id: string }; error?: string } | null
-    if (!response.ok || !body?.item) return setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` })
-    onDestsChanged?.()
-    setForm({ open: false, name: "", server: "", key: "" })
-    setMessage({ tone: "info", text: "Saved. Tick it, or set a timer, to start." })
-  }
   const h = view?.health
   return (
     <div data-testid="vertical-card" className="min-w-0 space-y-3 rounded-2xl border border-black/10 bg-white p-3 break-words [overflow-wrap:anywhere]">
@@ -135,51 +113,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
         </span>
       </div>
       <p className="font-mono text-[12px] text-black/70">Reads Browser capture from the relay (/capture), re-encodes it to 1080×1920 (whole 16:9 picture centred, bars top and bottom) and publishes it to the relay as /vertical. Destinations below are forwards from /vertical, like the HD relay. Needs Browser capture publishing to the relay. H.264 4500k, 30 fps, keyframe 2s.</p>
-      <div className="space-y-1 font-mono text-[12px] text-black/70">
-        <p className="font-bold text-black">Vertical destinations</p>
-        {dests.length === 0 ? <p>No saved destinations yet. Add one below.</p> : null}
-        {dests.map((d) => {
-          const fwd = path?.forwards.find((f) => f.destId === d.id)
-          const checked = pendingFwd.has(d.id) ? !Boolean(fwd) : Boolean(fwd)
-          const reason = path?.available?.find((x) => x.destId === d.id)?.reason ?? null
-          // Only a real conflict blocks ticking (a ticked one can always be unticked). Ticks apply live.
-          const blocked = Boolean(reason) && !checked
-          return (
-            <div key={d.id} data-testid={`vertical-dest-row-${d.id}`} data-blocked={blocked ? "1" : "0"} data-state={fwd?.state ?? "off"} className="space-y-0.5">
-              <div className="flex items-center gap-2">
-              <label className={`flex min-w-0 flex-1 items-center gap-2 ${blocked ? "cursor-not-allowed" : "cursor-pointer text-black"}`}>
-                <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || pendingFwd.has(d.id) || !path} checked={checked} onChange={(e) => void toggle(d.id, e.target.checked)} />
-                <span className="min-w-0 truncate"><span className="font-bold">{d.name}</span> · {d.host}</span>
-                {fwd ? <span data-testid={`vertical-fwd-state-${d.id}`} className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${tone(fwd.state)}`}>{FORWARD_STATE_LABEL[fwd.state]}{fwd.reconnects ? ` · ${fwd.reconnects}↻` : ""}</span> : null}
-              </label>
-              {onEdit ? <button type="button" data-testid={`vertical-dest-edit-${d.id}`} title="Edit name / server / stream key (Saved destinations, right column)" className="shrink-0 text-[11px] text-black/50 underline underline-offset-2 hover:text-black" onClick={() => onEdit(d.id)}>Edit</button> : null}
-              </div>
-              {d.activateAt ? <p data-testid={`vertical-timer-${d.id}`} className="pl-6 text-[11px] text-[#b45309]">Timer · {d.timerPath ?? "?"} · {(() => { const dt = new Date(d.activateAt!); const now = new Date(); const same = dt.toDateString() === now.toDateString(); const tom = new Date(now); tom.setDate(now.getDate() + 1); const time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); return same ? `today ${time}` : dt.toDateString() === tom.toDateString() ? `tomorrow ${time}` : `${dt.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}` })()}</p> : null}
-              {fwd && fwd.state === "forwarding" && fwd.health.kbps !== null ? <p className="pl-6 text-[11px] text-[#0f6b31]">{fwd.health.fps !== null ? `${fwd.health.fps.toFixed(1)} fps · ` : ""}{fwd.health.kbps}k{fwd.health.speed ? ` · ${fwd.health.speed.toFixed(2)}x` : ""}</p> : null}
-              {fwd?.error && fwd.state !== "forwarding" ? <p title={fwd.rawError ?? undefined} data-testid={`vertical-fwd-error-${d.id}`} className={`pl-6 text-[11px] font-bold ${fwd.state === "waiting" ? "text-black/60" : "text-[#8a1c13]"}`}>{fwd.error}</p> : null}
-              {blocked ? <p data-testid={`vertical-dest-reason-${d.id}`} className="pl-6 text-[11px] font-bold text-[#8a4b06]">{reason}</p> : null}
-            </div>
-          )
-        })}
-        <p className="text-[11px] text-black/60">Each ticked destination is its own relay forward from /vertical (ffmpeg -c copy): tick or untick while live, the encoder keeps running. A rejected key backs off (up to 30s between tries).</p>
-        <button type="button" data-testid="vertical-dest-add" className={pillClass("outline", "sm")} onClick={() => setForm({ ...form, open: !form.open })}>+ Add vertical destination</button>
-        {form.open ? (
-          <form data-testid="vertical-dest-form" className="space-y-2 rounded-xl border border-black/10 bg-[#F6F6F3] p-3" onSubmit={(e) => { e.preventDefault(); void addDest() }}>
-            <input aria-label="Destination name" data-testid="vertical-dest-name" className="h-9 w-full border px-3 text-sm" placeholder="Name, e.g. TikTok Live" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            <label className="block text-[11px] text-black/60">Server
-              <input aria-label="Server" data-testid="vertical-dest-url" autoComplete="off" spellCheck={false} className="h-9 w-full border px-3 text-sm" placeholder="rtmp://push.example.com/live" value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value })} />
-            </label>
-            <label className="block text-[11px] text-black/60">Stream key
-              <input aria-label="Stream key" data-testid="vertical-dest-key" type="password" autoComplete="off" spellCheck={false} className="h-9 w-full border px-3 text-sm" placeholder="xxxx-xxxx (leave empty if Server has the full URL)" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} />
-            </label>
-            <p className="text-[11px] text-black/60">Saved with the other destinations (same allow-list: RTMP_ALLOWED_HOSTS, or LAN + YouTube/Restream/Castr/Twitch/Facebook) and ticked for Vertical.</p>
-            <div className="flex gap-2">
-              <button type="submit" data-testid="vertical-dest-save" disabled={busy !== null} className={pillClass("live", "sm")}>Save destination</button>
-              <button type="button" className={pillClass("outline", "sm")} onClick={() => setForm({ open: false, name: "", server: "", key: "" })}>Cancel</button>
-            </div>
-          </form>
-        ) : null}
-      </div>
+      <p className="font-mono text-[11px] text-black/60">Destinations: tick 9:16 /vertical per destination in Saved destinations (right column). Ticks apply live; the encoder keeps running.</p>
       <div className="flex flex-wrap items-center gap-2 font-mono text-[12px] text-black/70">
         <label htmlFor="vertical-bg">Bars</label>
         <select id="vertical-bg" data-testid="vertical-bg" disabled={live || !s} value={s && ["#000000", "#0000B6"].includes(s.bg) ? s.bg : "custom"} onChange={(e) => e.target.value !== "custom" && save({ bg: e.target.value })} className="h-8 border px-2">
