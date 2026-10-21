@@ -100,7 +100,7 @@ export function SrtOptions() {
         <span data-testid="srs-engaged" data-engaged={engaged ? "yes" : "no"} className={`rounded-full px-2 py-0.5 font-mono text-[11px] font-bold tracking-[0.1em] ${
           engaged ? "bg-[#12b76a]/15 text-[#067647] ring-1 ring-[#12b76a]/30" : "bg-black/5 text-black/50"
         }`}>{engaged ? "ENGAGED" : "IDLE"}</span>
-        <button type="button" data-testid="srs-refresh" disabled={busy} aria-label="Refresh" onClick={() => void refresh()} className="ml-auto grid size-8 place-items-center rounded-full text-black/50 hover:bg-[#f1f0ec] disabled:opacity-40">
+        <button type="button" data-testid="srs-refresh" disabled={busy} aria-label="Refresh" onClick={() => void refresh()} className="ml-auto grid size-8 place-items-center rounded-full disabled:opacity-40">
           <RefreshCw aria-hidden className={`size-4 ${busy ? "animate-spin" : ""}`} />
         </button>
         <button type="button" data-testid="srs-collapse" aria-label="Collapse" aria-expanded onClick={() => setCollapsed("1")} className="grid size-8 place-items-center rounded-full hover:bg-[#f1f0ec]">
