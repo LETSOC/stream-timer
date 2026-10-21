@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
   if (denied) return denied
-  const body = (await request.json().catch(() => null)) as { action?: unknown; id?: unknown; name?: unknown; url?: unknown; channel?: unknown; server?: unknown; key?: unknown; activateAt?: unknown } | null
+  const body = (await request.json().catch(() => null)) as { action?: unknown; id?: unknown; name?: unknown; url?: unknown; channel?: unknown; server?: unknown; key?: unknown; activateAt?: unknown; timerPath?: unknown } | null
   if (!body || typeof body.action !== "string") return Response.json({ error: "Expected { action }." }, { status: 400 })
   const respond = (result: { ok: true; value: unknown } | { ok: false; error: string; status: number }) =>
     result.ok ? Response.json({ ...listDestinations(), item: result.value }, { headers: NO_STORE }) : Response.json({ error: result.error }, { status: result.status, headers: NO_STORE })
@@ -73,7 +73,8 @@ export async function POST(request: Request) {
     }
     case "set-timer": {
       const at = body.activateAt === null || body.activateAt === undefined ? null : Number(body.activateAt)
-      return respond(setDestinationTimer(body.id, at))
+      const path = body.timerPath === "slate" || body.timerPath === "capture" || body.timerPath === "vertical" ? body.timerPath : null
+      return respond(setDestinationTimer(body.id, at, path))
     }
     default:
       return Response.json({ error: "Unknown action." }, { status: 400 })
