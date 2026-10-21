@@ -40,7 +40,14 @@ function fromLocalInput(s: string): number | null {
 }
 function formatTime(ms: number): string {
   const d = new Date(ms)
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1)
+  const isTomorrow = d.toDateString() === tomorrow.toDateString()
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  if (sameDay) return `today ${time}`
+  if (isTomorrow) return `tomorrow ${time}`
+  return `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`
 }
 
 let pendingEdit: string | null = null
