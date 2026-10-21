@@ -121,7 +121,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
     if (!response.ok || !body?.item) return setMessage({ tone: "error", text: body?.error ?? `Server returned ${response.status}.` })
     onDestsChanged?.()
     setForm({ open: false, name: "", server: "", key: "" })
-    void toggle(body.item.id, true)
+    setMessage({ tone: "info", text: "Saved. Tick it, or set a timer, to start." })
   }
   const h = view?.health
   return (
