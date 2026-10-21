@@ -55,6 +55,7 @@ import { VisualsDeskSection } from "@/components/visuals-desk"
 import { VerticalCard } from "@/components/vertical-output"
 import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
+import { PathPanels } from "@/components/path-panels"
 import { SrtOptions } from "@/components/srt-options"
 import {
   buildLocalTestCommand,
@@ -1562,6 +1563,7 @@ export function OperatorConsole() {
             <DestinationsPanel dests={dests.items} selected={{ slate: dests.selectedId, capture: dests.selectedCaptureId }}
               liveIds={[rtmpChannels.slate.running ? dests.selectedId : null, rtmpChannels.capture.running ? dests.selectedCaptureId : null].filter((x): x is string => Boolean(x))}
               pillClass={pillClass} onChanged={() => void loadDests()} onNote={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text.split(/(?<=\.) /)[0])} />
+            <PathPanels dests={dests.items} onEdit={openDestEdit} onDestsChanged={() => void loadDests()} />
           </Panel>
         </section>
       </main>

@@ -19,10 +19,8 @@ import { handleUnauthorized } from "@/lib/use-operator"
 export type PanelDest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number; activateAt?: number | null; timerPath?: "slate" | "capture" | "vertical" | null }
 type Tone = "solid" | "outline" | "danger" | "live"
 type PillClass = (tone?: Tone, size?: "sm" | "md") => string
-type Fwd = { destId: string; state: string; reconnects?: number; restarts?: number; health?: { fps?: number | null; kbps?: number | null; speed?: number | null } | null; error?: string | null; rawError?: string | null }
+export type Fwd = { destId: string; state: string; reconnects?: number; restarts?: number; health?: { fps?: number | null; kbps?: number | null; speed?: number | null } | null; error?: string | null; rawError?: string | null }
 type Paths = Partial<Record<"slate" | "capture" | "vertical", { forwards: Fwd[]; available?: { destId: string; reason: string | null }[] }>>
-export type ForwardPath = "capture" | "slate" | "vertical"
-export type ForwardToggle = { path: ForwardPath; label: string; on: boolean; state: string | null; blocked: string | null; stats: string | null; error: string | null }
 type UseFor = "none" | "capture" | "vertical"
 type Form = { mode: "add" | "edit"; id: string | null; name: string; server: string; key: string; showKey: boolean; useFor: UseFor; keyTail: string; keyKind: "path" | "query" | "none"; savedKey: string | null; error: string; busy: boolean; timerOn: boolean; timerAt: string; timerPath: "slate" | "capture" | "vertical" }
 
@@ -104,16 +102,6 @@ export function timerTag(at: number | null | undefined, path: PanelDest["timerPa
   return `Timer · ${label} · ${when(at)}`
 }
 
-/** Pure: the per-destination forward switches (HD /capture, HD /slate, 9:16 /vertical) from /api/relay state. A ticked one can always be switched off; a blocked reason only stops switching on. */
-export function forwardToggles(id: string, paths: Paths | null): ForwardToggle[] {
-  const label: Record<ForwardPath, string> = { capture: "HD /capture", slate: "HD /slate", vertical: "9:16 /vertical" }
-  return (["capture", "slate", "vertical"] as const).map((p) => {
-    const f = paths?.[p]?.forwards.find((x) => x.destId === id) ?? null
-    const reason = paths?.[p]?.available?.find((x) => x.destId === id)?.reason ?? null
-    return { path: p, label: label[p], on: Boolean(f), state: f?.state ?? null, blocked: f ? null : reason, stats: f ? forwardStats(f) : null, error: f?.error && f.state !== "forwarding" && f.state !== "waiting" ? f.error : null }
-  })
-}
-
 async function post(url: string, payload: Record<string, unknown>): Promise<{ ok: boolean; body: Record<string, unknown> | null; status: number }> {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
   if (!response) return { ok: false, body: { error: "Could not reach the server." }, status: 0 }
@@ -151,17 +139,6 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
     return () => window.clearTimeout(id)
   }, [revealed])
 
-  const [fwdBusy, setFwdBusy] = useState<string | null>(null)
-  // Same call RelayCard / VerticalCard used: POST /api/relay { action: "forward", path, destinationId, on }.
-  async function setForward(id: string, name: string, path: ForwardPath, on: boolean) {
-    setFwdBusy(`${path}-${id}`)
-    const r = await post("/api/relay", { action: "forward", path, destinationId: id, on })
-    setFwdBusy(null)
-    const next = r.body?.paths as Paths | undefined
-    if (next) setPaths(next); else void loadPaths()
-    if (r.ok) note("ok", `${name}: /${path} forward ${on ? "on" : "off"}.`)
-    else note("error", r.status === 401 ? `${name}: not switched, signed out. Sign in and try again.` : `${name}: /${path} forward not switched ${on ? "on" : "off"}: ${String(r.body?.error ?? (r.status ? `server returned ${r.status}` : "could not reach the server"))}`)
-  }
   const focusForm = () => window.requestAnimationFrame(() => formRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }))
   const startEdit = useCallback(async (id: string) => {
     const r = await post("/api/rtmp-destinations", { action: "edit-info", id })
@@ -263,24 +240,6 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
                   )) : <span>not used yet</span>}
                   {timer ? <span data-testid={`dest-timer-${d.id}`} className="rounded-full bg-[#b45309]/10 px-2 py-0.5 text-[#b45309]">{timerTag(timer, d.timerPath, formatTime)}</span> : null}
                 </p>
-                <div data-testid={`dest-fwd-${d.id}`} className="mt-1.5 flex flex-wrap gap-1.5 font-mono text-[11px]">
-                  {forwardToggles(d.id, paths).map((t) => {
-                    const tid = `dest-fwd-${t.path}-${d.id}`
-                    const busy = fwdBusy === `${t.path}-${d.id}` || !paths
-                    return t.on ? (
-                      <ConfirmButton key={t.path} data-testid={tid} data-on="1" data-state={t.state ?? undefined} disabled={busy} className="rounded-full bg-[#128a3e] px-2.5 py-1 font-bold text-white disabled:opacity-40"
-                        confirmLabel={`Stop ${t.label}? Tap again`} onConfirm={() => void setForward(d.id, d.name, t.path, false)}>
-                        ● {t.label} · {FWD_LABEL[t.state ?? ""] ?? t.state}{t.stats ? <span data-testid={`${tid}-stats`} className="font-normal"> · {t.stats}</span> : null}
-                      </ConfirmButton>
-                    ) : (
-                      <button key={t.path} type="button" data-testid={tid} data-on="0" disabled={busy || Boolean(t.blocked)} title={t.blocked ?? `Forward ${t.label} to ${d.name}`}
-                        className="rounded-full border border-black/15 bg-white px-2.5 py-1 text-black/70 hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void setForward(d.id, d.name, t.path, true)}>
-                        ○ {t.label}
-                      </button>
-                    )
-                  })}
-                  {forwardToggles(d.id, paths).filter((t) => t.error).map((t) => <p key={`e-${t.path}`} data-testid={`dest-fwd-${t.path}-${d.id}-error`} className="basis-full break-words text-[11px] font-bold text-[#8a1c13]">{t.label}: {t.error}</p>)}
-                </div>
                 <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <p data-testid={`dest-display-${d.id}`} className="min-w-0 font-mono text-[12px] break-all">{revealed?.id === d.id ? revealed.url : (d.display ?? d.masked)}</p>
                   <span className="flex shrink-0 items-center gap-1 font-mono text-[12px] text-black/70">

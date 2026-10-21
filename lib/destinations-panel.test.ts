@@ -27,44 +27,11 @@ test("dropout log never carries a stream key from a forward error line", async (
   assert.ok(!/abcd-efgh|pw-secret/.test(line), line)
 })
 
-test("forwardToggles: one switch per path, live state from /api/relay", async () => {
-  const { forwardToggles } = await import("@/components/destinations-panel")
-  const paths = {
-    capture: { forwards: [{ destId: "yt", state: "forwarding" }] },
-    slate: { forwards: [] },
-    vertical: { forwards: [{ destId: "one", state: "retrying" }], available: [{ destId: "yt", reason: "Already used by /capture" }] },
-  }
-  const yt = forwardToggles("yt", paths)
-  assert.deepEqual(yt.map((t) => t.path), ["capture", "slate", "vertical"])
-  assert.deepEqual(yt[0], { path: "capture", label: "HD /capture", on: true, state: "forwarding", blocked: null, stats: null, error: null })
-  assert.equal(yt[1].on, false)
-  assert.equal(yt[2].blocked, "Already used by /capture")
-  const one = forwardToggles("one", paths)
-  assert.equal(one[2].on, true)
-  assert.equal(one[2].state, "retrying")
-})
-
-test("forwardToggles: a ticked forward is never blocked from switching off; no relay state = all off", async () => {
-  const { forwardToggles } = await import("@/components/destinations-panel")
-  const paths = { vertical: { forwards: [{ destId: "a", state: "forwarding" }], available: [{ destId: "a", reason: "conflict" }] } }
-  assert.equal(forwardToggles("a", paths)[2].blocked, null)
-  assert.ok(forwardToggles("a", null).every((t) => !t.on && t.state === null && t.blocked === null))
-})
-
 test("forwardStats: compact fps/kbps/speed/reconnects for a live switch; retries when not live", async () => {
   const { forwardStats } = await import("@/components/destinations-panel")
   assert.equal(forwardStats({ destId: "a", state: "forwarding", health: { fps: 30, kbps: 2500, speed: 1 }, reconnects: 2 }), "30 fps · 2500k · 1.00x · 2↻")
   assert.equal(forwardStats({ destId: "a", state: "retrying", restarts: 3, health: { fps: 30, kbps: 2500 } }), "3 retries")
   assert.equal(forwardStats({ destId: "a", state: "connecting" }), null)
-})
-
-test("forwardToggles: error text only when not forwarding/waiting; stats attached", async () => {
-  const { forwardToggles } = await import("@/components/destinations-panel")
-  const paths = { capture: { forwards: [{ destId: "a", state: "retrying", error: "Key rejected", restarts: 1 }] }, slate: { forwards: [{ destId: "a", state: "waiting", error: "No source" }] } }
-  const [cap, slate] = forwardToggles("a", paths)
-  assert.equal(cap.error, "Key rejected")
-  assert.equal(cap.stats, "1 retry")
-  assert.equal(slate.error, null)
 })
 
 test("timerTag: shows path and time on the card", async () => {
@@ -73,4 +40,19 @@ test("timerTag: shows path and time on the card", async () => {
   assert.equal(timerTag(1, "capture", when), "Timer · HD /capture · today 09:25")
   assert.equal(timerTag(1, "vertical", when), "Timer · 9:16 /vertical · today 09:25")
   assert.equal(timerTag(null, "slate", when), null)
+})
+
+test("path panels: live forward needs two taps to untick; waiting/off does not", async () => {
+  const { isLiveForward } = await import("@/components/path-panels")
+  for (const st of ["forwarding", "connecting", "retrying", "stalled"]) assert.equal(isLiveForward(st), true)
+  for (const st of ["waiting", "off", "blocked", null, undefined]) assert.equal(isLiveForward(st), false)
+})
+
+test("path panels: failed ticks always produce an error (unreachable, signed out, server error)", async () => {
+  const { tickError } = await import("@/components/path-panels")
+  assert.equal(tickError("YouTube", "capture", true, { ok: true, status: 200 }), null)
+  assert.equal(tickError("YouTube", "capture", true, null), "YouTube: /capture not ticked: could not reach the server.")
+  assert.equal(tickError("YouTube", "vertical", false, { ok: false, status: 401 }), "YouTube: /vertical not unticked: signed out. Sign in and try again.")
+  assert.equal(tickError("YouTube", "slate", true, { ok: false, status: 409, error: "Already used" }), "YouTube: /slate not ticked: Already used.")
+  assert.equal(tickError("YouTube", "slate", true, { ok: false, status: 500 }), "YouTube: /slate not ticked: server returned 500.")
 })
