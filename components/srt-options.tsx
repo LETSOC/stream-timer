@@ -5,13 +5,13 @@
  * Collapses to a pill (same shape as Local access). Expanded: latency choice
  * builds the SRT link, HLS is m3u8. Not part of MediaMTX failover.
  */
-import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, Copy, RefreshCw } from "lucide-react"
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import { copyOrShow } from "@/components/copy-fallback"
 
 type Latency = "low" | "balanced" | "reliable"
 const LATENCY_US: Record<Latency, number> = { low: 200000, balanced: 300000, reliable: 500000 }
-const LATENCY_SHORT: Record<Latency, string> = { low: "Low 200", balanced: "Balanced 300", reliable: "Reliable 500" }
+const LATENCY_SHORT: Record<Latency, string> = { low: "Low\n200", balanced: "Balanced\n300", reliable: "Reliable\n500" }
 
 type SrsStatus = { engaged: boolean; host: string | null; note: string }
 
@@ -101,7 +101,7 @@ export function SrtOptions() {
           engaged ? "bg-[#12b76a]/15 text-[#067647] ring-1 ring-[#12b76a]/30" : "bg-black/5 text-black/50"
         }`}>{engaged ? "ENGAGED" : "IDLE"}</span>
         <button type="button" data-testid="srs-refresh" disabled={busy} aria-label="Refresh" onClick={() => void refresh()} className="ml-auto grid size-8 place-items-center rounded-full text-black/50 hover:bg-[#f1f0ec] disabled:opacity-40">
-          <span className={`font-mono text-[11px] ${busy ? "animate-pulse" : ""}`}>{busy ? "…" : "↻"}</span>
+          <RefreshCw aria-hidden className={`size-4 ${busy ? "animate-spin" : ""}`} />
         </button>
         <button type="button" data-testid="srs-collapse" aria-label="Collapse" aria-expanded onClick={() => setCollapsed("1")} className="grid size-8 place-items-center rounded-full hover:bg-[#f1f0ec]">
           <ChevronUp aria-hidden className="size-4" />
@@ -113,7 +113,7 @@ export function SrtOptions() {
         <div role="radiogroup" aria-label="Latency" className="grid grid-cols-3 gap-1 rounded-full bg-[#f1f0ec] p-1">
           {(["low", "balanced", "reliable"] as const).map((v) => (
             <button key={v} type="button" role="radio" aria-checked={latency === v} data-testid={`srs-latency-${v}`} onClick={() => setLatency(v)}
-              className={`min-h-10 rounded-full text-[14px] ${latency === v ? "bg-black font-semibold text-white" : "text-black/55"}`}>{LATENCY_SHORT[v]}</button>
+              className={`min-h-10 rounded-full text-[13px] leading-tight whitespace-pre-line ${latency === v ? "bg-black font-semibold text-white" : "text-black/55"}`}>{LATENCY_SHORT[v]}</button>
           ))}
         </div>
       </div>
