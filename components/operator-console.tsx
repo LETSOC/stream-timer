@@ -1856,7 +1856,7 @@ function BackToTop() {
   )
 }
 
-type Dest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number }
+type Dest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number; activateAt?: number | null }
 
 function hostOf(url: string, fallback: string): string {
   try {
@@ -1980,6 +1980,11 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
             <option value="relay">Relay (MediaMTX) → /{channel}</option>
           </select>
         )}
+        {(() => {
+          const sel = dests.find((d) => d.id === selectedId)
+          const t = sel?.activateAt && sel.activateAt > Date.now() ? sel.activateAt : null
+          return t ? <span data-testid={tid("timer-hint")} className="flex items-center gap-1.5 rounded-md bg-[#b45309]/10 px-2 py-1 text-[#b45309]"><span className="size-1.5 rounded-full bg-[#b45309]" />Timer · starts {new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span> : null
+        })()}
         {channel === "capture" ? (
           <>
             <label htmlFor="capture-size">Size</label>
