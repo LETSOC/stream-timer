@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ConfirmButton } from "@/components/confirm-button"
 import { StreamPlayer } from "@/components/stream-player"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
