@@ -6,6 +6,9 @@
  * Keys never come to the browser except on Reveal (operator-only POST, hidden again after 30s); the
  * edit form gets the server part and the key's last 4 only. Saving a new key for a ticked forward
  * restarts only that forward (server side).
+ *
+ * Per-destination timer: activateAt (unix ms) shows as a tag on the card and a checkbox + datetime
+ * in the editor. It does not affect the HD/Vertical group — only this destination.
  */
 import { Eye, EyeOff, Pencil, Plus, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -13,18 +16,33 @@ import { ConfirmButton } from "@/components/confirm-button"
 import { joinRtmpServerAndKey, splitRtmpUrl } from "@/lib/rtmp-join"
 import { handleUnauthorized } from "@/lib/use-operator"
 
-export type PanelDest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number }
+export type PanelDest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number; activateAt?: number | null }
 type Tone = "solid" | "outline" | "danger" | "live"
 type PillClass = (tone?: Tone, size?: "sm" | "md") => string
 type Fwd = { destId: string; state: string }
 type Paths = Partial<Record<"slate" | "capture" | "vertical", { forwards: Fwd[] }>>
 type UseFor = "none" | "capture" | "vertical"
-type Form = { mode: "add" | "edit"; id: string | null; name: string; server: string; key: string; showKey: boolean; useFor: UseFor; keyTail: string; keyKind: "path" | "query" | "none"; savedKey: string | null; error: string; busy: boolean }
+type Form = { mode: "add" | "edit"; id: string | null; name: string; server: string; key: string; showKey: boolean; useFor: UseFor; keyTail: string; keyKind: "path" | "query" | "none"; savedKey: string | null; error: string; busy: boolean; timerOn: boolean; timerAt: string }
 
 const DOTS = "••••••••"
 const FWD_LABEL: Record<string, string> = { forwarding: "live", connecting: "connecting", retrying: "retrying", stalled: "stalled", waiting: "waiting", blocked: "blocked", off: "off" }
 
-// The left lists' "Edit" links: open this panel's form for one destination (mounted or not yet).
+function toLocalInput(ms: number | null | undefined): string {
+  if (!ms) return ""
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function fromLocalInput(s: string): number | null {
+  if (!s) return null
+  const t = Date.parse(s)
+  return Number.isFinite(t) ? t : null
+}
+function formatTime(ms: number): string {
+  const d = new Date(ms)
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+}
+
 let pendingEdit: string | null = null
 const EDIT_EVENT = "desk:edit-destination"
 export function requestDestinationEdit(id: string) {
@@ -32,7 +50,6 @@ export function requestDestinationEdit(id: string) {
   window.dispatchEvent(new CustomEvent(EDIT_EVENT, { detail: id }))
 }
 
-/** Pure: what the form's "Preview (joined)" line shows. Typed keys are dots unless the eye is on; a blank key is the saved one (dots + last 4, or the revealed key). */
 export function joinedPreview(f: Pick<Form, "mode" | "server" | "key" | "showKey" | "keyTail" | "keyKind" | "savedKey">): string {
   const server = f.server.trim()
   if (!server) return ""
@@ -44,7 +61,6 @@ export function joinedPreview(f: Pick<Form, "mode" | "server" | "key" | "showKey
   return joinRtmpServerAndKey(server, `${f.keyKind === "query" ? "?" : ""}${DOTS}${f.keyTail}`)
 }
 
-/** Pure: the tags under a destination's name. */
 export function destinationUses(id: string, paths: Paths | null, selected: { slate: string | null; capture: string | null }): { label: string; kind: "hd" | "vertical" | "channel"; state?: string }[] {
   const out: { label: string; kind: "hd" | "vertical" | "channel"; state?: string }[] = []
   for (const p of ["capture", "slate"] as const) {
@@ -68,9 +84,7 @@ async function post(url: string, payload: Record<string, unknown>): Promise<{ ok
 
 export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChanged, onNote }: {
   dests: PanelDest[]
-  /** each channel's selected destination (Encoder panel) */
   selected: { slate: string | null; capture: string | null }
-  /** ids a running channel streams to directly (can't delete) */
   liveIds: string[]
   pillClass: PillClass
   onChanged: () => void
@@ -100,9 +114,10 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
   const focusForm = () => window.requestAnimationFrame(() => formRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }))
   const startEdit = useCallback(async (id: string) => {
     const r = await post("/api/rtmp-destinations", { action: "edit-info", id })
-    const info = r.body as { name?: string; server?: string; keyTail?: string; keyKind?: Form["keyKind"]; error?: string } | null
+    const info = r.body as { name?: string; server?: string; keyTail?: string; keyKind?: Form["keyKind"]; activateAt?: number | null; error?: string } | null
     if (!r.ok || !info?.server) { if (info?.error) note("error", info.error); return }
-    setForm({ mode: "edit", id, name: info.name ?? "", server: info.server, key: "", showKey: false, useFor: "none", keyTail: info.keyTail ?? "", keyKind: info.keyKind ?? "path", savedKey: null, error: "", busy: false })
+    const at = info.activateAt ?? null
+    setForm({ mode: "edit", id, name: info.name ?? "", server: info.server, key: "", showKey: false, useFor: "none", keyTail: info.keyTail ?? "", keyKind: info.keyKind ?? "path", savedKey: null, error: "", busy: false, timerOn: at !== null, timerAt: toLocalInput(at) })
     focusForm()
   }, [onNote]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -130,9 +145,11 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
   async function save() {
     if (!form) return
     setForm({ ...form, busy: true, error: "" })
+    const timerAt = form.timerOn ? fromLocalInput(form.timerAt) : null
     if (form.mode === "edit") {
       const r = await post("/api/rtmp-destinations", { action: "update", id: form.id, name: form.name, server: form.server, key: form.key })
       if (!r.ok) return setForm((f) => (f ? { ...f, busy: false, error: String(r.body?.error ?? `Server returned ${r.status}.`) } : f))
+      if (form.id) await post("/api/rtmp-destinations", { action: "set-timer", id: form.id, activateAt: timerAt })
       setForm(null)
       setRevealed(null)
       onChanged()
@@ -142,6 +159,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
     const r = await post("/api/rtmp-destinations", { action: "add", name: form.name, url: joinRtmpServerAndKey(form.server, form.key) })
     const id = (r.body as { item?: { id?: string } } | null)?.item?.id
     if (!r.ok || !id) return setForm((f) => (f ? { ...f, busy: false, error: String(r.body?.error ?? `Server returned ${r.status}.`) } : f))
+    if (timerAt) await post("/api/rtmp-destinations", { action: "set-timer", id, activateAt: timerAt })
     let msg = `Saved ${form.name.trim()}.`
     if (form.useFor !== "none") {
       const t = await post("/api/relay", { action: "forward", path: form.useFor, destinationId: id, on: true })
@@ -164,6 +182,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
   }
   const input = "h-9 w-full rounded-lg border border-black/15 bg-white px-3 font-mono text-[13px]"
   const preview = form ? joinedPreview(form) : ""
+  const timerPreview = form?.timerOn && form.timerAt ? fromLocalInput(form.timerAt) : null
   return (
     <div data-testid="dest-panel" className="space-y-3">
       <p className="font-mono text-[12px] text-black/70">Where each destination is used (HD relay forward, Vertical forward, or a channel). Edit replaces a rotated stream key: a ticked forward restarts with it on Save, nothing else restarts. Keys stay on this server; Reveal shows one for 30s.</p>
@@ -175,6 +194,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
             const uses = destinationUses(d.id, paths, selected)
             const editing = form?.mode === "edit" && form.id === d.id
             const live = liveIds.includes(d.id)
+            const timer = d.activateAt && d.activateAt > Date.now() ? d.activateAt : null
             return (
               <div key={d.id} data-testid={`dest-card-${d.id}`} data-editing={editing ? "1" : undefined} className={`min-w-0 rounded-xl border p-3 ${editing ? "border-black/10 border-l-4 border-l-[#d93200] bg-[#fff7f2]" : "border-black/10 bg-white"}`}>
                 <p className="text-[15px] font-bold break-words">{d.name}</p>
@@ -184,6 +204,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
                       {u.kind === "vertical" ? "9:16 " : u.kind === "hd" ? "HD " : ""}{u.label.replace(/^(HD|Vertical) /, "")}{u.state ? ` · ${FWD_LABEL[u.state] ?? u.state}` : ""}
                     </span>
                   )) : <span>not used yet</span>}
+                  {timer ? <span data-testid={`dest-timer-${d.id}`} className="rounded-full bg-[#b45309]/10 px-2 py-0.5 text-[#b45309]">Timer · {formatTime(timer)}</span> : null}
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <p data-testid={`dest-display-${d.id}`} className="min-w-0 font-mono text-[12px] break-all">{revealed?.id === d.id ? revealed.url : (d.display ?? d.masked)}</p>
@@ -201,7 +222,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
           })}
         </div>
       ))}
-      <button type="button" data-testid="dest-panel-add" onClick={() => setForm({ mode: "add", id: null, name: "", server: "", key: "", showKey: false, useFor: "none", keyTail: "", keyKind: "path", savedKey: null, error: "", busy: false })}
+      <button type="button" data-testid="dest-panel-add" onClick={() => setForm({ mode: "add", id: null, name: "", server: "", key: "", showKey: false, useFor: "none", keyTail: "", keyKind: "path", savedKey: null, error: "", busy: false, timerOn: false, timerAt: "" })}
         className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-black/15 bg-white py-2.5 font-mono text-[13px] text-black/70 hover:bg-black/[0.03]">
         <Plus aria-hidden className="size-4" />Add destination
       </button>
@@ -237,6 +258,20 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
               ))}
             </fieldset>
           ) : null}
+          <div className="space-y-2 rounded-lg border border-dashed border-black/15 bg-[#fafaf8] p-3">
+            <label className="flex items-center gap-2 font-mono text-[12px] font-normal">
+              <input type="checkbox" data-testid="dest-panel-timer" checked={form.timerOn} onChange={(e) => setForm({ ...form, timerOn: e.target.checked })} className="size-4 accent-[#12b76a]" />
+              Activate this destination on a timer
+            </label>
+            {form.timerOn ? (
+              <div className="space-y-2">
+                <label className="block font-mono text-[12px] font-bold">Start at
+                  <input data-testid="dest-panel-timer-at" type="datetime-local" className={input} value={form.timerAt} onChange={(e) => setForm({ ...form, timerAt: e.target.value })} />
+                </label>
+                {timerPreview ? <p className="rounded-lg bg-[#b45309]/10 px-2.5 py-2 font-mono text-[12px] text-[#b45309]">This destination starts forwarding at {formatTime(timerPreview)}. Other destinations are not affected.</p> : null}
+              </div>
+            ) : null}
+          </div>
           {preview ? (
             <div data-testid="dest-panel-preview" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 font-mono text-[12px]">
               <span className="text-black/60">Preview (joined):</span>
@@ -247,7 +282,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
             </div>
           ) : null}
           {form.error ? <p role="alert" data-testid="dest-panel-error" className="font-mono text-[12px] font-bold text-[#b42318]">{form.error}</p> : null}
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex flex-wrap justify-end gap-2 pt-1">
             <button type="submit" data-testid="dest-panel-save" disabled={form.busy} className={`${pillClass("live", "md")} min-w-28 rounded-lg`}>{form.busy ? "Saving…" : "Save"}</button>
             <button type="button" data-testid="dest-panel-cancel" className={`${pillClass("outline", "md")} min-w-28 rounded-lg`} onClick={() => setForm(null)}>Cancel</button>
           </div>
