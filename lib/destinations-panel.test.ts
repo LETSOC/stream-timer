@@ -26,3 +26,27 @@ test("dropout log never carries a stream key from a forward error line", async (
   const line = dropoutLine(Date.UTC(2026, 10, 4, 10), "!", "push", redact("FwdSink: rtmp://a.rtmp.youtube.com/live2/abcd-efgh-ijkl-mnop: I/O error ?password=pw-secret"))
   assert.ok(!/abcd-efgh|pw-secret/.test(line), line)
 })
+
+test("forwardToggles: one switch per path, live state from /api/relay", async () => {
+  const { forwardToggles } = await import("@/components/destinations-panel")
+  const paths = {
+    capture: { forwards: [{ destId: "yt", state: "forwarding" }] },
+    slate: { forwards: [] },
+    vertical: { forwards: [{ destId: "one", state: "retrying" }], available: [{ destId: "yt", reason: "Already used by /capture" }] },
+  }
+  const yt = forwardToggles("yt", paths)
+  assert.deepEqual(yt.map((t) => t.path), ["capture", "slate", "vertical"])
+  assert.deepEqual(yt[0], { path: "capture", label: "HD /capture", on: true, state: "forwarding", blocked: null })
+  assert.equal(yt[1].on, false)
+  assert.equal(yt[2].blocked, "Already used by /capture")
+  const one = forwardToggles("one", paths)
+  assert.equal(one[2].on, true)
+  assert.equal(one[2].state, "retrying")
+})
+
+test("forwardToggles: a ticked forward is never blocked from switching off; no relay state = all off", async () => {
+  const { forwardToggles } = await import("@/components/destinations-panel")
+  const paths = { vertical: { forwards: [{ destId: "a", state: "forwarding" }], available: [{ destId: "a", reason: "conflict" }] } }
+  assert.equal(forwardToggles("a", paths)[2].blocked, null)
+  assert.ok(forwardToggles("a", null).every((t) => !t.on && t.state === null && t.blocked === null))
+})

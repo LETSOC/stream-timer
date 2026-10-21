@@ -1212,8 +1212,8 @@ export function OperatorConsole() {
                     }} />
                 )
               })}
-              <RelayCard dests={dests.items} onEdit={openDestEdit} />
-              <VerticalCard dests={dests.items} pillClass={pillClass} onDestsChanged={() => void loadDests()} onEdit={openDestEdit} />
+              <RelayCard />
+              <VerticalCard pillClass={pillClass} />
               <AudioCard routing={streamAudio} onRouting={(patch) => void saveStreamAudio(patch)} />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
@@ -2033,8 +2033,6 @@ type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | 
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
 type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: { on: boolean; passphraseSet: boolean; port: number }; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
-const FORWARD_LABEL: Record<RelayForwardView["state"], string> = { blocked: "Blocked", off: "Paused", waiting: "Waiting for source", connecting: "Connecting…", forwarding: "Forwarding", retrying: "Retrying", stalled: "Stalled" }
-const FORWARD_TONE: Record<RelayForwardView["state"], string> = { blocked: "bg-[#d93200] text-white", off: "bg-black/5 text-black/70", waiting: "bg-black/10 text-black/70", connecting: "bg-[#b45309] text-white", forwarding: "bg-[#128a3e] text-white", retrying: "bg-[#b45309] text-white", stalled: "bg-[#d93200] text-white" }
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
 /** External OBS program feed: OBS publishes to the relay's /program; /stream can show it full-frame. */
@@ -2252,7 +2250,7 @@ function MdnsRow({ relay, busy, act }: { relay: RelayView | null; busy: boolean;
   )
 }
 
-function RelayCard({ dests, onEdit }: { dests: Dest[]; onEdit?: (id: string) => void }) {
+function RelayCard() {
   const [relay, setRelay] = useState<RelayView | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
@@ -2304,38 +2302,13 @@ function RelayCard({ dests, onEdit }: { dests: Dest[]; onEdit?: (id: string) => 
       <ProgramSection relay={relay} busy={busy} act={act} />
       {(["slate", "capture"] as const).map((name) => {
         const info = relay?.paths[name]
-        const enabled = new Map((info?.forwards ?? []).map((item) => [item.destId, item]))
         return (
           <div key={name} data-testid={`relay-path-${name}`} className="space-y-2 rounded-xl border border-black/10 p-2">
             <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[12px]">
               <span className="font-bold">/{name}</span>
               <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (set ${name === "slate" ? "Slate" : "Browser capture"} → Relay)`}</span>
             </div>
-            {dests.length === 0 ? <p className="font-mono text-[12px] text-black/60">Add a destination below to forward to.</p> : null}
-            <ul className="space-y-1">
-              {dests.map((dest) => {
-                const fwd = enabled.get(dest.id)
-                const on = Boolean(fwd)
-                return (
-                  <li key={dest.id} className="space-y-1 font-mono text-[12px]">
-                    {/* Always stacked: name on its own line (wraps), status + stats below, so a narrow column never truncates names. */}
-                    <div className="flex min-w-0 items-start gap-2">
-                    <label className="flex min-w-0 flex-1 items-start gap-2">
-                      <input type="checkbox" className="mt-0.5 shrink-0" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked })} />
-                      <span data-testid={`relay-fwd-name-${name}-${dest.name}`} className="min-w-0 break-words [overflow-wrap:anywhere]"><span className="font-bold">{dest.name}</span> <span className="text-black/60">· {dest.host}</span></span>
-                    </label>
-                    {onEdit ? <button type="button" data-testid={`relay-fwd-edit-${name}-${dest.name}`} title="Edit name / server / stream key (Saved destinations, right column)" className="shrink-0 text-[11px] text-black/50 underline underline-offset-2 hover:text-black" onClick={() => onEdit(dest.id)}>Edit</button> : null}
-                    </div>
-                    {fwd ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6">
-                    {fwd ? <span data-testid={`relay-fwd-state-${name}-${dest.name}`} data-state={fwd.state} className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${FORWARD_TONE[fwd.state]}`}>{FORWARD_LABEL[fwd.state]}</span> : null}
-                    {fwd && fwd.reconnects > 0 ? <span data-testid={`relay-fwd-reconnects-${name}-${dest.name}`} title={`A working connection to ${dest.name} dropped and was re-made ${fwd.reconnects}×. Total relaunches incl. quick retries: ${fwd.restarts}.`} className="font-mono text-[11px] text-[#8a4b06]">{fwd.reconnects} {fwd.reconnects === 1 ? "reconnect" : "reconnects"}</span> : fwd && fwd.restarts > 0 && fwd.state !== "forwarding" ? <span title="Quick retries: the forward could not connect (or the source was not publishing) and was started again." className="font-mono text-[11px] text-black/60">{fwd.restarts} {fwd.restarts === 1 ? "retry" : "retries"}</span> : null}
-                    {fwd && fwd.state === "forwarding" ? <HealthChip testid={`relay-fwd-health-${name}-${dest.name}`} health={fwd.health} /> : null}
-                    {fwd?.error && fwd.state !== "waiting" ? <span data-testid={`relay-fwd-error-${name}-${dest.name}`} className="basis-full break-words text-[11px] text-[#8a1c13]">{fwd.error}</span> : null}
-                    </div> : null}
-                  </li>
-                )
-              })}
-            </ul>
+            <p className="font-mono text-[12px] text-black/60">Forwards: tick per destination in Saved destinations (right column).</p>
             {info && (info.forwards.length > 0 || info.source) && info.ready ? <DiagnosisLine testid={`relay-diagnosis-${name}`} value={info.diagnosis} /> : null}
             <Pill size="sm" tone="outline" data-testid={`relay-preview-${name}`} aria-pressed={preview === name} disabled={!info?.ready} onClick={() => setPreview(preview === name ? null : name)}>{preview === name ? "Hide preview" : "Preview what the relay receives"}</Pill>
             {preview === name && info?.ready ? (

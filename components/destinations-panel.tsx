@@ -17,7 +17,9 @@ export type PanelDest = { id: string; name: string; host: string; masked: string
 type Tone = "solid" | "outline" | "danger" | "live"
 type PillClass = (tone?: Tone, size?: "sm" | "md") => string
 type Fwd = { destId: string; state: string }
-type Paths = Partial<Record<"slate" | "capture" | "vertical", { forwards: Fwd[] }>>
+type Paths = Partial<Record<"slate" | "capture" | "vertical", { forwards: Fwd[]; available?: { destId: string; reason: string | null }[] }>>
+export type ForwardPath = "capture" | "slate" | "vertical"
+export type ForwardToggle = { path: ForwardPath; label: string; on: boolean; state: string | null; blocked: string | null }
 type UseFor = "none" | "capture" | "vertical"
 type Form = { mode: "add" | "edit"; id: string | null; name: string; server: string; key: string; showKey: boolean; useFor: UseFor; keyTail: string; keyKind: "path" | "query" | "none"; savedKey: string | null; error: string; busy: boolean }
 
@@ -56,6 +58,16 @@ export function destinationUses(id: string, paths: Paths | null, selected: { sla
   if (selected.capture === id) out.push({ label: "Browser capture channel", kind: "channel" })
   if (selected.slate === id) out.push({ label: "Slate channel", kind: "channel" })
   return out
+}
+
+/** Pure: the per-destination forward switches (HD /capture, HD /slate, 9:16 /vertical) from /api/relay state. A ticked one can always be switched off; a blocked reason only stops switching on. */
+export function forwardToggles(id: string, paths: Paths | null): ForwardToggle[] {
+  const label: Record<ForwardPath, string> = { capture: "HD /capture", slate: "HD /slate", vertical: "9:16 /vertical" }
+  return (["capture", "slate", "vertical"] as const).map((p) => {
+    const f = paths?.[p]?.forwards.find((x) => x.destId === id) ?? null
+    const reason = paths?.[p]?.available?.find((x) => x.destId === id)?.reason ?? null
+    return { path: p, label: label[p], on: Boolean(f), state: f?.state ?? null, blocked: f ? null : reason }
+  })
 }
 
 async function post(url: string, payload: Record<string, unknown>): Promise<{ ok: boolean; body: Record<string, unknown> | null; status: number }> {
@@ -97,6 +109,17 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
     return () => window.clearTimeout(id)
   }, [revealed])
 
+  const [fwdBusy, setFwdBusy] = useState<string | null>(null)
+  // Same call RelayCard / VerticalCard used: POST /api/relay { action: "forward", path, destinationId, on }.
+  async function setForward(id: string, name: string, path: ForwardPath, on: boolean) {
+    setFwdBusy(`${path}-${id}`)
+    const r = await post("/api/relay", { action: "forward", path, destinationId: id, on })
+    setFwdBusy(null)
+    const next = r.body?.paths as Paths | undefined
+    if (next) setPaths(next); else void loadPaths()
+    if (!r.ok && r.body) note("error", String(r.body.error ?? r.status))
+    else if (r.ok) note("ok", `${name}: /${path} forward ${on ? "on" : "off"}.`)
+  }
   const focusForm = () => window.requestAnimationFrame(() => formRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }))
   const startEdit = useCallback(async (id: string) => {
     const r = await post("/api/rtmp-destinations", { action: "edit-info", id })
@@ -185,6 +208,23 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
                     </span>
                   )) : <span>not used yet</span>}
                 </p>
+                <div data-testid={`dest-fwd-${d.id}`} className="mt-1.5 flex flex-wrap gap-1.5 font-mono text-[11px]">
+                  {forwardToggles(d.id, paths).map((t) => {
+                    const tid = `dest-fwd-${t.path}-${d.id}`
+                    const busy = fwdBusy === `${t.path}-${d.id}` || !paths
+                    return t.on ? (
+                      <ConfirmButton key={t.path} data-testid={tid} data-on="1" data-state={t.state ?? undefined} disabled={busy} className="rounded-full bg-[#128a3e] px-2.5 py-1 font-bold text-white disabled:opacity-40"
+                        confirmLabel={`Stop ${t.label}? Tap again`} onConfirm={() => void setForward(d.id, d.name, t.path, false)}>
+                        ● {t.label} · {FWD_LABEL[t.state ?? ""] ?? t.state}
+                      </ConfirmButton>
+                    ) : (
+                      <button key={t.path} type="button" data-testid={tid} data-on="0" disabled={busy || Boolean(t.blocked)} title={t.blocked ?? `Forward ${t.label} to ${d.name}`}
+                        className="rounded-full border border-black/15 bg-white px-2.5 py-1 text-black/70 hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void setForward(d.id, d.name, t.path, true)}>
+                        ○ {t.label}
+                      </button>
+                    )
+                  })}
+                </div>
                 <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                   <p data-testid={`dest-display-${d.id}`} className="min-w-0 font-mono text-[12px] break-all">{revealed?.id === d.id ? revealed.url : (d.display ?? d.masked)}</p>
                   <span className="flex shrink-0 items-center gap-1 font-mono text-[12px] text-black/70">
