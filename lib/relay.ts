@@ -1197,6 +1197,11 @@ async function checkDestinationTimers() {
     if (!dest.activateAt || dest.activateAt > now) continue
     const path = dest.timerPath
     if (!path) continue
+    const settings = readSettings()
+    if (settings.forwards[path].includes(dest.id)) {
+      setDestinationTimer(dest.id, null)
+      continue
+    }
     try {
       await setForward(path, dest.id, true)
       setDestinationTimer(dest.id, null)
