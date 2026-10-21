@@ -2261,7 +2261,7 @@ function MdnsRow({ relay, busy, act }: { relay: RelayView | null; busy: boolean;
 
 function RelayCard({ dests, onEdit }: { dests: Dest[]; onEdit?: (id: string) => void }) {
   const [relay, setRelay] = useState<RelayView | null>(null)
-  const pendingFwd = useRef<Set<string>>(new Set())
+  const [pendingFwd, setPendingFwd] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [preview, setPreview] = useState<RtmpChannelId | null>(null)
@@ -2324,13 +2324,13 @@ function RelayCard({ dests, onEdit }: { dests: Dest[]; onEdit?: (id: string) => 
               {dests.map((dest) => {
                 const fwd = enabled.get(dest.id)
                 const key = `${name}:${dest.id}`
-                const on = pendingFwd.current.has(key) ? !Boolean(fwd) : Boolean(fwd)
+                const on = pendingFwd.has(key) ? !Boolean(fwd) : Boolean(fwd)
                 return (
                   <li key={dest.id} className="space-y-1 font-mono text-[12px]">
                     {/* Always stacked: name on its own line (wraps), status + stats below, so a narrow column never truncates names. */}
                     <div className="flex min-w-0 items-start gap-2">
                     <label className="flex min-w-0 flex-1 items-start gap-2">
-                      <input type="checkbox" className="mt-0.5 shrink-0" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={busy} onChange={(event) => { pendingFwd.current.add(key); void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked }).then(() => pendingFwd.current.delete(key)) }} />
+                      <input type="checkbox" className="mt-0.5 shrink-0" data-testid={`relay-fwd-${name}-${dest.name}`} checked={on} disabled={pendingFwd.has(key)} onChange={(event) => { setPendingFwd((s) => new Set(s).add(key)); void act({ action: "forward", path: name, destinationId: dest.id, on: event.target.checked }).then(() => setPendingFwd((s) => { const n = new Set(s); n.delete(key); return n })) }} />
                       <span data-testid={`relay-fwd-name-${name}-${dest.name}`} className="min-w-0 break-words [overflow-wrap:anywhere]"><span className="font-bold">{dest.name}</span> <span className="text-black/60">· {dest.host}</span></span>
                     </label>
                     {onEdit ? <button type="button" data-testid={`relay-fwd-edit-${name}-${dest.name}`} title="Edit name / server / stream key (Saved destinations, right column)" className="shrink-0 text-[11px] text-black/50 underline underline-offset-2 hover:text-black" onClick={() => onEdit(dest.id)}>Edit</button> : null}
