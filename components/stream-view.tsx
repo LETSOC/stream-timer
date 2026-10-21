@@ -16,6 +16,7 @@ import { brandUrl } from "@/lib/brand-asset"
 import { preloadImages, stageImageUrls } from "@/lib/image-preload"
 import { StageGuides } from "@/components/stage-guides"
 import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
+import { VisualsLayer } from "@/components/visuals-layer"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
 import { captureStartReady, handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
@@ -326,6 +327,12 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
       )}
+      {/* Visuals layer (deck): straps, talk-ends pill, ticker, Q&A, Sponsored. Over countdown and program, hidden by full-screen cards. */}
+      <div className="pointer-events-none absolute top-1/2 left-1/2 z-30 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)] -translate-x-1/2 -translate-y-1/2">
+        <VisualsLayer stage={stage} event={event} screen={shownScreen} now={now ? now.getTime() : null}
+          // Festival mode counts to the same end the countdown/end card use (test clock shifts it like the countdown).
+          eventEndMs={now && clock ? endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() - (clock.getTime() - now.getTime()) : null} />
+      </div>
     </main>
   )
 }
