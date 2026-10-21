@@ -26,3 +26,33 @@ test("dropout log never carries a stream key from a forward error line", async (
   const line = dropoutLine(Date.UTC(2026, 10, 4, 10), "!", "push", redact("FwdSink: rtmp://a.rtmp.youtube.com/live2/abcd-efgh-ijkl-mnop: I/O error ?password=pw-secret"))
   assert.ok(!/abcd-efgh|pw-secret/.test(line), line)
 })
+
+test("forwardStats: compact fps/kbps/speed/reconnects for a live switch; retries when not live", async () => {
+  const { forwardStats } = await import("@/components/destinations-panel")
+  assert.equal(forwardStats({ destId: "a", state: "forwarding", health: { fps: 30, kbps: 2500, speed: 1 }, reconnects: 2 }), "30 fps · 2500k · 1.00x · 2↻")
+  assert.equal(forwardStats({ destId: "a", state: "retrying", restarts: 3, health: { fps: 30, kbps: 2500 } }), "3 retries")
+  assert.equal(forwardStats({ destId: "a", state: "connecting" }), null)
+})
+
+test("timerTag: shows path and time on the card", async () => {
+  const { timerTag } = await import("@/components/destinations-panel")
+  const when = () => "today 09:25"
+  assert.equal(timerTag(1, "capture", when), "Timer · HD /capture · today 09:25")
+  assert.equal(timerTag(1, "vertical", when), "Timer · 9:16 /vertical · today 09:25")
+  assert.equal(timerTag(null, "slate", when), null)
+})
+
+test("path panels: live forward needs two taps to untick; waiting/off does not", async () => {
+  const { isLiveForward } = await import("@/components/path-panels")
+  for (const st of ["forwarding", "connecting", "retrying", "stalled"]) assert.equal(isLiveForward(st), true)
+  for (const st of ["waiting", "off", "blocked", null, undefined]) assert.equal(isLiveForward(st), false)
+})
+
+test("path panels: failed ticks always produce an error (unreachable, signed out, server error)", async () => {
+  const { tickError } = await import("@/components/path-panels")
+  assert.equal(tickError("YouTube", "capture", true, { ok: true, status: 200 }), null)
+  assert.equal(tickError("YouTube", "capture", true, null), "YouTube: /capture not ticked: could not reach the server.")
+  assert.equal(tickError("YouTube", "vertical", false, { ok: false, status: 401 }), "YouTube: /vertical not unticked: signed out. Sign in and try again.")
+  assert.equal(tickError("YouTube", "slate", true, { ok: false, status: 409, error: "Already used" }), "YouTube: /slate not ticked: Already used.")
+  assert.equal(tickError("YouTube", "slate", true, { ok: false, status: 500 }), "YouTube: /slate not ticked: server returned 500.")
+})
