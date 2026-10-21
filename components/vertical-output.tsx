@@ -8,7 +8,7 @@ import { handleUnauthorized } from "@/lib/use-operator"
 
 type Tone = "solid" | "outline" | "danger" | "live"
 type PillClass = (tone?: Tone, size?: "sm" | "md") => string
-type Dest = { id: string; name: string; host: string; activateAt?: number | null }
+type Dest = { id: string; name: string; host: string }
 type Health = { fps: number | null; kbps: number | null; speed?: number | null; level?: string; warnings?: string[] }
 export type VerticalView = {
   running: boolean
@@ -149,7 +149,6 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
               <label className={`flex min-w-0 flex-1 items-center gap-2 ${blocked ? "cursor-not-allowed" : "cursor-pointer text-black"}`}>
                 <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || busy === `fwd-${d.id}` || !path} checked={checked} onChange={(e) => void toggle(d.id, e.target.checked)} />
                 <span className="min-w-0"><span className="font-bold">{d.name}</span> · {d.host}</span>
-                {d.activateAt && d.activateAt > Date.now() ? <span data-testid={`vertical-timer-${d.id}`} className="shrink-0 rounded-full bg-[#b45309]/10 px-2 py-0.5 text-[10px] font-bold text-[#b45309]">Timer · {new Date(d.activateAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span> : null}
                 {fwd ? <span data-testid={`vertical-fwd-state-${d.id}`} className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${tone(fwd.state)}`}>{FORWARD_STATE_LABEL[fwd.state]}{fwd.reconnects ? ` · ${fwd.reconnects}↻` : ""}</span> : null}
               </label>
               {onEdit ? <button type="button" data-testid={`vertical-dest-edit-${d.id}`} title="Edit name / server / stream key (Saved destinations, right column)" className="shrink-0 text-[11px] text-black/50 underline underline-offset-2 hover:text-black" onClick={() => onEdit(d.id)}>Edit</button> : null}
