@@ -12,9 +12,9 @@ import { joinRtmpServerAndKey, maskRtmpDisplay, splitRtmpUrl } from "@/lib/rtmp-
 /** Pseudo-destination a channel can select: publish to the local MediaMTX relay path instead. */
 export const RELAY_TARGET = "relay"
 
-export type Destination = { id: string; name: string; url: string; createdAt: number; updatedAt?: number; activateAt?: number | null }
+export type Destination = { id: string; name: string; url: string; createdAt: number; updatedAt?: number; activateAt?: number | null; timerPath?: "slate" | "capture" | "vertical" | null }
 /** `display` = "rtmp://••••••••/live2/••••a1b2" (host and key hidden), `masked` = "rtmp://host/••••a1b2". */
-export type MaskedDestination = { id: string; name: string; host: string; masked: string; display: string; createdAt: number; updatedAt: number | null; activateAt: number | null }
+export type MaskedDestination = { id: string; name: string; host: string; masked: string; display: string; createdAt: number; updatedAt: number | null; activateAt: number | null; timerPath: "slate" | "capture" | "vertical" | null }
 /** selectedId = Slate channel (kept for compatibility), selectedCaptureId = Browser capture channel. */
 type Store = { selectedId: string | null; selectedCaptureId: string | null; items: Destination[] }
 
@@ -59,7 +59,7 @@ export function maskRtmpUrl(url: string): { host: string; masked: string } {
 }
 
 function mask(item: Destination): MaskedDestination {
-  return { id: item.id, name: item.name, createdAt: item.createdAt, updatedAt: item.updatedAt ?? null, activateAt: item.activateAt ?? null, display: maskRtmpDisplay(item.url), ...maskRtmpUrl(item.url) }
+  return { id: item.id, name: item.name, createdAt: item.createdAt, updatedAt: item.updatedAt ?? null, activateAt: item.activateAt ?? null, timerPath: item.timerPath ?? null, display: maskRtmpDisplay(item.url), ...maskRtmpUrl(item.url) }
 }
 
 export function listDestinations(): { selectedId: string | null; selectedCaptureId: string | null; items: MaskedDestination[] } {
@@ -135,12 +135,13 @@ export function updateDestination(id: unknown, input: { name?: unknown; server?:
 }
 
 /** Set or clear the per-destination activation timer. null clears it. */
-export function setDestinationTimer(id: unknown, activateAt: number | null, now = Date.now()): Result<MaskedDestination> {
+export function setDestinationTimer(id: unknown, activateAt: number | null, timerPath?: "slate" | "capture" | "vertical" | null, now = Date.now()): Result<MaskedDestination> {
   const store = read()
   const item = store.items.find((entry) => entry.id === id)
   if (!item) return { ok: false, error: "No such destination.", status: 404 }
   if (activateAt !== null && (!Number.isFinite(activateAt) || activateAt < now - 60_000)) return { ok: false, error: "Timer must be a future time.", status: 400 }
   item.activateAt = activateAt
+  item.timerPath = activateAt === null ? null : (timerPath ?? item.timerPath ?? null)
   item.updatedAt = now
   write(store)
   return { ok: true, value: mask(item) }
@@ -151,7 +152,7 @@ export function destinationEditInfo(id: unknown): { id: string; name: string; se
   const item = read().items.find((entry) => entry.id === id)
   if (!item) return null
   const { server, key } = splitRtmpUrl(item.url)
-  return { id: item.id, name: item.name, server, keyTail: key.length > 6 ? key.slice(-4) : "", keyKind: !key ? "none" : key.startsWith("?") ? "query" : "path", activateAt: item.activateAt ?? null }
+  return { id: item.id, name: item.name, server, keyTail: key.length > 6 ? key.slice(-4) : "", keyKind: !key ? "none" : key.startsWith("?") ? "query" : "path", activateAt: item.activateAt ?? null, timerPath: item.timerPath ?? null }
 }
 
 export function deleteDestination(id: unknown): Result<null> {
