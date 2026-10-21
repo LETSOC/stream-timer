@@ -1,21 +1,39 @@
 "use client"
 /**
- * Desk panel: copyable SRT URLs for Main and Backup (MediaMTX, port 8890)
- * and the parallel SRS option (docker, port 10080).
+ * Desk panel for the parallel SRS ingest (docker).
  *
- * SRT is better on Wi-Fi — it retransmits inside the latency window instead of
- * dropping frames the way RTMP does. RTMP stays available for both feeds.
+ * Shows engaged/idle from a probe of the SRS HTTP port, and builds the SRT
+ * (and HLS) links for the chosen latency. Not part of MediaMTX failover.
  */
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { copyOrShow } from "@/components/copy-fallback"
 
-type SrtReveal = { url: string | null; lan: boolean; port: number; note: string }
-type SrsOption = { host: string | null; rtmpServer: string | null; rtmpKey: string; srtUrl: string | null; flv: string | null; note: string }
+type Latency = "low" | "balanced" | "reliable"
+const LATENCY_US: Record<Latency, number> = { low: 200000, balanced: 300000, reliable: 500000 }
+const LATENCY_LABEL: Record<Latency, string> = { low: "Low (200 ms)", balanced: "Balanced (300 ms)", reliable: "Reliable (500 ms)" }
 
-async function reveal(action: string): Promise<SrtReveal | SrsOption | null> {
-  const r = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }).catch(() => null)
-  if (!r?.ok) return null
-  return (await r.json().catch(() => null)) as SrtReveal | SrsOption | null
+type SrsStatus = { engaged: boolean; host: string | null; note: string }
+
+function buildSrt(host: string, key: string, latencyUs: number) {
+  return `srt://${host}:10080?streamid=#!::r=live/${key},m=publish&latency=${latencyUs}`
+}
+function buildHls(host: string, key: string) {
+  return `http://${host}:8088/live/${key}.m3u8`
+}
+
+async function probeSrs(): Promise<SrsStatus> {
+  const r = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-srs" }) }).catch(() => null)
+  if (!r?.ok) return { engaged: false, host: null, note: "Could not reach the server." }
+  const body = (await r.json().catch(() => null)) as { host?: string | null; note?: string } | null
+  const host = body?.host ?? null
+  // Probe the SRS HTTP port from the browser. CORS may block; a successful response means engaged.
+  let engaged = false
+  if (host) {
+    const probe = await fetch(`http://${host}:8088/api/v1/summaries`, { mode: "no-cors" }).catch(() => null)
+    // no-cors returns an opaque response if the port answers; a network error means not engaged.
+    engaged = probe !== null
+  }
+  return { engaged, host, note: engaged ? "SRS docker is answering." : host ? "SRS not answering on :8088. Start the docker container." : (body?.note ?? "No LAN IP.") }
 }
 
 function Row({ label, value, testId }: { label: string; value: string | null; testId: string }) {
@@ -23,9 +41,9 @@ function Row({ label, value, testId }: { label: string; value: string | null; te
   if (!value) return null
   return (
     <div className="flex flex-wrap items-center gap-2 font-mono text-[12px]">
-      <span className="shrink-0 text-black/60">{label}</span>
-      <span data-testid={testId} className="min-w-0 break-all">{value}</span>
-      <button type="button" className="shrink-0 rounded border border-black/15 px-2 py-0.5 text-[11px] hover:bg-black/5" onClick={() => { void copyOrShow(label, value); setCopied(true); window.setTimeout(() => setCopied(false), 1500) }}>
+      <span className="w-14 shrink-0 text-black/50">{label}</span>
+      <span data-testid={testId} className="min-w-0 flex-1 break-all">{value}</span>
+      <button type="button" className="shrink-0 rounded-full border border-black/15 px-2.5 py-0.5 text-[11px] hover:bg-black/5" onClick={() => { void copyOrShow(label, value); setCopied(true); window.setTimeout(() => setCopied(false), 1500) }}>
         {copied ? "Copied" : "Copy"}
       </button>
     </div>
@@ -33,57 +51,59 @@ function Row({ label, value, testId }: { label: string; value: string | null; te
 }
 
 export function SrtOptions() {
-  const [main, setMain] = useState<SrtReveal | null>(null)
-  const [backup, setBackup] = useState<SrtReveal | null>(null)
-  const [srs, setSrs] = useState<SrsOption | null>(null)
+  const [status, setStatus] = useState<SrsStatus | null>(null)
+  const [latency, setLatency] = useState<Latency>("balanced")
+  const [key, setKey] = useState("backup2")
   const [busy, setBusy] = useState(false)
 
-  async function load(which: "main" | "backup" | "srs") {
+  const refresh = useCallback(async () => {
     setBusy(true)
-    const action = which === "main" ? "reveal-program-srt" : which === "backup" ? "reveal-backup-srt" : "reveal-srs"
-    const body = await reveal(action)
-    if (which === "main") setMain(body as SrtReveal)
-    else if (which === "backup") setBackup(body as SrtReveal)
-    else setSrs(body as SrsOption)
+    setStatus(await probeSrs())
     setBusy(false)
-  }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const host = status?.host
+  const engaged = status?.engaged === true
+  const latUs = LATENCY_US[latency]
+  const srtUrl = host ? buildSrt(host, key.trim() || "backup2", latUs) : null
+  const hlsUrl = host ? buildHls(host, key.trim() || "backup2") : null
 
   return (
-    <div data-testid="srt-options" className="space-y-3 rounded-xl border border-black/10 bg-white p-3">
-      <p className="text-[14px] font-bold">SRT for OBS (better on Wi-Fi)</p>
-      <p className="font-mono text-[11px] text-black/60">SRT retransmits lost packets inside its latency window, so short Wi-Fi drops don't stall the stream. RTMP stays available. Paste the SRT URL as the OBS Server and leave the Stream Key blank.</p>
+    <div data-testid="srs-panel" className="space-y-3 rounded-xl border border-black/10 bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[15px] font-bold">SRS (parallel)</p>
+        <span data-testid="srs-engaged" data-engaged={engaged ? "yes" : "no"} className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold ${
+          engaged ? "bg-[#067647] text-white" : "bg-black/10 text-black/60"
+        }`}>{engaged ? "Engaged" : "Idle"}</span>
+      </div>
+      <p className="font-mono text-[11px] text-black/60">Separate from MediaMTX. Does not join Main/Backup failover. Start the docker container for Engaged.</p>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[12px]">
+        <span className="text-black/60">Latency</span>
+        {(["low", "balanced", "reliable"] as const).map((v) => (
+          <label key={v} className="flex items-center gap-1.5">
+            <input type="radio" name="srs-latency" data-testid={`srs-latency-${v}`} checked={latency === v} onChange={() => setLatency(v)} />
+            {LATENCY_LABEL[v]}
+          </label>
+        ))}
+      </div>
+
+      <label className="block font-mono text-[12px] font-bold">Stream key
+        <input data-testid="srs-key" className="mt-1 h-9 w-full rounded-lg border border-black/15 bg-white px-3 font-mono text-[13px]" value={key} onChange={(e) => setKey(e.target.value)} spellCheck={false} />
+      </label>
+
+      {status ? <p className="font-mono text-[11px] text-black/50">{status.note}</p> : null}
 
       <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[12px] font-bold">Main</span>
-          <button type="button" data-testid="srt-main-reveal" disabled={busy} className="rounded border border-black/15 px-2 py-0.5 font-mono text-[11px] hover:bg-black/5 disabled:opacity-40" onClick={() => void load("main")}>Reveal SRT</button>
-        </div>
-        {main ? (main.url ? <Row label="SRT" value={main.url} testId="srt-main-url" /> : <p className="font-mono text-[11px] text-black/50">{main.note}</p>) : null}
+        <Row label="SRT" value={srtUrl} testId="srs-srt" />
+        <Row label="HLS" value={hlsUrl} testId="srs-hls" />
       </div>
 
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[12px] font-bold">Backup</span>
-          <button type="button" data-testid="srt-backup-reveal" disabled={busy} className="rounded border border-black/15 px-2 py-0.5 font-mono text-[11px] hover:bg-black/5 disabled:opacity-40" onClick={() => void load("backup")}>Reveal SRT</button>
-        </div>
-        {backup ? (backup.url ? <Row label="SRT" value={backup.url} testId="srt-backup-url" /> : <p className="font-mono text-[11px] text-black/50">{backup.note}</p>) : null}
-      </div>
-
-      <div className="space-y-1.5 border-t border-black/10 pt-2">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[12px] font-bold">SRS (parallel)</span>
-          <button type="button" data-testid="srt-srs-reveal" disabled={busy} className="rounded border border-black/15 px-2 py-0.5 font-mono text-[11px] hover:bg-black/5 disabled:opacity-40" onClick={() => void load("srs")}>Show URLs</button>
-        </div>
-        {srs ? (
-          <div className="space-y-1">
-            <p className="font-mono text-[11px] text-black/50">{srs.note}</p>
-            <Row label="RTMP" value={srs.rtmpServer} testId="srs-rtmp" />
-            <Row label="Key" value={srs.rtmpKey} testId="srs-key" />
-            <Row label="SRT" value={srs.srtUrl} testId="srs-srt" />
-            <Row label="Preview" value={srs.flv} testId="srs-flv" />
-          </div>
-        ) : null}
-      </div>
+      <button type="button" data-testid="srs-refresh" disabled={busy} className="rounded-lg border border-black/15 px-3 py-1.5 font-mono text-[12px] hover:bg-black/5 disabled:opacity-40" onClick={() => void refresh()}>
+        {busy ? "Checking…" : "Refresh status"}
+      </button>
     </div>
   )
 }
