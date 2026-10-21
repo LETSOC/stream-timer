@@ -1856,7 +1856,7 @@ function BackToTop() {
   )
 }
 
-type Dest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number; activateAt?: number | null }
+type Dest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number; activateAt?: number | null; timerPath?: "slate" | "capture" | "vertical" | null }
 
 function hostOf(url: string, fallback: string): string {
   try {
