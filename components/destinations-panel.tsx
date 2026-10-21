@@ -22,7 +22,7 @@ type PillClass = (tone?: Tone, size?: "sm" | "md") => string
 type Fwd = { destId: string; state: string }
 type Paths = Partial<Record<"slate" | "capture" | "vertical", { forwards: Fwd[] }>>
 type UseFor = "none" | "capture" | "vertical"
-type Form = { mode: "add" | "edit"; id: string | null; name: string; server: string; key: string; showKey: boolean; useFor: UseFor; keyTail: string; keyKind: "path" | "query" | "none"; savedKey: string | null; error: string; busy: boolean; timerOn: boolean; timerAt: string }
+type Form = { mode: "add" | "edit"; id: string | null; name: string; server: string; key: string; showKey: boolean; useFor: UseFor; keyTail: string; keyKind: "path" | "query" | "none"; savedKey: string | null; error: string; busy: boolean; timerOn: boolean; timerAt: string; timerPath: "slate" | "capture" | "vertical" }
 
 const DOTS = "••••••••"
 const FWD_LABEL: Record<string, string> = { forwarding: "live", connecting: "connecting", retrying: "retrying", stalled: "stalled", waiting: "waiting", blocked: "blocked", off: "off" }
@@ -117,7 +117,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
     const info = r.body as { name?: string; server?: string; keyTail?: string; keyKind?: Form["keyKind"]; activateAt?: number | null; error?: string } | null
     if (!r.ok || !info?.server) { if (info?.error) note("error", info.error); return }
     const at = info.activateAt ?? null
-    setForm({ mode: "edit", id, name: info.name ?? "", server: info.server, key: "", showKey: false, useFor: "none", keyTail: info.keyTail ?? "", keyKind: info.keyKind ?? "path", savedKey: null, error: "", busy: false, timerOn: at !== null, timerAt: toLocalInput(at) })
+    setForm({ mode: "edit", id, name: info.name ?? "", server: info.server, key: "", showKey: false, useFor: "none", keyTail: info.keyTail ?? "", keyKind: info.keyKind ?? "path", savedKey: null, error: "", busy: false, timerOn: at !== null, timerAt: toLocalInput(at), timerPath: (info as { timerPath?: "slate" | "capture" | "vertical" }).timerPath ?? "capture" })
     focusForm()
   }, [onNote]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -149,7 +149,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
     if (form.mode === "edit") {
       const r = await post("/api/rtmp-destinations", { action: "update", id: form.id, name: form.name, server: form.server, key: form.key })
       if (!r.ok) return setForm((f) => (f ? { ...f, busy: false, error: String(r.body?.error ?? `Server returned ${r.status}.`) } : f))
-      if (form.id) await post("/api/rtmp-destinations", { action: "set-timer", id: form.id, activateAt: timerAt })
+      if (form.id) await post("/api/rtmp-destinations", { action: "set-timer", id: form.id, activateAt: timerAt, timerPath: form.timerPath })
       setForm(null)
       setRevealed(null)
       onChanged()
@@ -159,7 +159,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
     const r = await post("/api/rtmp-destinations", { action: "add", name: form.name, url: joinRtmpServerAndKey(form.server, form.key) })
     const id = (r.body as { item?: { id?: string } } | null)?.item?.id
     if (!r.ok || !id) return setForm((f) => (f ? { ...f, busy: false, error: String(r.body?.error ?? `Server returned ${r.status}.`) } : f))
-    if (timerAt) await post("/api/rtmp-destinations", { action: "set-timer", id, activateAt: timerAt })
+    if (timerAt) await post("/api/rtmp-destinations", { action: "set-timer", id, activateAt: timerAt, timerPath: form.timerPath })
     let msg = `Saved ${form.name.trim()}.`
     if (form.useFor !== "none") {
       const t = await post("/api/relay", { action: "forward", path: form.useFor, destinationId: id, on: true })
@@ -194,7 +194,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
             const uses = destinationUses(d.id, paths, selected)
             const editing = form?.mode === "edit" && form.id === d.id
             const live = liveIds.includes(d.id)
-            const timer = d.activateAt && d.activateAt > Date.now() ? d.activateAt : null
+            const timer = d.activateAt ? d.activateAt : null
             return (
               <div key={d.id} data-testid={`dest-card-${d.id}`} data-editing={editing ? "1" : undefined} className={`min-w-0 rounded-xl border p-3 ${editing ? "border-black/10 border-l-4 border-l-[#d93200] bg-[#fff7f2]" : "border-black/10 bg-white"}`}>
                 <p className="text-[15px] font-bold break-words">{d.name}</p>
@@ -222,7 +222,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
           })}
         </div>
       ))}
-      <button type="button" data-testid="dest-panel-add" onClick={() => setForm({ mode: "add", id: null, name: "", server: "", key: "", showKey: false, useFor: "none", keyTail: "", keyKind: "path", savedKey: null, error: "", busy: false, timerOn: false, timerAt: "" })}
+      <button type="button" data-testid="dest-panel-add" onClick={() => setForm({ mode: "add", id: null, name: "", server: "", key: "", showKey: false, useFor: "none", keyTail: "", keyKind: "path", savedKey: null, error: "", busy: false, timerOn: false, timerAt: "", timerPath: "capture" })}
         className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-black/15 bg-white py-2.5 font-mono text-[13px] text-black/70 hover:bg-black/[0.03]">
         <Plus aria-hidden className="size-4" />Add destination
       </button>
@@ -268,6 +268,12 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
                 <label className="block font-mono text-[12px] font-bold">Start at
                   <input data-testid="dest-panel-timer-at" type="datetime-local" className={input} value={form.timerAt} onChange={(e) => setForm({ ...form, timerAt: e.target.value })} />
                 </label>
+                <fieldset className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[12px]">
+                  <legend className="mb-1 font-bold">Activate on</legend>
+                  {([["capture", "HD /capture"], ["slate", "HD /slate"], ["vertical", "Vertical"]] as const).map(([v, label]) => (
+                    <label key={v} className="flex items-center gap-1.5 font-normal"><input type="radio" name="timer-path" data-testid={`dest-panel-timer-path-${v}`} checked={form.timerPath === v} onChange={() => setForm({ ...form, timerPath: v })} />{label}</label>
+                  ))}
+                </fieldset>
                 {timerPreview ? <p className="rounded-lg bg-[#b45309]/10 px-2.5 py-2 font-mono text-[12px] text-[#b45309]">This destination starts forwarding at {formatTime(timerPreview)}. Other destinations are not affected.</p> : null}
               </div>
             ) : null}
