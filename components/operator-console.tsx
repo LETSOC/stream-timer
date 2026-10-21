@@ -55,6 +55,7 @@ import { VisualsDeskSection } from "@/components/visuals-desk"
 import { VerticalCard } from "@/components/vertical-output"
 import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
+import { SrtOptions } from "@/components/srt-options"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
@@ -2220,6 +2221,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
         </div>
       ) : null}
       <SrtBackup relay={relay} busy={busy} act={act} />
+      <SrtOptions />
       <div className="flex flex-wrap items-center gap-2">
         <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
         <Pill size="sm" data-testid="backup-pull-save" disabled={busy || !pull.trim() || pullUrlError(pull.trim()) !== null} onClick={() => { void act({ action: "backup-pull", url: pull.trim() }, "Backup pulls from the URL."); setPull("") }}>Pull</Pill>
@@ -2613,3 +2615,4 @@ function ColorField({ id, label, value, onChange }: { id: string; label: string;
     </label>
   )
 }
+
