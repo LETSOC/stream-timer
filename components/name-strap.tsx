@@ -22,7 +22,17 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
   ) : null
   return (
     <div data-testid="name-strap" data-style={look.style} data-motion={look.motion} data-visible={visible ? "1" : "0"} className={cn("strap", `strap-${look.style}`, `strap-m-${look.motion}`, visible ? "strap-on" : "strap-off")} style={vars}>
-      {look.style === "line" ? (
+      {look.style === "house" ? (
+        <div className="strap-body">
+          <span className="strap-dot" />
+          <div className="strap-lines">
+            <span className="strap-name">{preset.name}</span>
+            {preset.title ? <span className="strap-title">{preset.title}</span> : null}
+            {social}
+          </div>
+          <span className="strap-arrow" aria-hidden>→</span>
+        </div>
+      ) : look.style === "line" ? (
         <div className="strap-body">
           <span className="strap-bar" />
           <div className="strap-lines">

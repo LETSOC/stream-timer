@@ -379,3 +379,65 @@ html:has([data-desk-root]) body {
 @media (prefers-reduced-motion: reduce) {
   .strap-body { transition-property: opacity !important; transform: none !important; clip-path: none !important; }
 }
+
+/* ---------- Visuals layer (/stream + /overlay/visuals), 1920x1080 in px × --px ---------- */
+.visuals-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  container-type: inline-size;
+  --px: calc(100cqi / 1920);
+  --safe: calc(32 * var(--px));
+  --vl-sans: var(--font-instrument-sans), "Instrument Sans", Arial, Helvetica, sans-serif;
+  --vl-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--vl-sans);
+  z-index: 40;
+}
+.vl-anchor { position: absolute; max-width: calc(1920 * var(--px) - 2 * var(--safe)); }
+.vl-pill {
+  display: inline-flex; align-items: center; gap: calc(14 * var(--px));
+  padding: calc(14 * var(--px)) calc(28 * var(--px));
+  border-radius: 9999px; font-weight: 600; font-size: calc(26 * var(--px)); line-height: 1.1; white-space: nowrap;
+  transition: transform 0.68s cubic-bezier(.16, 1, .3, 1), opacity 0.68s cubic-bezier(.16, 1, .3, 1);
+}
+.vl-pill.vl-off { opacity: 0; transform: translateY(calc(-24 * var(--px))); transition-duration: 0.48s; transition-timing-function: cubic-bezier(.7, 0, .84, 0); }
+.vl-qa.vl-off { transform: translateY(calc(24 * var(--px))); }
+.vl-talk { background: rgba(10, 10, 10, 0.86); color: #fff; border: calc(1 * var(--px)) solid rgba(255, 255, 255, 0.18); }
+.vl-talk-prefix { opacity: 0.8; font-weight: 500; }
+.vl-talk-clock { font-family: var(--vl-mono); font-weight: 500; font-size: calc(30 * var(--px)); font-variant-numeric: tabular-nums; }
+.vl-over { color: #ff5a3c; animation: vl-pulse 1s ease-in-out infinite; }
+.vl-rec { width: calc(14 * var(--px)); height: calc(14 * var(--px)); border-radius: 9999px; background: #ef4423; animation: vl-rec 1.6s ease-in-out infinite; }
+.vl-sponsor { background: #0a0a0a; color: #fff; border: calc(1 * var(--px)) solid rgba(255, 255, 255, 0.22); }
+.vl-qa { background: #fff; color: #0a0a0a; }
+.vl-ticker {
+  position: absolute; left: 0; right: 0; bottom: 0; height: calc(48 * var(--px));
+  display: flex; align-items: center; background: rgba(10, 10, 10, 0.9); color: #fff;
+  font-size: calc(22 * var(--px)); font-weight: 500;
+  transition: transform 0.6s cubic-bezier(.16, 1, .3, 1);
+}
+.vl-ticker.vl-off { transform: translateY(100%); }
+.vl-ticker-tag { flex: none; height: 100%; display: flex; align-items: center; padding: 0 calc(24 * var(--px)); background: #d9ff43; color: #0000b6; font-family: var(--vl-mono); font-weight: 700; letter-spacing: 0.08em; font-size: calc(18 * var(--px)); }
+.vl-ticker-track { flex: 1; overflow: hidden; }
+.vl-marquee { display: inline-flex; white-space: nowrap; animation: vl-marquee 28s linear infinite; }
+.vl-ticker-run { display: inline-flex; }
+.vl-ticker-item { padding: 0 calc(28 * var(--px)); }
+.vl-ticker-item::after { content: "•"; margin-left: calc(56 * var(--px)); opacity: 0.5; }
+@keyframes vl-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes vl-rec { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@keyframes vl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+/* House name strap (4 Nov): Hyphen blue #1236A0, orange left border, accent dot + arrow */
+.strap-house .strap-body {
+  display: inline-flex; align-items: center; gap: calc(20 * var(--px));
+  padding: calc(18 * var(--px)) calc(34 * var(--px)) calc(20 * var(--px)) calc(26 * var(--px));
+  background: #1236a0; border-left: calc(8 * var(--px)) solid #ef4423; border-radius: 0 calc(16 * var(--px)) calc(16 * var(--px)) 0;
+  box-shadow: 0 calc(10 * var(--px)) calc(36 * var(--px)) rgba(0, 0, 30, 0.4);
+  font-family: var(--font-instrument-sans), "Instrument Sans", Arial, sans-serif;
+}
+.strap-house .strap-dot { flex: none; width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-radius: 9999px; background: #ef4423; animation: vl-rec 1.6s ease-in-out infinite; }
+.strap-house .strap-name { font-weight: 600; }
+.strap-house .strap-title, .strap-house .strap-social { font-family: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace; font-size: calc(22 * var(--px)); opacity: 0.9; }
+.strap-house .strap-arrow { flex: none; font-size: calc(34 * var(--px)); color: #ef4423; margin-left: calc(8 * var(--px)); }
+@media (prefers-reduced-motion: reduce) {
+  .vl-marquee, .vl-rec, .vl-over, .strap-house .strap-dot { animation: none !important; }
+  .vl-pill, .vl-ticker { transition-property: opacity !important; transform: none !important; }
+}
