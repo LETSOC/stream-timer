@@ -4,7 +4,7 @@
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
-import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
+import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export type StageOptions = {
   /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
@@ -35,6 +35,24 @@ export type StageOptions = {
   strapCorner: Corner
   socialsOverlay: boolean
   socialsCorner: Corner
+  /** Visuals layer on /stream (captured: reaches YouTube and Vertical). Off = OBS /overlay/* pages only. */
+  streamVisuals: boolean
+  /** Talk-ends pill (top-left): Session = manual timer from the deck, Festival = to the event end. */
+  talkVisible: boolean
+  talkMode: TalkMode
+  talkEndsAt: number | null
+  talkPausedMs: number | null
+  talkPrefix: string
+  festivalPrefix: string
+  /** Bottom ticker bar (marquee). */
+  tickerVisible: boolean
+  tickerType: TickerType
+  tickerItems: string[]
+  /** Q&A white pill (bottom-right) and Sponsored black pill (top-right). */
+  qaVisible: boolean
+  qaText: string
+  sponsorVisible: boolean
+  sponsorText: string
   /** Extra px @1080p in from the safe-zone line for straps, socials and timecode badges (0 = edge on the line). */
   overlayInset: number
   /** A/V diagnostics: labelled STREAM wall-clock timecode on /stream (TC2), live switch, default off. */
@@ -121,6 +139,20 @@ export const DEFAULT_STAGE: StageOptions = {
   socialsOverlay: false,
   socialsCorner: "bottom-left",
   overlayInset: 0,
+  streamVisuals: true,
+  talkVisible: false,
+  talkMode: "session",
+  talkEndsAt: null,
+  talkPausedMs: null,
+  talkPrefix: "Talk ends in",
+  festivalPrefix: "Festival ends in",
+  tickerVisible: false,
+  tickerType: "planner",
+  tickerItems: [],
+  qaVisible: false,
+  qaText: "Q&A · Ask a question →",
+  sponsorVisible: false,
+  sponsorText: "Sponsored · Studio Partner",
   streamTimecode: false,
   streamTimecodeFps: 30,
   lineSpacing: 1.14,
@@ -235,6 +267,24 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     socialsOverlay: pick("socialsOverlay", (v) => v === true),
     socialsCorner: pick("socialsCorner", (v) => parseCorner(v)),
     overlayInset: pick("overlayInset", (v, f) => clampInset(v, f)),
+    streamVisuals: pick("streamVisuals", (v) => v !== false),
+    talkVisible: pick("talkVisible", (v) => v === true),
+    talkMode: pick("talkMode", (v) => parseTalkMode(v)),
+    ...(() => {
+      // endsAt / pausedMs are one timer: validate them together (paused wins).
+      if (!has("talkEndsAt") && !has("talkPausedMs")) return { talkEndsAt: base.talkEndsAt, talkPausedMs: base.talkPausedMs }
+      const t = parseTalkTimer(has("talkEndsAt") ? r.talkEndsAt : base.talkEndsAt, has("talkPausedMs") ? r.talkPausedMs : base.talkPausedMs)
+      return { talkEndsAt: t.endsAt, talkPausedMs: t.pausedMs }
+    })(),
+    talkPrefix: pick("talkPrefix", (v, f) => visualText(v, f) || f),
+    festivalPrefix: pick("festivalPrefix", (v, f) => visualText(v, f) || f),
+    tickerVisible: pick("tickerVisible", (v) => v === true),
+    tickerType: pick("tickerType", (v) => parseTickerType(v)),
+    tickerItems: pick("tickerItems", (v) => sanitizeTickerItems(v)),
+    qaVisible: pick("qaVisible", (v) => v === true),
+    qaText: pick("qaText", (v, f) => visualText(v, f) || f),
+    sponsorVisible: pick("sponsorVisible", (v) => v === true),
+    sponsorText: pick("sponsorText", (v, f) => visualText(v, f) || f),
     streamTimecode: pick("streamTimecode", (v) => v === true),
     streamTimecodeFps: pick("streamTimecodeFps", (v) => ([25, 30, 50, 60].includes(Number(v)) ? Number(v) : 30)),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),
@@ -346,4 +396,4 @@ export function socialLook(stage: StageOptions) {
 }
 
 /** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
-export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps"] as const satisfies readonly (keyof StageOptions)[]
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText"] as const satisfies readonly (keyof StageOptions)[]

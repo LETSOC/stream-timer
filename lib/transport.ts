@@ -8,7 +8,7 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import type { FailoverEvent, FailoverSettings, ReturnStatus, SourceHealth } from "@/lib/program-source"
 import type { InputReadout } from "@/lib/input-state"
 import { stageScreen, testClockStale, type StageOptions } from "@/lib/stage"
-import { clampHold, CORNERS, STRAP_MODES, STRAP_MOTIONS, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
+import { clampHold, CORNERS, parseTalkTimer, sanitizeTickerItems, talkAdjust, talkPause, talkResume, talkStart, TALK_MAX_SEC, TALK_MODES, TALK_STOPPED, TICKER_TYPES, visualText, type TalkMode, type TickerType, STRAP_MODES, STRAP_MOTIONS, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export const JUMPS = [
   { label: "15s", seconds: 15 },
@@ -43,6 +43,13 @@ export type TransportAction =
   | { type: "socials"; show?: boolean; corner?: Corner }
   /** A/V diagnostics: STREAM timecode on /stream (diagnostic only). */
   | { type: "timecode"; show?: boolean; fps?: number }
+  /** Visuals layer: talk-ends pill (timer start/add/pause/resume/stop, Session/Festival), ticker, Q&A, Sponsored, and the /stream master switch. Applied at once. */
+  | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string }
+
+export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream"] as const
+export type VisualTarget = (typeof VISUAL_TARGETS)[number]
+export const TALK_OPS = ["start", "add", "pause", "resume", "stop"] as const
+export type TalkOp = (typeof TALK_OPS)[number]
 
 export type ProgramSourcesView = {
   main: SourceHealth & Partial<InputReadout>
@@ -192,6 +199,24 @@ export function parseAction(value: unknown): TransportAction | null {
       if (CORNERS.includes(v.corner as Corner)) out.corner = v.corner as Corner
       return Object.keys(out).length > 1 ? out : null
     }
+    case "visual": {
+      if (!VISUAL_TARGETS.includes(v.target as VisualTarget)) return null
+      const out: Extract<TransportAction, { type: "visual" }> = { type: "visual", target: v.target as VisualTarget }
+      if (typeof v.show === "boolean") out.show = v.show
+      if (out.target === "talk") {
+        if (TALK_OPS.includes(v.op as TalkOp)) out.op = v.op as TalkOp
+        if (typeof v.sec === "number" && Number.isFinite(v.sec) && Math.abs(v.sec) <= TALK_MAX_SEC) out.sec = Math.round(v.sec)
+        if ((out.op === "start" || out.op === "add") && out.sec === undefined) return null
+        if (TALK_MODES.includes(v.mode as TalkMode)) out.mode = v.mode as TalkMode
+        if (typeof v.prefix === "string") out.prefix = v.prefix
+      }
+      if (out.target === "ticker") {
+        if (TICKER_TYPES.includes(v.tickerType as TickerType)) out.tickerType = v.tickerType as TickerType
+        if (Array.isArray(v.items) || typeof v.items === "string") out.items = sanitizeTickerItems(v.items)
+      }
+      if ((out.target === "qa" || out.target === "sponsor") && typeof v.text === "string") out.text = v.text
+      return Object.keys(out).length > 2 ? out : null
+    }
     case "timecode": {
       const out: Extract<TransportAction, { type: "timecode" }> = { type: "timecode" }
       if (typeof v.show === "boolean") out.show = v.show
@@ -278,6 +303,8 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       return next({}, { ...(action.show === undefined ? {} : { streamTimecode: action.show }), ...(action.fps ? { streamTimecodeFps: action.fps } : {}) })
     case "socials":
       return next({}, { ...(action.show === undefined ? {} : { socialsOverlay: action.show }), ...(action.corner ? { socialsCorner: action.corner } : {}) })
+    case "visual":
+      return next({}, visualPatch(state.stage, action, now))
   }
 }
 
@@ -320,6 +347,16 @@ export type DeckState = {
     strapCorner: Corner
     socialsOverlay: boolean
     socialsCorner: Corner
+    streamVisuals?: boolean
+    talkVisible?: boolean
+    talkMode?: TalkMode
+    talkEndsAt?: number | null
+    talkPausedMs?: number | null
+    tickerVisible?: boolean
+    tickerType?: TickerType
+    tickerCount?: number
+    qaVisible?: boolean
+    sponsorVisible?: boolean
   }
   serverNow: number
 }
@@ -363,6 +400,16 @@ export function deckState(
       strapCorner: state.stage.strapCorner ?? "bottom-left",
       socialsOverlay: state.stage.socialsOverlay === true,
       socialsCorner: state.stage.socialsCorner ?? "bottom-left",
+      streamVisuals: state.stage.streamVisuals !== false,
+      talkVisible: state.stage.talkVisible === true,
+      talkMode: state.stage.talkMode ?? "session",
+      talkEndsAt: state.stage.talkEndsAt ?? null,
+      talkPausedMs: state.stage.talkPausedMs ?? null,
+      tickerVisible: state.stage.tickerVisible === true,
+      tickerType: state.stage.tickerType ?? "planner",
+      tickerCount: state.stage.tickerItems?.length ?? 0,
+      qaVisible: state.stage.qaVisible === true,
+      sponsorVisible: state.stage.sponsorVisible === true,
     },
     serverNow: now,
   }
@@ -375,4 +422,41 @@ export function deckScreen(s: DeckState, now: number): Screen {
   const at = effectiveNow(clock, now)
   const end = endInstant(s.date, s.time, s.endAt || s.endTime, s.timeZone).getTime()
   return stageScreen(s, Number.isFinite(end) && end <= at)
+}
+
+/** Pure: the stage patch for a Visuals layer action (deck). */
+export function visualPatch(stage: StageOptions, action: Extract<TransportAction, { type: "visual" }>, now: number): Partial<StageOptions> {
+  const show = action.show
+  switch (action.target) {
+    case "stream":
+      return show === undefined ? {} : { streamVisuals: show }
+    case "talk": {
+      const patch: Partial<StageOptions> = {}
+      if (show !== undefined) patch.talkVisible = show
+      if (action.mode) patch.talkMode = action.mode
+      if (action.prefix !== undefined) {
+        const t = visualText(action.prefix, "")
+        if (t) patch[(action.mode ?? stage.talkMode) === "festival" ? "festivalPrefix" : "talkPrefix"] = t
+      }
+      const cur = parseTalkTimer(stage.talkEndsAt, stage.talkPausedMs)
+      const t = action.op === "start" ? talkStart(action.sec ?? 0, now)
+        : action.op === "add" ? talkAdjust(cur, action.sec ?? 0, now)
+        : action.op === "pause" ? talkPause(cur, now)
+        : action.op === "resume" ? talkResume(cur, now)
+        : action.op === "stop" ? TALK_STOPPED
+        : null
+      if (t) Object.assign(patch, { talkEndsAt: t.endsAt, talkPausedMs: t.pausedMs })
+      // Starting a session timer shows the pill in Session mode.
+      if (action.op === "start") Object.assign(patch, { talkVisible: show ?? true, talkMode: action.mode ?? "session" })
+      return patch
+    }
+    case "ticker":
+      return { ...(show === undefined ? {} : { tickerVisible: show }), ...(action.tickerType ? { tickerType: action.tickerType } : {}), ...(action.items ? { tickerItems: action.items } : {}) }
+    case "qa":
+    case "sponsor": {
+      const key = action.target === "qa" ? ({ v: "qaVisible", t: "qaText" } as const) : ({ v: "sponsorVisible", t: "sponsorText" } as const)
+      const text = action.text === undefined ? "" : visualText(action.text, "")
+      return { ...(show === undefined ? {} : { [key.v]: show }), ...(text ? { [key.t]: text } : {}) }
+    }
+  }
 }
