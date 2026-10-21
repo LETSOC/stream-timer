@@ -1203,6 +1203,8 @@ async function checkDestinationTimers() {
       continue
     }
     try {
+      // HD forwards only run while "Start forwards" is on; turn it on if a HD timer fires.
+      if (path !== "vertical" && !settings.enabled) writeSettings({ ...settings, enabled: true })
       await setForward(path, dest.id, true)
       setDestinationTimer(dest.id, null)
       dlog("+", "relay", `timer fired: ${dest.name} on /${path}`)
