@@ -1193,15 +1193,10 @@ export function startDestinationTimers() {
 async function checkDestinationTimers() {
   const now = Date.now()
   const { items } = listDestinations()
-  const settings = readSettings()
   for (const dest of items) {
     if (!dest.activateAt || dest.activateAt > now) continue
-    // Find which path this destination is assigned to
-    let path: RelayPath | null = null
-    for (const p of RELAY_PATHS) {
-      if (settings.forwards[p].includes(dest.id)) { path = p; break }
-    }
-    if (!path) continue // not assigned to a path yet
+    const path = dest.timerPath
+    if (!path) continue
     try {
       await setForward(path, dest.id, true)
       setDestinationTimer(dest.id, null)
