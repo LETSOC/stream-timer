@@ -89,7 +89,7 @@ export function useVertical() {
 export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { dests: Dest[]; pillClass: PillClass; onDestsChanged?: () => void; /** opens the desk's Saved destinations editor */ onEdit?: (id: string) => void }) {
   const { view, act } = useVertical()
   const [busy, setBusy] = useState<string | null>(null)
-  const pendingFwd = useRef<Set<string>>(new Set())
+  const [pendingFwd, setPendingFwd] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [form, setForm] = useState<{ open: boolean; name: string; server: string; key: string }>({ open: false, name: "", server: "", key: "" })
   const [preview, setPreview] = useState(false)
@@ -106,11 +106,9 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
   }
   const save = (patch: Partial<VerticalView["settings"]>) => void run("settings", { action: "settings", settings: patch })
   const toggle = async (id: string, on: boolean) => {
-    pendingFwd.current.add(id)
-    setBusy(`fwd-${id}`)
+    setPendingFwd((s) => new Set(s).add(id))
     const error = await setForward(id, on)
-    setBusy(null)
-    pendingFwd.current.delete(id)
+    setPendingFwd((s) => { const n = new Set(s); n.delete(id); return n })
     setMessage(error ? { tone: "error", text: error } : null)
   }
   async function addDest() {
@@ -142,7 +140,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
         {dests.length === 0 ? <p>No saved destinations yet. Add one below.</p> : null}
         {dests.map((d) => {
           const fwd = path?.forwards.find((f) => f.destId === d.id)
-          const checked = pendingFwd.current.has(d.id) ? !Boolean(fwd) : Boolean(fwd)
+          const checked = pendingFwd.has(d.id) ? !Boolean(fwd) : Boolean(fwd)
           const reason = path?.available?.find((x) => x.destId === d.id)?.reason ?? null
           // Only a real conflict blocks ticking (a ticked one can always be unticked). Ticks apply live.
           const blocked = Boolean(reason) && !checked
@@ -150,7 +148,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
             <div key={d.id} data-testid={`vertical-dest-row-${d.id}`} data-blocked={blocked ? "1" : "0"} data-state={fwd?.state ?? "off"} className="space-y-0.5">
               <div className="flex items-center gap-2">
               <label className={`flex min-w-0 flex-1 items-center gap-2 ${blocked ? "cursor-not-allowed" : "cursor-pointer text-black"}`}>
-                <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || busy === `fwd-${d.id}` || !path} checked={checked} onChange={(e) => void toggle(d.id, e.target.checked)} />
+                <input type="checkbox" data-testid={`vertical-dest-${d.id}`} className="size-4 shrink-0 accent-black" disabled={blocked || pendingFwd.has(d.id) || !path} checked={checked} onChange={(e) => void toggle(d.id, e.target.checked)} />
                 <span className="min-w-0 truncate"><span className="font-bold">{d.name}</span> · {d.host}</span>
                 {fwd ? <span data-testid={`vertical-fwd-state-${d.id}`} className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${tone(fwd.state)}`}>{FORWARD_STATE_LABEL[fwd.state]}{fwd.reconnects ? ` · ${fwd.reconnects}↻` : ""}</span> : null}
               </label>
