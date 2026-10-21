@@ -20,7 +20,7 @@ import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { destinationFingerprint, directChannelDests, readChannelStatus, killGroup, pidRunsScript, redact, relayChildEnv } from "@/lib/encoder"
-import { listDestinations, resolveDestination } from "@/lib/rtmp-destinations"
+import { listDestinations, resolveDestination, setDestinationTimer } from "@/lib/rtmp-destinations"
 import { diagnose, EMPTY_HEALTH, healthFromSamples, parseProgressBlocks, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 
 export const RELAY_PATHS = ["slate", "capture", "vertical"] as const
@@ -1180,4 +1180,32 @@ export async function relayStatus(): Promise<RelayStatus> {
 /** For the HLS preview proxy. */
 export function relayHlsOrigin() {
   return { origin: `http://127.0.0.1:${relayPorts().hls}`, authorization: basicAuth() }
+}
+
+
+/** Check destinations with timers and activate their forwards when the time arrives. */
+let timerInterval: ReturnType<typeof setInterval> | null = null
+export function startDestinationTimers() {
+  if (timerInterval) return
+  timerInterval = setInterval(() => void checkDestinationTimers(), 15_000)
+  void checkDestinationTimers()
+}
+async function checkDestinationTimers() {
+  const now = Date.now()
+  const { items } = listDestinations()
+  const settings = readSettings()
+  for (const dest of items) {
+    if (!dest.activateAt || dest.activateAt > now) continue
+    // Find which path this destination is assigned to
+    let path: RelayPath | null = null
+    for (const p of RELAY_PATHS) {
+      if (settings.forwards[p].includes(dest.id)) { path = p; break }
+    }
+    if (!path) continue // not assigned to a path yet
+    try {
+      await setForward(path, dest.id, true)
+      setDestinationTimer(dest.id, null)
+      dlog("relay", `timer fired: ${dest.name} on /${path}`)
+    } catch { /* next tick */ }
+  }
 }
