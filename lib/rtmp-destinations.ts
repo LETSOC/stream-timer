@@ -148,7 +148,7 @@ export function setDestinationTimer(id: unknown, activateAt: number | null, time
 }
 
 /** Edit form prefill: the server part (no key) and the key's last 4. Operator only (API). */
-export function destinationEditInfo(id: unknown): { id: string; name: string; server: string; keyTail: string; keyKind: "path" | "query" | "none"; activateAt: number | null } | null {
+export function destinationEditInfo(id: unknown): { id: string; name: string; server: string; keyTail: string; keyKind: "path" | "query" | "none"; activateAt: number | null; timerPath: "slate" | "capture" | "vertical" | null } | null {
   const item = read().items.find((entry) => entry.id === id)
   if (!item) return null
   const { server, key } = splitRtmpUrl(item.url)
