@@ -69,7 +69,7 @@ test("edit: new key, keep key when blank, rename only, validation, duplicates, d
   assert.equal(a.value.display, "rtmp://••••••••/live2/••••••••1234")
   assert.ok(!JSON.stringify(d.listDestinations()).includes("old-key"))
   const info = d.destinationEditInfo(a.value.id)
-  assert.deepEqual(info, { id: a.value.id, name: "YouTube HD", server: "rtmp://a.rtmp.youtube.com/live2", keyTail: "1234", keyKind: "path" })
+  assert.deepEqual(info, { id: a.value.id, name: "YouTube HD", server: "rtmp://a.rtmp.youtube.com/live2", keyTail: "1234", keyKind: "path", activateAt: null, timerPath: null })
   // new key only
   const k = d.updateDestination(a.value.id, { name: "YouTube HD", server: "rtmp://a.rtmp.youtube.com/live2", key: " new-key-9999 " })
   assert.ok(k.ok && k.changed)
