@@ -1983,7 +1983,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
         {(() => {
           const sel = dests.find((d) => d.id === selectedId)
           const t = sel?.activateAt && sel.activateAt > Date.now() ? sel.activateAt : null
-          return t ? <span data-testid={tid("timer-hint")} className="flex items-center gap-1.5 rounded-md bg-[#b45309]/10 px-2 py-1 text-[#b45309]"><span className="size-1.5 rounded-full bg-[#b45309]" />Timer · starts {new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span> : null
+          return t ? <span data-testid={tid("timer-hint")} className="flex items-center gap-1.5 rounded-md bg-[#b45309]/10 px-2 py-1 text-[#b45309]"><span className="size-1.5 rounded-full bg-[#b45309]" />Timer · (() => { const d = new Date(t); const now = new Date(); const same = d.toDateString() === now.toDateString(); const tom = new Date(now); tom.setDate(now.getDate() + 1); const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); return same ? `today ${time}` : d.toDateString() === tom.toDateString() ? `tomorrow ${time}` : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}` })()</span> : null
         })()}
         {channel === "capture" ? (
           <>
