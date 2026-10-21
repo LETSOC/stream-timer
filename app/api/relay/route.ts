@@ -4,6 +4,7 @@ import { notePlannedBack } from "@/lib/program-rearm"
 import { disarmFeed } from "@/lib/program-monitor"
 import type { ArmScope } from "@/lib/program-arm"
 import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { programSrtUrl, srsOptionUrls } from "@/lib/srt-urls"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 const scopeOf = (v: unknown): ArmScope => (v === "main" || v === "backup" ? v : "both")
@@ -48,8 +49,12 @@ export async function POST(request: Request) {
     case "reveal-program":
       // OBS settings, on demand only (POST + operator + same-origin). Never part of GET status.
       return Response.json(programObsUrl(), { headers: NO_STORE })
+    case "reveal-program-srt":
+      return Response.json(programSrtUrl(), { headers: NO_STORE })
     case "reveal-backup-srt":
       return Response.json(backupSrtUrl(), { headers: NO_STORE })
+    case "reveal-srs":
+      return Response.json(srsOptionUrls(), { headers: NO_STORE })
     case "webrtc-preview":
       return reply(await setWebrtcPreview(body.on === true))
     case "srt-backup":
@@ -66,6 +71,6 @@ export async function POST(request: Request) {
     case "failover":
       return reply(await setFailover(body.failover))
     default:
-      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | rotate-program | reveal-backup | reveal-backup-srt | srt-backup | backup-pull | failover | lan-ingest | mdns-name }." }, { status: 400 })
+      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | reveal-program-srt | rotate-program | reveal-backup | reveal-backup-srt | reveal-srs | srt-backup | backup-pull | failover | lan-ingest | mdns-name }." }, { status: 400 })
   }
 }
