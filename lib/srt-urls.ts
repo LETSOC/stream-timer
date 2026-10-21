@@ -9,8 +9,7 @@
  *   RTMP: rtmp://<host>:19360/live  key backup2
  *   SRT:  srt://<host>:10080?streamid=#!::r=live/backup2,m=publish&latency=300000
  */
-import { lanIp } from "@/lib/relay"
-import { SRT_LATENCY_US, srtPort } from "@/lib/relay"
+import { credentials, lanIp, PROGRAM_PATH, readSettings, SRT_LATENCY_US, srtPort } from "@/lib/relay"
 
 export type SrtReveal = { url: string | null; lan: boolean; port: number; note: string }
 
@@ -33,6 +32,22 @@ export function buildMediamtxSrtUrl(input: {
 /** Build an SRS-style SRT publish URL (streamid format differs). */
 export function buildSrsSrtUrl(host: string, key = "backup2", port = 10080, latencyUs = SRT_LATENCY_US): string {
   return `srt://${host}:${port}?streamid=#!::r=live/${key},m=publish&latency=${latencyUs}`
+}
+
+/**
+ * Main SRT URL for OBS (MediaMTX, same port as Backup SRT).
+ * Requires srtBackup on (the SRT listener is shared). Uses the program credentials.
+ */
+export function programSrtUrl(): SrtReveal {
+  const s = readSettings()
+  const c = credentials()
+  const port = srtPort()
+  if (!s.srtBackup) return { url: null, lan: false, port, note: "SRT is off. Tick ‘Also accept Backup over SRT’ first (the listener is shared)." }
+  const host = s.lanIngest ? (lanIp() ?? "127.0.0.1") : "127.0.0.1"
+  const lan = host !== "127.0.0.1"
+  if (!c.programUser || !c.programPass) return { url: null, lan, port, note: "No Main credentials yet. Arm the program feed first." }
+  const url = buildMediamtxSrtUrl({ host, port, path: PROGRAM_PATH, user: c.programUser, pass: c.programPass, passphrase: s.srtPassphrase || undefined })
+  return { url, lan, port, note: lan ? "Main SRT (LAN)." : "Main SRT (this machine only). Turn on LAN ingest for the other computer." }
 }
 
 /** SRS option URLs (parallel ingest, not MediaMTX). Returns null host if LAN IP unknown. */
