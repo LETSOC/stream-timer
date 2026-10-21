@@ -2,7 +2,7 @@ import { connection } from "next/server"
 import { authorizeMutation, requireOperator } from "@/lib/auth"
 import { destinationFingerprint, directChannelDests } from "@/lib/encoder"
 import { reconcileRelay, relayForwardFingerprints } from "@/lib/relay"
-import { addDestination, deleteDestination, destinationEditInfo, listDestinations, renameDestination, resolveDestination, selectDestination, updateDestination } from "@/lib/rtmp-destinations"
+import { addDestination, deleteDestination, destinationEditInfo, listDestinations, renameDestination, resolveDestination, selectDestination, setDestinationTimer, updateDestination } from "@/lib/rtmp-destinations"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 
@@ -42,12 +42,12 @@ async function update(body: { id?: unknown; name?: unknown; server?: unknown; ke
   return Response.json({ ...listDestinations(), item: result.value, changed: result.changed === true, note: notes.join(" ") || (result.changed ? "Saved." : "Saved (no change).") }, { headers: NO_STORE })
 }
 
-/** Operator + same-origin. { action: "add" | "rename" | "update" | "edit-info" | "delete" | "select" | "reveal", ... } */
+/** Operator + same-origin. { action: "add" | "rename" | "update" | "edit-info" | "delete" | "select" | "reveal" | "set-timer", ... } */
 export async function POST(request: Request) {
   await connection()
   const denied = authorizeMutation(request) ?? requireOperator(request)
   if (denied) return denied
-  const body = (await request.json().catch(() => null)) as { action?: unknown; id?: unknown; name?: unknown; url?: unknown; channel?: unknown; server?: unknown; key?: unknown } | null
+  const body = (await request.json().catch(() => null)) as { action?: unknown; id?: unknown; name?: unknown; url?: unknown; channel?: unknown; server?: unknown; key?: unknown; activateAt?: unknown } | null
   if (!body || typeof body.action !== "string") return Response.json({ error: "Expected { action }." }, { status: 400 })
   const respond = (result: { ok: true; value: unknown } | { ok: false; error: string; status: number }) =>
     result.ok ? Response.json({ ...listDestinations(), item: result.value }, { headers: NO_STORE }) : Response.json({ error: result.error }, { status: result.status, headers: NO_STORE })
@@ -59,7 +59,6 @@ export async function POST(request: Request) {
     case "update":
       return update(body)
     case "edit-info": {
-      // Server part + last 4 of the key only: the key itself needs an explicit Reveal.
       const info = destinationEditInfo(body.id)
       return info ? Response.json(info, { headers: NO_STORE }) : Response.json({ error: "No such destination." }, { status: 404, headers: NO_STORE })
     }
@@ -71,6 +70,10 @@ export async function POST(request: Request) {
       const item = resolveDestination(body.id)
       if (!item) return Response.json({ error: "No such destination." }, { status: 404, headers: NO_STORE })
       return Response.json({ id: item.id, url: item.url }, { headers: NO_STORE })
+    }
+    case "set-timer": {
+      const at = body.activateAt === null || body.activateAt === undefined ? null : Number(body.activateAt)
+      return respond(setDestinationTimer(body.id, at))
     }
     default:
       return Response.json({ error: "Unknown action." }, { status: 400 })
