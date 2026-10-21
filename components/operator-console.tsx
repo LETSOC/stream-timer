@@ -44,6 +44,7 @@ import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
+import { PathPanels } from "@/components/path-panels"
 import { DEFAULT_STAGE, localClock, parseStage, serverClock, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
@@ -1562,6 +1563,7 @@ export function OperatorConsole() {
             <DestinationsPanel dests={dests.items} selected={{ slate: dests.selectedId, capture: dests.selectedCaptureId }}
               liveIds={[rtmpChannels.slate.running ? dests.selectedId : null, rtmpChannels.capture.running ? dests.selectedCaptureId : null].filter((x): x is string => Boolean(x))}
               pillClass={pillClass} onChanged={() => void loadDests()} onNote={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text.split(/(?<=\.) /)[0])} />
+            <PathPanels dests={dests.items} onEdit={openDestEdit} onDestsChanged={() => void loadDests()} />
           </Panel>
         </section>
       </main>
