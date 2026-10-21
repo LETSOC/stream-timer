@@ -89,6 +89,7 @@ export function useVertical() {
 export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { dests: Dest[]; pillClass: PillClass; onDestsChanged?: () => void; /** opens the desk's Saved destinations editor */ onEdit?: (id: string) => void }) {
   const { view, act } = useVertical()
   const [busy, setBusy] = useState<string | null>(null)
+  const pendingFwd = useRef<Set<string>>(new Set())
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [form, setForm] = useState<{ open: boolean; name: string; server: string; key: string }>({ open: false, name: "", server: "", key: "" })
   const [preview, setPreview] = useState(false)
@@ -105,9 +106,11 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
   }
   const save = (patch: Partial<VerticalView["settings"]>) => void run("settings", { action: "settings", settings: patch })
   const toggle = async (id: string, on: boolean) => {
+    pendingFwd.current.add(id)
     setBusy(`fwd-${id}`)
     const error = await setForward(id, on)
     setBusy(null)
+    pendingFwd.current.delete(id)
     setMessage(error ? { tone: "error", text: error } : null)
   }
   async function addDest() {
@@ -139,7 +142,7 @@ export function VerticalCard({ dests, pillClass, onDestsChanged, onEdit }: { des
         {dests.length === 0 ? <p>No saved destinations yet. Add one below.</p> : null}
         {dests.map((d) => {
           const fwd = path?.forwards.find((f) => f.destId === d.id)
-          const checked = Boolean(fwd)
+          const checked = pendingFwd.current.has(d.id) ? !Boolean(fwd) : Boolean(fwd)
           const reason = path?.available?.find((x) => x.destId === d.id)?.reason ?? null
           // Only a real conflict blocks ticking (a ticked one can always be unticked). Ticks apply live.
           const blocked = Boolean(reason) && !checked
