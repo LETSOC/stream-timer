@@ -35,7 +35,7 @@ test("logos: the 5 built-in SVGs from the design survive sanitising; colour reco
     assert.ok(sanitizeSvg(DEFAULT_LOGO_SVG[id]).includes("<path"), id)
     assert.ok(DEFAULT_LOGO_SVG[id].includes(`fill="${LOGO_BRAND}"`), id)
   }
-  assert.ok(DEFAULT_LOGO_SVG.logo5.includes('width="517" height="133"'))
+  assert.ok(DEFAULT_LOGO_SVG.logo5.includes('width="517" height="137"'))
   const src = logoSrc("logo2", { source: "default", image: "", svg: "", color: "#1236a0", text: "" })
   assert.ok(src.startsWith("data:image/svg+xml"))
   const svg = decodeURIComponent(src.split(",")[1])
@@ -131,7 +131,7 @@ const NO_GO: Record<string, Box> = {
 }
 const SIZE: Record<LayoutPart, { w: number; h: number }> = {
   talk: { w: 420, h: 64 }, sponsor: { w: 320, h: 60 }, qa: { w: 420, h: 60 }, strap: { w: 760, h: 130 }, socials: { w: 0, h: 0 },
-  logo1: { w: 178, h: 178 }, logo2: { w: 178, h: 178 }, logo3: { w: 178, h: 178 }, logo4: { w: 178, h: 178 }, logo5: { w: 517, h: 133 },
+  logo1: { w: 178, h: 178 }, logo2: { w: 178, h: 178 }, logo3: { w: 178, h: 178 }, logo4: { w: 178, h: 178 }, logo5: { w: 517, h: 137 },
   qr: { w: 178, h: 178 }, qrLogo: { w: 178, h: 178 },
 }
 function box(screen: "countdown" | "program", part: LayoutPart): Box {
@@ -199,4 +199,25 @@ test("uploads: logo SVG is sanitised and stored as .svg; card uploads stay raste
     else process.env.STREAM_DATA_DIR = prev
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test("ticker: Planner and Social keep separate lists; legacy single list migrates into the current type", () => {
+  const legacy = parseStage({ tickerType: "social", tickerItems: ["old"] })
+  assert.deepEqual([legacy.tickerSocialItems, legacy.tickerPlannerItems, legacy.tickerItems], [["old"], [], ["old"]])
+  const st = parseStage({ tickerType: "planner", tickerPlannerItems: ["p1"], tickerSocialItems: ["s1", "s2"], tickerItems: ["stale"] })
+  assert.deepEqual(st.tickerItems, ["p1"])
+  assert.ok(LIVE_VISUAL_KEYS.includes("tickerPlannerItems") && LIVE_VISUAL_KEYS.includes("tickerSocialItems"))
+  // switching type shows that type's own items; lists untouched
+  const sw = visualPatch(st, { type: "visual", target: "ticker", tickerType: "social" }, 0)
+  assert.deepEqual([sw.tickerItems, sw.tickerPlannerItems, sw.tickerSocialItems], [["s1", "s2"], ["p1"], ["s1", "s2"]])
+  // editing the selected tab's list (list given) replaces only that list
+  const a = parseAction({ type: "visual", target: "ticker", items: ["n1"], list: "social" })
+  assert.equal((a as { list?: string }).list, "social")
+  const ed = visualPatch(st, a as never, 0)
+  assert.deepEqual([ed.tickerSocialItems, ed.tickerPlannerItems, ed.tickerItems], [["n1"], ["p1"], ["p1"]])
+  // no list: edits the current type
+  const cur = visualPatch(st, { type: "visual", target: "ticker", items: ["x"] }, 0)
+  assert.deepEqual([cur.tickerPlannerItems, cur.tickerSocialItems], [["x"], ["s1", "s2"]])
+  const ds = deckState({ ...state(st), rev: 1, testSetAt: null }, T0)
+  assert.deepEqual([ds.visuals?.tickerPlannerItems, ds.visuals?.tickerSocialItems], [["p1"], ["s1", "s2"]])
 })
