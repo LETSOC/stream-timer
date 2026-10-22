@@ -201,3 +201,9 @@ export function talkPillValue(mode: TalkMode, timer: TalkTimer, eventEndMs: numb
 /** Ticker bar height px @1080p; bottom overlays lift above it while it shows. */
 export const TICKER_H_PX = 48
 export const TICKER_GAP_PX = 16
+
+/** Ticker line as in the design: "PLANNER • 10:00 Keynote" (the type word is added unless the item has it). */
+export function tickerLine(type: TickerType, item: string): string {
+  const tag = type === "social" ? "SOCIAL" : "PLANNER"
+  return item.toUpperCase().startsWith(tag) ? item : `${tag} • ${item}`
+}

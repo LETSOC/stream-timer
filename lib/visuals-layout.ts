@@ -8,9 +8,9 @@
  */
 import { CORNERS, SAFE_X_PX, SAFE_Y_PX, type Corner } from "@/lib/visuals"
 
-export const LAYOUT_PARTS = ["strap", "talk", "qa", "sponsor", "socials"] as const
+export const LAYOUT_PARTS = ["strap", "talk", "qa", "sponsor", "socials", "logo1", "logo2", "logo3", "logo4", "logo5", "qr", "qrLogo"] as const
 export type LayoutPart = (typeof LAYOUT_PARTS)[number]
-export const LAYOUT_PART_LABEL: Record<LayoutPart, string> = { strap: "Name strap", talk: "Talk timer pill", qa: "Q&A pill", sponsor: "Sponsored pill", socials: "Social circles" }
+export const LAYOUT_PART_LABEL: Record<LayoutPart, string> = { strap: "Name strap", talk: "Talk timer pill", qa: "Q&A pill", sponsor: "Sponsored pill", socials: "Social circles", logo1: "Logo 1 · Large square", logo2: "Logo 2 · Large circle", logo3: "Logo 3 · Small square", logo4: "Logo 4 · Small circle", logo5: "Logo 5 · Wordmark", qr: "QR (animated)", qrLogo: "Logo QR" }
 export const LAYOUT_SCREENS = ["countdown", "program"] as const
 export type LayoutScreen = (typeof LAYOUT_SCREENS)[number]
 export const SNAPS = ["safe", "edge"] as const
@@ -41,6 +41,15 @@ export const DEFAULT_LAYOUT: VisualsLayout = {
     qa: place("top-right", 150, 168),
     strap: place("bottom-right", 0, 0, 90),
     socials: place("bottom-right", 0, 0),
+    // Logos: the free slot bottom-middle (right of the social icons, left of the strap).
+    logo1: place("bottom-left", 720, 0),
+    logo2: place("bottom-left", 720, 0),
+    logo3: place("bottom-left", 720, 0),
+    logo4: place("bottom-left", 720, 0),
+    logo5: place("bottom-left", 720, 0, 60),
+    // QR: bottom-right between the speaker gallery and the strap, at half size.
+    qr: place("bottom-right", 0, 130, 50),
+    qrLogo: place("bottom-right", 100, 130, 50),
   },
   program: {
     talk: place("top-left"),
@@ -48,6 +57,15 @@ export const DEFAULT_LAYOUT: VisualsLayout = {
     qa: place("bottom-right"),
     strap: place("bottom-left"),
     socials: place("bottom-left"),
+    // Design: logos/QR on the 32px edge (178 = QR safe box). Logos top-left under the talk pill,
+    // animated QR top-right under the Sponsored pill, Logo QR bottom-right above the Q&A pill.
+    logo1: place("top-left", 0, 90, 100, "edge"),
+    logo2: place("top-left", 0, 90, 100, "edge"),
+    logo3: place("top-left", 0, 90, 100, "edge"),
+    logo4: place("top-left", 0, 90, 100, "edge"),
+    logo5: place("top-left", 0, 90, 60, "edge"),
+    qr: place("top-right", 0, 90, 100, "edge"),
+    qrLogo: place("bottom-right", 0, 110, 100, "edge"),
   },
 }
 

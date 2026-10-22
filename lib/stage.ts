@@ -3,6 +3,7 @@
  * so both always agree on defaults and ranges. Pure: safe to import from client components.
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
+import { DEFAULT_LOGOS, DEFAULT_QR, DEFAULT_SCENES, isScene, parseLogoIds, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_LAYOUT, parseVisualsLayout, type VisualsLayout } from "@/lib/visuals-layout"
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
 import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
@@ -25,6 +26,20 @@ export type StageOptions = {
   straps: StrapPreset[]
   strapAccent: string
   strapText: string
+  /** House strap: pulsing white accent circle and the ↗ arrow badge (design toggles). Saved. */
+  strapAccentCircle: boolean
+  strapArrow: boolean
+  /** Logos 1–5 (builder › Save): source (built-in / uploaded / pasted SVG), colour, caption text. */
+  logos: Logos
+  /** Live (deck): which logos show. */
+  logosOn: LogoId[]
+  /** QR (builder › Save): link, colours, captions, Logo QR badge. */
+  qr: QrConfig
+  /** Live (deck): animated QR and Logo QR show/hide. */
+  qrOn: boolean
+  qrLogoOn: boolean
+  /** Extra full-screen scene cards (HOLD 05/06/07, STANDBY, SHOWREEL): texts, dot, pill, background. Saved. */
+  scenes: Record<SceneId, SceneCard>
   /** Live (deck /visuals, applied at once): which strap, IN/OUT/LOOP and when, look overrides, socials overlay. */
   strapId: string
   strapMode: StrapMode
@@ -113,7 +128,7 @@ export type StageOptions = {
 }
 
 export type ImageFit = "cover" | "contain"
-export type Overlay = "none" | "break" | "hold" | "welcome"
+export type Overlay = "none" | "break" | "hold" | "welcome" | SceneId
 
 export const DEFAULT_STAGE: StageOptions = {
   checker: 6,
@@ -130,8 +145,16 @@ export const DEFAULT_STAGE: StageOptions = {
   countdownStrokePx: 2,
   countdownStrokeColor: "#ffffff",
   straps: DEFAULT_STRAPS,
-  strapAccent: "#d4ff32",
+  strapAccent: "#d9ff43",
   strapText: "#ffffff",
+  strapAccentCircle: true,
+  strapArrow: true,
+  logos: DEFAULT_LOGOS,
+  logosOn: [],
+  qr: DEFAULT_QR,
+  qrOn: false,
+  qrLogoOn: false,
+  scenes: DEFAULT_SCENES,
   strapId: "",
   strapMode: "out",
   strapAt: null,
@@ -261,6 +284,14 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     straps: pick("straps", (v) => sanitizeStraps(v)),
     strapAccent: pick("strapAccent", (v, f) => hexColor(v, f)),
     strapText: pick("strapText", (v, f) => hexColor(v, f)),
+    strapAccentCircle: pick("strapAccentCircle", (v) => v !== false),
+    strapArrow: pick("strapArrow", (v) => v !== false),
+    logos: pick("logos", (v, f) => parseLogos(v, f)),
+    logosOn: pick("logosOn", (v) => parseLogoIds(v)),
+    qr: pick("qr", (v, f) => parseQr(v, f)),
+    qrOn: pick("qrOn", (v) => v === true),
+    qrLogoOn: pick("qrLogoOn", (v) => v === true),
+    scenes: pick("scenes", (v, f) => parseScenes(v, f)),
     strapId: pick("strapId", (v) => (typeof v === "string" ? v.replace(/[^a-z0-9_-]/gi, "").slice(0, 32) : "")),
     strapMode: pick("strapMode", (v) => parseStrapMode(v)),
     strapAt: pick("strapAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
@@ -326,7 +357,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     welcomeImage: pick("welcomeImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
     welcomeFit: pick("welcomeFit", (v) => (v === "contain" ? "contain" : "cover")),
     deskLive: pick("deskLive", (v) => v === true),
-    overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" ? v : "none")),
+    overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" || isScene(v) ? v : "none")),
     program: pick("program", (v) => v === true),
     programSource: pick("programSource", (v) => (v === "backup" ? "backup" : "main")),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
@@ -360,7 +391,7 @@ export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[
  * forced, the end card cuts over Program. The plain Event › End time does NOT pre-empt Program (a running show is never
  * cut by the schedule alone). After it fires, tap Program or Countdown to stay past the end: that sets holdCountdown.
  */
-export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endAt?: string }, pastEnd: boolean): "break" | "hold" | "welcome" | "program" | "end" | "countdown" {
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endAt?: string }, pastEnd: boolean): "break" | "hold" | "welcome" | SceneId | "program" | "end" | "countdown" {
   if (stage.overlay !== "none") return stage.overlay
   if (stage.forceEnd) return "end"
   if (stage.endAt && pastEnd && !stage.holdCountdown) return "end"
@@ -401,4 +432,4 @@ export function socialLook(stage: StageOptions) {
 }
 
 /** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
-export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText"] as const satisfies readonly (keyof StageOptions)[]
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "logosOn", "qrOn", "qrLogoOn"] as const satisfies readonly (keyof StageOptions)[]
