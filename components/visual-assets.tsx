@@ -95,11 +95,13 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   const [, setPin] = useState(0)
   useEffect(() => subscribeViewerMute(() => setPin((n) => n + 1)), [])
   // Same rule as the program player: sound on unless the viewer muted. OBS Browser Source has no viewer choice, so it plays.
-  const wantSound = !(viewerHasChosen() && isViewerMuted())
+  // Builder / desk previews (not onAir): always muted.
+  const wantSound = onAir && !(viewerHasChosen() && isViewerMuted())
   useEffect(() => {
     const el = videoRef.current
     if (!el || !video) return
-    el.muted = !wantSound
+    // /stream?mute=1 (builder Live tab, desk monitors) is a preview too.
+    el.muted = !wantSound || new URLSearchParams(window.location.search).get("mute") === "1"
     void el.play().catch(() => {
       // Autoplay with sound refused (normal browser tab): keep the picture, muted. A tap on the stream unmute turns it back on.
       el.muted = true
@@ -121,7 +123,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   return (
     <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
       {video && !card.videoFront ? (
-        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
+        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none" }}>
         {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
@@ -137,7 +139,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
         ) : null}
       </div>
       {video && card.videoFront ? (
-        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
+        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
       ) : null}
     </div>
   )
