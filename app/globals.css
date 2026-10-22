@@ -441,3 +441,69 @@ html:has([data-desk-root]) body {
   .vl-marquee, .vl-rec, .vl-over, .strap-house .strap-dot { animation: none !important; }
   .vl-pill, .vl-ticker { transition-property: opacity !important; transform: none !important; }
 }
+
+/* ---------- Hyphen component system (design file): faithful looks, 1920x1080 in px × --px ---------- */
+@keyframes vl-pulse-dot { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.2); opacity: 0.7; } }
+/* House strap: #1236A0, 4px(×2) #FF6A00 left border, white pulsing accent circle, ↗ in a white circle */
+.strap-house .strap-body { border-left-color: #ff6a00; border-radius: calc(16 * var(--px)); }
+.strap-house .strap-dot { width: calc(20 * var(--px)); height: calc(20 * var(--px)); background: #fff; animation: vl-pulse-dot 1.8s ease-in-out infinite; }
+.strap-house .strap-arrow { display: inline-flex; align-items: center; justify-content: center; width: calc(64 * var(--px)); height: calc(64 * var(--px)); border-radius: 9999px; background: #fff; color: #000; font-size: calc(28 * var(--px)); margin-left: calc(16 * var(--px)); }
+/* Line: #0A0A0A card, #222 border, 4px(×2) lime left bar, lime mono handle, pulsing lime dot */
+.strap-line .strap-body { align-items: center; background: #0a0a0a; border: calc(2 * var(--px)) solid #222; border-left: calc(8 * var(--px)) solid var(--strap-accent); border-radius: 0 calc(16 * var(--px)) calc(16 * var(--px)) 0; padding: calc(16 * var(--px)) calc(32 * var(--px)) calc(16 * var(--px)) calc(24 * var(--px)); text-shadow: none; }
+.strap-line .strap-bar { display: none; }
+.strap-line .strap-title, .strap-line .strap-social { font-family: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace; color: var(--strap-accent); }
+.strap-live-dot { flex: none; width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-radius: 9999px; background: var(--strap-accent); animation: vl-pulse-dot 1.4s ease-in-out infinite; }
+.strap-line .strap-live-dot { margin-left: calc(16 * var(--px)); }
+/* Block: lime name block (black text) over a #0000B6 mono subline, soft drop shadow */
+.strap-block .strap-body { filter: drop-shadow(0 calc(6 * var(--px)) calc(22 * var(--px)) rgba(0, 0, 0, 0.55)); }
+.strap-block .strap-name { color: #000; letter-spacing: -0.02em; }
+.strap-block .strap-title { color: #fff; margin-top: calc(-4 * var(--px)); font-family: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace; }
+/* Pill: dark pill, 1px(×2) lime border, lime mono text and dot */
+.strap-pill .strap-body { background: rgba(10, 10, 10, 0.9); border-width: calc(2 * var(--px)); color: var(--strap-accent); padding: calc(16 * var(--px)) calc(32 * var(--px)); }
+.strap-pill .strap-live-dot { animation: none; }
+.strap-pill .strap-name, .strap-pill .strap-title { font-family: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace; color: var(--strap-accent); }
+/* Gradient: #0000B6 → #6a5ee0 → lime, white text with shadow */
+.strap-gradient .strap-body { background: linear-gradient(90deg, #0000b6 0%, #6a5ee0 45%, var(--strap-accent) 100%); border-radius: calc(16 * var(--px)); text-shadow: 0 calc(2 * var(--px)) calc(4 * var(--px)) rgba(0, 0, 0, 0.5); }
+.strap-gradient .strap-title { font-family: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace; opacity: 0.9; }
+
+/* Talk ends: white pill, black mono text, green rec dot (Session) / red (Festival), small orange accent dot */
+.vl-talk { background: #fff; color: #000; border: calc(2 * var(--px)) solid rgba(0, 0, 0, 0.08); box-shadow: 0 calc(8 * var(--px)) calc(36 * var(--px)) rgba(0, 0, 0, 0.3); font-family: var(--vl-mono); font-weight: 500; }
+.vl-talk-prefix { opacity: 1; font-weight: 500; }
+.vl-rec { background: #16a34a; animation: vl-pulse-dot 1.6s ease-in-out infinite; }
+.vl-rec-festival { background: #ff3b3b; }
+.vl-talk-accent { width: calc(12 * var(--px)); height: calc(12 * var(--px)); border-radius: 9999px; background: #ff6a00; }
+.vl-over { color: #d92d20; }
+/* Q&A white pill, Sponsored black pill: mono */
+.vl-qa { font-family: var(--vl-mono); font-weight: 500; }
+.vl-sponsor { font-family: var(--vl-mono); font-weight: 500; background: #000; border-color: rgba(255, 255, 255, 0.1); }
+/* Ticker: #0A0A0A bar, hairlines, mono, "•" separators at 30% */
+.vl-ticker { background: #0a0a0a; border-top: calc(2 * var(--px)) solid rgba(255, 255, 255, 0.08); border-bottom: calc(2 * var(--px)) solid rgba(255, 255, 255, 0.08); font-family: var(--vl-mono); letter-spacing: 0.02em; }
+.vl-ticker-item { opacity: 0.9; }
+.vl-ticker-item::after { opacity: 0.3; margin-left: calc(48 * var(--px)); }
+
+/* Logos and QR */
+.vl-logo, .vl-qr { display: flex; flex-direction: column; align-items: center; gap: calc(8 * var(--px)); transition: opacity 0.5s cubic-bezier(.16, 1, .3, 1), transform 0.5s cubic-bezier(.16, 1, .3, 1); }
+.vl-logo.vl-off, .vl-qr.vl-off { opacity: 0; transform: scale(0.96); }
+.vl-logo-text { font-family: var(--vl-mono); font-size: calc(20 * var(--px)); color: #fff; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); white-space: nowrap; }
+.vl-qr-caption { font-family: var(--vl-mono); font-size: calc(14 * var(--px)); line-height: 1.1; text-align: center; color: #fff; opacity: 0.7; }
+/* Animated QR: decorative reveal (top-to-bottom wipe) each time it shows; the code itself never moves */
+.vl-qr-animated.vl-on svg { animation: vl-qr-reveal 0.9s cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes vl-qr-reveal { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* Scene cards (HOLD 05/06/07, STANDBY, SHOWREEL) */
+.scene-card .visuals-layer { z-index: 1; }
+.scene-pill { position: absolute; top: calc(48 * var(--px)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: calc(16 * var(--px)); padding: calc(12 * var(--px)) calc(32 * var(--px)); border-radius: 9999px; background: #141414; border: calc(2 * var(--px)) solid rgba(255, 255, 255, 0.1); font-family: var(--vl-mono); font-size: calc(20 * var(--px)); letter-spacing: 0.1em; white-space: nowrap; }
+.scene-dot { width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-radius: 9999px; animation: vl-rec 1.2s ease-in-out infinite; }
+.scene-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; animation: vl-scene-in 0.35s ease-out both; }
+@keyframes vl-scene-in { from { transform: translateY(calc(24 * var(--px))); opacity: 0; } to { transform: none; opacity: 1; } }
+.scene-hero { height: calc(240 * var(--px)); max-width: 80%; object-fit: contain; margin-bottom: calc(48 * var(--px)); }
+.scene-title { font-size: calc(144 * var(--px)); font-weight: 600; letter-spacing: -0.04em; line-height: 1; }
+.scene-sub { margin-top: calc(24 * var(--px)); font-family: var(--vl-mono); font-size: calc(26 * var(--px)); opacity: 0.6; }
+.scene-dots { margin-top: calc(64 * var(--px)); display: flex; gap: calc(16 * var(--px)); }
+.scene-dots i { width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-radius: 9999px; background: rgba(255, 255, 255, 0.3); animation: vl-pulse-dot 1.2s infinite; }
+.scene-dots i:nth-child(2) { animation-delay: 0.2s; }
+.scene-dots i:nth-child(3) { animation-delay: 0.4s; }
+.scene-qr { position: absolute; right: calc(32 * var(--px)); bottom: calc(32 * var(--px)); }
+@media (prefers-reduced-motion: reduce) {
+  .strap-live-dot, .strap-house .strap-dot, .scene-dot, .scene-dots i, .scene-center, .vl-qr-animated.vl-on svg { animation: none !important; }
+}
