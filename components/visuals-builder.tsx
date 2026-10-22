@@ -13,8 +13,8 @@ import { VisualsLayer } from "@/components/visuals-layer"
 import { SceneCardView } from "@/components/visual-assets"
 import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
-import { effectiveEndTime, parseStage, socialLook } from "@/lib/stage"
-import { endInstant, type TransportAction } from "@/lib/transport"
+import { parseStage, socialLook } from "@/lib/stage"
+import { endCardAt, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import { CORNER_LABEL, CORNERS, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
@@ -152,7 +152,7 @@ export function VisualsBuilder() {
 
   const eventEndMs = useMemo(() => {
     if (!stage) return null
-    const end = endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime()
+    const end = endCardAt(event.date, event.time, event.endTime, event.timeZone, stage.endOffsetMin)
     return Number.isFinite(end) ? end : null
   }, [stage, event])
 

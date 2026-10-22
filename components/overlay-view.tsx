@@ -11,8 +11,7 @@ import { StageGuides } from "@/components/stage-guides"
 import { clampInset, cornerOffsets, parseCorner, strapVisible, type Corner } from "@/lib/visuals"
 import { useNow } from "@/lib/use-now"
 import { VisualsLayer } from "@/components/visuals-layer"
-import { endInstant } from "@/lib/transport"
-import { effectiveEndTime } from "@/lib/stage"
+import { endCardAt } from "@/lib/transport"
 
 export type OverlayInitial = { event: EventConfig; stage: Partial<Record<keyof StageOptions, unknown>> } | null
 
@@ -131,7 +130,7 @@ export function SocialsOverlay({ initial }: { initial: OverlayInitial }) {
 function VisualsInner({ initial }: { initial: OverlayInitial }) {
   const { event, stage, blocked, checker, guides } = useOverlayState(initial)
   const now = useNow()
-  const end = endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime()
+  const end = endCardAt(event.date, event.time, event.endTime, event.timeZone, stage.endOffsetMin)
   return (
     <Frame checker={checker} guides={guides} blocked={blocked}>
       <VisualsLayer stage={stage} event={event} screen="overlay" now={now ? now.getTime() : null} eventEndMs={Number.isFinite(end) ? end : null} />
