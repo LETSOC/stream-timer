@@ -2,6 +2,8 @@ import fs from "node:fs"
 import path from "node:path"
 import { DATA_DIR } from "@/lib/encoder"
 import { emitSaved } from "@/lib/event-bus"
+import { setBedHold } from "@/lib/audio-bed"
+import { isScene } from "@/lib/visuals-assets"
 import { asEventConfig, DEFAULT_EVENT, type EventConfig, type SpeakerCard } from "@/lib/event"
 import { DEFAULT_STAGE, parseStage, testClockStale, type StageOptions } from "@/lib/stage"
 
@@ -148,8 +150,17 @@ export function writeServerEvent(
   const temporary = `${file}.tmp`
   fs.writeFileSync(temporary, payload)
   fs.renameSync(temporary, file)
+  try { setBedHold(stageHoldsBed(nextStage)) } catch { /* audio is best effort; never fail a save */ }
   emitSaved(rev)
   return { event, rev }
+}
+
+/** On-air scene card has a video and "Pause audio bed while the video plays". */
+export function stageHoldsBed(stage: StageOptions): boolean {
+  const id = stage.overlay
+  if (!isScene(id)) return false
+  const card = stage.scenes[id]
+  return Boolean(card?.video) && card.pauseBed === true
 }
 
 /** True once an operator has saved at least once (data/event.json exists). */
