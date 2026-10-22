@@ -134,8 +134,12 @@ test("builder Live tab: real /stream muted, only mounted while selected, /stream
   const fs = await import("node:fs")
   const src = fs.readFileSync("components/visuals-builder.tsx", "utf8")
   assert.match(src, /src="\/stream\?mute=1"/)
-  assert.match(src, /\{liveView \? <LiveMonitor \/> : \(/)
+  assert.match(src, /\{liveView \? <LiveMonitor state=\{state\} \/> : \(/)
   assert.match(src, /data-testid="vb-screen-live"[\s\S]{0,200}>Live<\/button>/)
+  assert.match(src, /data-testid="vb-multiview"/)
+  assert.match(src, /vb-multiview/)
+  assert.match(src, /ProgramPlayer/)
+  assert.match(src, /programOperatorSrc/)
   // the existing mute param still mutes program and bed on /stream
   const view = fs.readFileSync("components/stream-view.tsx", "utf8")
   assert.match(view, /muted=\{params\.get\("mute"\) === "1" \|\| !isAir\}/)

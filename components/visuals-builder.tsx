@@ -20,6 +20,7 @@ import { CORNER_LABEL, CORNERS, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTI
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
 import { addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 import { StreamPlayer } from "@/components/stream-player"
+import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 
 type Sel = { kind: "part"; part: LayoutPart | "ticker" } | { kind: "strap"; id: string } | { kind: "scene"; id: SceneId }
 
@@ -254,7 +255,7 @@ export function VisualsBuilder() {
 
         {/* Preview */}
         <section className="flex min-h-0 flex-col gap-2">
-          {liveView ? <LiveMonitor /> : (<>
+          {liveView ? <LiveMonitor state={state} /> : (<>
           <div data-testid="vb-preview" data-screen={screen} className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-[#1a1a1a] [&_.visuals-layer]:pointer-events-none">
             {screen === "countdown" ? (
               <CountdownStage event={event} checker={stage.checker} showMeta={stage.showMeta} showLink={stage.showLink} lineSpacing={stage.lineSpacing} blockGap={stage.blockGap}
@@ -477,8 +478,9 @@ export function VisualsBuilder() {
  * Live monitor: the real /stream page (?mute=1, the existing mute param: program and bed audio off),
  * 1920x1080 scaled to fit, like OBS's program monitor. Only mounted while the Live tab is selected.
  * An operator session may view /stream without the OBS view key (same as the phone deck's preview).
+ * Below it: a light Main | Backup multiview (ProgramPlayer, muted = WebRTC). Does not affect /stream.
  */
-function LiveMonitor() {
+function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; programReady?: boolean | null; programSources?: { main?: { ready?: boolean }; backup?: { ready?: boolean } } | null; rearmHoldMs?: number } | null }) {
   const box = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.4)
   const [gen, setGen] = useState(0)
@@ -489,6 +491,10 @@ function LiveMonitor() {
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
+  const onAir = state?.programSource === "backup" ? "backup" : "main"
+  const mainReady = state?.programSources?.main?.ready ?? state?.programReady === true
+  const backupReady = state?.programSources?.backup?.ready ?? false
+  const rearm = state?.rearmHoldMs ?? 0
   return (
     <>
       <div ref={box} data-testid="vb-live" className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black">
@@ -499,6 +505,23 @@ function LiveMonitor() {
         <button type="button" data-testid="vb-live-reload" onClick={() => setGen((g) => g + 1)} className="rounded-full border border-white/20 px-3 py-1 font-mono text-[11px] text-white hover:bg-white/10">Reload</button>
         <span className="font-mono text-[10px] text-white/45">/stream?mute=1 · muted · what goes on air (program, cards, overlays). A viewer like OBS, a little behind the real output.</span>
       </div>
+
+      {/* Main | Backup multiview — light (muted = WebRTC), only while Live is selected */}
+      <div data-testid="vb-multiview" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {([
+          { id: "main", label: "Main", path: "program", ready: mainReady },
+          { id: "backup", label: "Backup", path: "program-backup", ready: backupReady },
+        ] as const).map((s) => (
+          <div key={s.id} data-testid={`vb-mv-${s.id}`} className="relative aspect-video overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black">
+            <ProgramPlayer scope={`builder-mv-${s.id}`} src={programOperatorSrc(s.path)} ready={s.ready} rearmHoldMs={rearm} />
+            <span className={`pointer-events-none absolute top-1.5 left-1.5 z-20 flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[9px] font-bold tracking-[0.12em] uppercase ${onAir === s.id ? "bg-[#d93200] text-white" : "bg-black/70 text-white/80"}`}>
+              {onAir === s.id ? <span className="size-1.5 rounded-full bg-white" /> : null}
+              {s.label}{onAir === s.id ? " · On air" : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="font-mono text-[10px] text-white/40">Main and Backup, muted (WebRTC). Unmute one only if you need to hear it.</p>
     </>
   )
 }
