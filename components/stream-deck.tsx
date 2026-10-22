@@ -19,7 +19,7 @@ import { deckScreen, effectiveNow, endInstant, endSoonAt, formatEndWhen, eventTa
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
-const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", program: "Program (OBS)", end: "End card" }
+const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", standby: "Standby card", showreel: "Showreel", program: "Program (OBS)", end: "End card" }
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling (no WebSocket)", offline: "Offline" }
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 

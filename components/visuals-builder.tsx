@@ -10,6 +10,8 @@ import Link from "next/link"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { CountdownStage } from "@/components/countdown-stage"
 import { VisualsLayer } from "@/components/visuals-layer"
+import { SceneCardView } from "@/components/visual-assets"
+import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { effectiveEndTime, parseStage, socialLook } from "@/lib/stage"
 import { endInstant, type TransportAction } from "@/lib/transport"
@@ -18,9 +20,17 @@ import { CORNER_LABEL, CORNERS, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTI
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
 import { addStrap, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 
-type Sel = { kind: "part"; part: LayoutPart | "ticker" } | { kind: "strap"; id: string }
+type Sel = { kind: "part"; part: LayoutPart | "ticker" } | { kind: "strap"; id: string } | { kind: "scene"; id: SceneId }
+
+function LibGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div data-testid={`vb-group-${title.toLowerCase()}`} className="mb-3">
+      <p className={`${mono} mb-1`}>{title}</p>
+      <ul className="m-0 grid list-none gap-0.5 p-0">{children}</ul>
+    </div>
+  )
+}
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling", offline: "Offline" }
-const COMPONENTS: (LayoutPart | "ticker")[] = ["strap", "talk", "qa", "sponsor", "socials", "ticker"]
 const COMPONENT_LABEL: Record<LayoutPart | "ticker", string> = { ...LAYOUT_PART_LABEL, ticker: "Ticker bar" }
 
 const panel = "rounded-[14px] border border-[#2a2a2a] bg-[#141414]"
@@ -96,7 +106,7 @@ export function VisualsBuilder() {
   const live = state?.visuals
   const liveFields = useMemo(() => (live ? Object.fromEntries(Object.entries(live).filter(([k]) => k !== "straps" && k !== "tickerCount")) : undefined), [live])
   const event = (loaded?.event ?? DEFAULT_EVENT) as EventConfig
-  const stage = useMemo(() => (loaded && draft ? previewStage(loaded.stage, liveFields, draft, { showAll, strapId: sel.kind === "strap" ? sel.id : undefined, now }) : null), [loaded, draft, liveFields, showAll, sel, now])
+  const stage = useMemo(() => (loaded && draft ? previewStage(loaded.stage, liveFields, draft, { showAll, strapId: sel.kind === "strap" ? sel.id : undefined, now, logo: sel.kind === "part" && (LOGO_IDS as readonly string[]).includes(sel.part) ? (sel.part as LogoId) : undefined }) : null), [loaded, draft, liveFields, showAll, sel, now])
   const dirty = Boolean(savedStage && draft && draftDirty(savedStage, draft))
 
   useEffect(() => {
@@ -144,12 +154,35 @@ export function VisualsBuilder() {
   const setStraps = (next: StrapPreset[]) => setDraft({ ...draft, straps: next })
   const patchStrap = (id: string, p: Partial<StrapPreset>) => setStraps(straps.map((s) => (s.id === id ? { ...s, ...p } : s)))
   const on: Record<LayoutPart | "ticker", boolean> = {
+    ...(Object.fromEntries(LOGO_IDS.map((id) => [id, (live?.logosOn ?? []).includes(id)])) as Record<LogoId, boolean>),
+    qr: live?.qrOn === true,
+    qrLogo: live?.qrLogoOn === true,
     strap: live?.strapMode === "in" || live?.strapMode === "loop",
     talk: live?.talkVisible === true,
     qa: live?.qaVisible === true,
     sponsor: live?.sponsorVisible === true,
     socials: live?.socialsOverlay === true,
     ticker: live?.tickerVisible === true,
+  }
+
+  const libItem = (c: LayoutPart | "ticker") => (
+    <li key={c}>
+      <button type="button" data-testid={`vb-lib-${c}`} onClick={() => setSel({ kind: "part", part: c })} className={`flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] ${sel.kind === "part" && sel.part === c ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
+        <span className={`size-2 rounded-full ${on[c] ? "bg-[#FF3B3B] shadow-[0_0_8px_#FF3B3B]" : "bg-white/20"}`} />
+        <span className="flex-1">{COMPONENT_LABEL[c]}</span>
+        {on[c] ? <span className="font-mono text-[9px] text-[#FF3B3B]">ON AIR</span> : null}
+      </button>
+    </li>
+  )
+  const setLogo = (id: LogoId, p: Partial<LogoConfig>) => setDraft({ ...draft, logos: { ...draft.logos, [id]: { ...draft.logos[id], ...p } } })
+  const setQr = (p: Partial<QrConfig>) => setDraft({ ...draft, qr: { ...draft.qr, ...p } })
+  const setScene = (id: SceneId, p: Partial<SceneCard>) => setDraft({ ...draft, scenes: { ...draft.scenes, [id]: { ...draft.scenes[id], ...p } } })
+  async function upload(file: File, kind: "logo" | "card"): Promise<string | null> {
+    if (file.size > 5_000_000) { setNote({ tone: "error", text: "File is over 5 MB." }); return null }
+    const res = await fetch(`/api/upload${kind === "logo" ? "?kind=logo" : ""}`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file })
+    const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
+    if (!res.ok || !body.url) { setNote({ tone: "error", text: body.error ?? `Upload failed (${res.status})` }); return null }
+    return body.url
   }
 
   return (
@@ -176,18 +209,7 @@ export function VisualsBuilder() {
       <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] gap-4 p-4">
         {/* Library */}
         <aside data-testid="vb-library" className={`${panel} flex min-h-0 flex-col overflow-auto p-3`}>
-          <p className={`${mono} mb-2`}>Components</p>
-          <ul className="m-0 mb-4 grid list-none gap-1 p-0">
-            {COMPONENTS.map((c) => (
-              <li key={c}>
-                <button type="button" data-testid={`vb-lib-${c}`} onClick={() => setSel({ kind: "part", part: c })} className={`flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] ${sel.kind === "part" && sel.part === c ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
-                  <span className={`size-2 rounded-full ${on[c] ? "bg-[#FF3B3B] shadow-[0_0_8px_#FF3B3B]" : "bg-white/20"}`} />
-                  <span className="flex-1">{COMPONENT_LABEL[c]}</span>
-                  {on[c] ? <span className="font-mono text-[9px] text-[#FF3B3B]">ON AIR</span> : null}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <LibGroup title="Straps">{libItem("strap")}</LibGroup>
           <div className="mb-2 flex items-center">
             <p className={`${mono} mr-auto`}>Speakers ({straps.length}/{STRAP_MAX})</p>
             <button type="button" data-testid="vb-strap-add" disabled={straps.length >= STRAP_MAX} className={btn} onClick={() => { const next = addStrap(straps); setStraps(next); setSel({ kind: "strap", id: next[next.length - 1].id }) }}>+ Add</button>
@@ -202,6 +224,23 @@ export function VisualsBuilder() {
               </li>
             ))}
           </ul>
+          <LibGroup title="Logos">{LOGO_IDS.map((id) => libItem(id))}</LibGroup>
+          <LibGroup title="QR">{libItem("qr")}{libItem("qrLogo")}</LibGroup>
+          <LibGroup title="Scenes">
+            {SCENE_IDS.map((id) => (
+              <li key={id}>
+                <button type="button" data-testid={`vb-lib-scene-${id}`} onClick={() => setSel({ kind: "scene", id })} className={`flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] ${sel.kind === "scene" && sel.id === id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
+                  <span className="size-2 rounded-full" style={{ background: draft.scenes[id].dot }} />
+                  <span className="flex-1">{SCENE_LABEL[id]}</span>
+                  {state?.overlay === id ? <span className="font-mono text-[9px] text-[#FF3B3B]">ON AIR</span> : null}
+                </button>
+              </li>
+            ))}
+            <li className="px-2.5 py-1 font-mono text-[10px] text-white/40">Break · Hold · Welcome · End: desk › Cards</li>
+          </LibGroup>
+          <LibGroup title="Pills">{libItem("talk")}{libItem("qa")}{libItem("sponsor")}</LibGroup>
+          <LibGroup title="Ticker">{libItem("ticker")}</LibGroup>
+          <LibGroup title="Socials">{libItem("socials")}</LibGroup>
         </aside>
 
         {/* Preview */}
@@ -218,6 +257,7 @@ export function VisualsBuilder() {
               </div>
             )}
             <VisualsLayer stage={stage} event={event} screen={screen} now={now} eventEndMs={eventEndMs} />
+            {sel.kind === "scene" ? <SceneCardView id={sel.id} card={draft.scenes[sel.id]} qr={draft.qr} now={now} className="absolute inset-0 z-40 h-full" /> : null}
             {guides ? (
               <div aria-hidden data-testid="vb-guides-layer" className="pointer-events-none absolute inset-0 z-50">
                 <div className="absolute border border-dashed border-[#C6FF00]/80" style={{ inset: "5%" }} />
@@ -250,6 +290,34 @@ export function VisualsBuilder() {
                   <button type="button" data-testid="vb-strap-delete" className={`${btn} border-[#FF3B3B]/60 text-[#FF3B3B]`} onClick={() => { setStraps(deleteStrap(straps, s.id)); setSel({ kind: "part", part: "strap" }) }}>Delete</button>
                   <button type="button" data-testid="vb-strap-cue" disabled={dirty || !savedStage.straps.some((x) => x.id === s.id)} title={dirty ? "Save first" : undefined} className={btn} onClick={() => void act({ type: "strap", id: s.id })}>Cue on deck <span className="text-[#FF6A00]">· live</span></button>
                 </div>
+              </div>
+            )
+          })() : sel.kind === "scene" ? (() => {
+            const id = sel.id
+            const c = draft.scenes[id]
+            return (
+              <div className="grid gap-3">
+                <h2 className="text-[15px] font-semibold">Scene card · {SCENE_LABEL[id]}</h2>
+                <label className="grid gap-1"><Label>Label</Label><input data-testid="vb-scene-label" className={field} maxLength={120} value={c.label} onChange={(e) => setScene(id, { label: e.target.value })} /></label>
+                <label className="grid gap-1"><Label>Subline</Label><input data-testid="vb-scene-sub" className={field} maxLength={120} value={c.sub} onChange={(e) => setScene(id, { sub: e.target.value })} /></label>
+                <label className="grid gap-1"><Label>Pill text</Label><input data-testid="vb-scene-pill" className={field} maxLength={120} value={c.pill} onChange={(e) => setScene(id, { pill: e.target.value })} /></label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="grid gap-1"><Label>Dot colour</Label><input type="color" data-testid="vb-scene-dot" className="h-9 w-full" value={c.dot} onChange={(e) => setScene(id, { dot: e.target.value })} /></label>
+                  <label className="grid gap-1"><Label>Background</Label><input type="color" data-testid="vb-scene-bg" className="h-9 w-full" value={c.bg} onChange={(e) => setScene(id, { bg: e.target.value })} /></label>
+                </div>
+                <div className="grid gap-1"><Label>Background mode</Label>
+                  <div className="flex gap-1">{SCENE_BG_MODES.map((m) => <button key={m} type="button" data-testid={`vb-scene-mode-${m}`} aria-pressed={c.bgMode === m} className={chip(c.bgMode === m)} onClick={() => setScene(id, { bgMode: m })}>{m === "solid" ? "Solid" : m === "image" ? "Image" : "Hero"}</button>)}</div>
+                </div>
+                <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={c.gradient} onChange={(e) => setScene(id, { gradient: e.target.checked })} className="accent-[#D9FF43]" /> Showreel gradient (solid mode)</label>
+                {c.bgMode !== "solid" ? (
+                  <label className="grid gap-1"><Label>{c.bgMode === "hero" ? "Hero image (above the title)" : "Background image"}</Label>
+                    <input type="file" data-testid="vb-scene-image" accept="image/png,image/jpeg,image/webp" className="text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f, "card").then((url) => url && setScene(id, { image: url })) }} />
+                    {c.image ? <span className="font-mono text-[10px] text-white/50">{c.image} <button type="button" className="underline" onClick={() => setScene(id, { image: "" })}>remove</button></span> : null}
+                  </label>
+                ) : null}
+                {c.bgMode === "image" ? <Slider label="Dim" testId="vb-scene-dim" unit="%" value={c.dim} range={{ min: 0, max: 90 }} onChange={(n) => setScene(id, { dim: n })} /> : null}
+                <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={c.showQr} onChange={(e) => setScene(id, { showQr: e.target.checked })} className="accent-[#D9FF43]" /> Animated QR bottom-right (QR link)</label>
+                <p className="font-mono text-[10px] text-white/45">Applies on Save. Put it on air from the deck › Scenes (two taps while program is live).</p>
               </div>
             )
           })() : sel.part === "ticker" ? (
@@ -302,6 +370,57 @@ export function VisualsBuilder() {
                         <option value="">Each preset&apos;s own style</option>
                         {STRAP_STYLES.map((m) => <option key={m} value={m}>{STRAP_STYLE_LABEL[m]}</option>)}
                       </select></label>
+                  </>
+                ) : null}
+                {part === "strap" ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" data-testid="vb-accent-circle" aria-pressed={draft.strapAccentCircle} className={chip(draft.strapAccentCircle)} onClick={() => setDraft({ ...draft, strapAccentCircle: !draft.strapAccentCircle })}>Accent circle</button>
+                    <button type="button" data-testid="vb-arrow" aria-pressed={draft.strapArrow} className={chip(draft.strapArrow)} onClick={() => setDraft({ ...draft, strapArrow: !draft.strapArrow })}>Arrow ↗</button>
+                    <span className="font-mono text-[10px] text-white/45">House style only · Save</span>
+                  </div>
+                ) : null}
+                {(LOGO_IDS as readonly string[]).includes(part) ? (() => {
+                  const id = part as LogoId
+                  const lg = draft.logos[id]
+                  return (
+                    <>
+                      <div className="grid gap-1"><Label>Source</Label>
+                        <div className="flex gap-1">{LOGO_SOURCES.map((src: LogoSource) => <button key={src} type="button" data-testid={`vb-logo-src-${src}`} aria-pressed={lg.source === src} className={chip(lg.source === src)} onClick={() => setLogo(id, { source: src })}>{src === "default" ? "Built-in" : src === "image" ? "Upload" : "Paste SVG"}</button>)}</div>
+                      </div>
+                      {lg.source === "default" ? <label className="grid gap-1"><Label>Colour (brand orange)</Label><input type="color" data-testid="vb-logo-color" className="h-9 w-full" value={lg.color} onChange={(e) => setLogo(id, { color: e.target.value })} /></label> : null}
+                      {lg.source === "image" ? (
+                        <label className="grid gap-1"><Label>PNG, JPG or SVG (max 5 MB; SVG 100 KB, cleaned)</Label>
+                          <input type="file" data-testid="vb-logo-upload" accept="image/png,image/jpeg,image/svg+xml" className="text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f, "logo").then((url) => url && setLogo(id, { image: url })) }} />
+                          {lg.image ? <span className="font-mono text-[10px] text-white/50">{lg.image}</span> : <span className="font-mono text-[10px] text-[#FF6A00]">No image yet</span>}
+                        </label>
+                      ) : null}
+                      {lg.source === "svg" ? (
+                        <label className="grid gap-1"><Label>Paste SVG code</Label>
+                          <textarea data-testid="vb-logo-svg" rows={5} defaultValue={lg.svg} className={`${field} h-auto py-2 font-mono text-[11px]`} onBlur={(e) => { const clean = sanitizeSvg(e.target.value); setLogo(id, { svg: clean }); if (e.target.value.trim() && !clean) setNote({ tone: "error", text: "That SVG can't be used (not an SVG, or unsafe)." }) }} />
+                          <span className="font-mono text-[10px] text-white/45">Scripts, foreignObject, event handlers and external links are removed. Shown as an image.</span>
+                        </label>
+                      ) : null}
+                      <label className="grid gap-1"><Label>Caption text (optional)</Label><input data-testid="vb-logo-text" className={field} maxLength={120} value={lg.text} onChange={(e) => setLogo(id, { text: e.target.value })} /></label>
+                      <p className="font-mono text-[10px] text-white/45">Show/Hide on the deck › Logos.</p>
+                    </>
+                  )
+                })() : null}
+                {part === "qr" || part === "qrLogo" ? (
+                  <>
+                    <label className="grid gap-1"><Label>QR link (shared by both QR codes)</Label><input data-testid="vb-qr-url" className={field} maxLength={500} value={draft.qr.url} onChange={(e) => setQr({ url: e.target.value })} /></label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="grid gap-1"><Label>Code colour</Label><input type="color" data-testid="vb-qr-color" className="h-9 w-full" value={draft.qr.color} onChange={(e) => setQr({ color: e.target.value })} /></label>
+                      {part === "qr"
+                        ? <label className="grid gap-1"><Label>Step accent</Label><input type="color" data-testid="vb-qr-accent" className="h-9 w-full" value={draft.qr.accent} onChange={(e) => setQr({ accent: e.target.value })} /></label>
+                        : <label className="grid gap-1"><Label>Badge colour</Label><input type="color" data-testid="vb-qr-badge-color" className="h-9 w-full" value={draft.qr.badgeColor} onChange={(e) => setQr({ badgeColor: e.target.value })} /></label>}
+                    </div>
+                    {part === "qr" ? (
+                      <>
+                        <label className="grid gap-1"><Label>Caption</Label><input data-testid="vb-qr-caption" className={field} maxLength={120} value={draft.qr.caption} onChange={(e) => setQr({ caption: e.target.value })} /></label>
+                        <label className="grid gap-1"><Label>Caption line 2</Label><input className={field} maxLength={120} value={draft.qr.caption2} onChange={(e) => setQr({ caption2: e.target.value })} /></label>
+                      </>
+                    ) : <label className="grid gap-1"><Label>Badge text (max 4)</Label><input data-testid="vb-qr-badge" className={field} maxLength={4} value={draft.qr.badgeText} onChange={(e) => setQr({ badgeText: e.target.value })} /></label>}
+                    <p className="font-mono text-[10px] text-white/45">{part === "qr" ? "A real code (ECC M); the orange cell steps round the quiet zone, never over the code." : "ECC H, so the centre badge still scans. Keep it dark on white."} Show/Hide on the deck › QR.</p>
                   </>
                 ) : null}
                 {part === "talk" ? (

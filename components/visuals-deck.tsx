@@ -4,7 +4,8 @@ import { StatusToast, TOAST_MS } from "@/components/status-toast"
 import Link from "next/link"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
-import type { TransportAction } from "@/lib/transport"
+import { deckScreen, type Screen, type TransportAction } from "@/lib/transport"
+import { LOGO_IDS, type LogoId } from "@/lib/visuals-assets"
 import { CORNER_LABEL, CORNERS, formatClock, sanitizeTickerItems, STRAP_HOLD_RANGE, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, type Corner, type StrapStyle } from "@/lib/visuals"
 import { deckLights, parseDuration, stepStrap, talkReadout, TALK_PRESETS_MIN } from "@/lib/visuals-deck"
 import { ConfirmButton } from "@/components/confirm-button"
@@ -17,6 +18,9 @@ const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "
  * every tap applies at once over the deck WebSocket. Strap presets and layout are edited in the
  * builder (/visuals/builder) or the desk › Visuals. Risky taps (layer OFF, Clear all) need two taps.
  */
+const SCENE_BUTTONS: [Screen, string][] = [["program", "LIVE"], ["hold07", "HOLD 07"], ["hold06", "HOLD 06"], ["hold05", "HOLD 05"], ["welcome", "WELCOME"], ["standby", "STANDBY"], ["break", "BREAK"], ["hold", "HOLD"], ["showreel", "SHOWREEL"], ["end", "END"]]
+const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", end: "END" }
+const LOGO_SHORT = ["1 □", "2 ○", "3 □", "4 ○", "5 W"]
 const BTN = "min-h-12 rounded-[14px] px-2 text-[15px] font-black touch-manipulation disabled:opacity-35"
 const GO = `${BTN} bg-[#12b76a] text-black`
 const STOP = `${BTN} bg-[#f04438] text-white`
@@ -60,6 +64,7 @@ export function VisualsDeck() {
   const lights = v ? deckLights(v, now) : null
   const talk = v ? talkReadout(v, now) : { ms: null, state: "stopped" as const }
   const holdSec = hold ?? v?.strapHoldSec ?? 5
+  const scr: Screen | null = state ? deckScreen(state, now) : null
   const off = !state || busy
 
   // Minimal toasts: errors always; "ok" only where the screen doesn't already show the change.
@@ -122,6 +127,22 @@ export function VisualsDeck() {
             <OverlayPreview path="/overlay/visuals?checker=1" />
           </div>
         ) : null}
+      </Row>
+
+      <Row title="Scenes" on={scr !== null && scr !== "program" && scr !== "countdown"} label={scr ? SCENE_NOW[scr] : "—"} testId="vd-scenes">
+        <div className="grid grid-cols-3 gap-1.5">
+          {SCENE_BUTTONS.map(([target, label]) => {
+            const active = scr === target
+            const cls = `${active ? SEL : target === "program" ? GO : PLAIN} min-h-11 px-1 text-[13px]`
+            // Full-screen card over a live program feed: two taps.
+            return scr === "program" && target !== "program" && !active ? (
+              <ConfirmButton key={target} data-testid={`vd-scene-${target}`} disabled={off} confirmLabel="Tap again" className={cls} onConfirm={() => void act({ type: "screen", screen: target })}>{label}</ConfirmButton>
+            ) : (
+              <button key={target} type="button" data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} onClick={() => void act({ type: "screen", screen: target })} className={cls}>{label}</button>
+            )
+          })}
+        </div>
+        <p className="mt-2 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes.</p>
       </Row>
 
       <Row title="Name strap" on={lights?.strap ?? false} label={lights?.strap ? "ON AIR" : v?.strapMode === "loop" ? "LOOP" : "OFF"} testId="vd-strap">
@@ -218,6 +239,23 @@ export function VisualsDeck() {
           <button type="button" data-testid="socials-hide" disabled={off} onClick={() => void act({ type: "socials", show: false })} className={STOP}>Hide</button>
         </div>
         <p className="mt-2 font-mono text-[11px] text-white/50">On the program screen and OBS; the countdown has its own circles.</p>
+      </Row>
+
+      <Row title="Logos" on={(v?.logosOn ?? []).length > 0} label={(v?.logosOn ?? []).length ? `${(v?.logosOn ?? []).length} ON` : "OFF"} testId="vd-logos">
+        <div className="grid grid-cols-5 gap-1.5">
+          {LOGO_IDS.map((id: LogoId, i) => {
+            const shown = (v?.logosOn ?? []).includes(id)
+            return <button key={id} type="button" data-testid={`vd-logo-${id}`} aria-pressed={shown} disabled={off} onClick={() => void visual({ target: "logo", logo: id, show: !shown })} className={`${shown ? SEL : PLAIN} px-0`}>{LOGO_SHORT[i]}</button>
+          })}
+        </div>
+        <p className="mt-2 font-mono text-[11px] text-white/50">Tap to show / hide. 1 □ 2 ○ large · 3 □ 4 ○ small · 5 wordmark.</p>
+      </Row>
+
+      <Row title="QR" on={Boolean(v?.qrOn || v?.qrLogoOn)} label={v?.qrOn || v?.qrLogoOn ? "SHOWING" : "HIDDEN"} testId="vd-qr">
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" data-testid="vd-qr-toggle" aria-pressed={v?.qrOn === true} disabled={off} onClick={() => void visual({ target: "qr", show: !v?.qrOn })} className={v?.qrOn ? SEL : PLAIN}>{v?.qrOn ? "QR ✓" : "QR"}</button>
+          <button type="button" data-testid="vd-qr-logo-toggle" aria-pressed={v?.qrLogoOn === true} disabled={off} onClick={() => void visual({ target: "qrLogo", show: !v?.qrLogoOn })} className={v?.qrLogoOn ? SEL : PLAIN}>{v?.qrLogoOn ? "Logo QR ✓" : "Logo QR"}</button>
+        </div>
       </Row>
 
       {toast ? <StatusToast tone={toast.tone} text={toast.text} testid="visuals-toast" /> : null}
