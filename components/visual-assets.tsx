@@ -86,7 +86,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   }
   return (
     <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
-      {video ? (
+      {video && !card.videoFront ? (
         <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none" }}>
@@ -102,6 +102,9 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
           <div className="scene-qr"><QrMark cfg={qr} variant="animated" show now={now ?? null} testId="scene-qr" /></div>
         ) : null}
       </div>
+      {video && card.videoFront ? (
+        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
+      ) : null}
     </div>
   )
 }

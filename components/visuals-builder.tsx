@@ -359,6 +359,7 @@ export function VisualsBuilder() {
                   <input type="file" data-testid="vb-scene-video" accept="video/mp4" className="text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f, "video").then((url) => url && setScene(id, { video: url })) }} />
                   {c.video ? <span className="truncate font-mono text-[10px] text-white/50">{c.video}</span> : <span className="font-mono text-[10px] text-white/40">No video</span>}
                   {c.video ? <button type="button" className={btn} onClick={() => setScene(id, { video: "" })}>Remove video</button> : null}
+                  <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-videofront" checked={c.videoFront} onChange={(e) => setScene(id, { videoFront: e.target.checked })} className="accent-[#D9FF43]" /> Video in front (above card text and QR)</label>
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-autoswitch" checked={c.autoSwitch} onChange={(e) => setScene(id, { autoSwitch: e.target.checked })} className="accent-[#D9FF43]" /> Auto-switch to Program when the video ends</label>
                   <p className="font-mono text-[10px] text-white/45">Plays on the scene card with sound. In OBS, enable “Control audio via OBS” on the Browser Source. Auto-switch only fires on the real /stream output.</p>
                 </div>
