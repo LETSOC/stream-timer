@@ -216,7 +216,7 @@ export function VisualsBuilder() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_340px] gap-4 p-4">
+      <div className={`grid min-h-0 flex-1 gap-4 p-4 ${liveView ? "grid-cols-[260px_minmax(0,1fr)]" : "grid-cols-[260px_minmax(0,1fr)_340px]"}`}>
         {/* Library */}
         <aside data-testid="vb-library" className={`${panel} flex min-h-0 flex-col overflow-auto p-3`}>
           <LibGroup title="Straps">{libItem("strap")}</LibGroup>
@@ -301,9 +301,9 @@ export function VisualsBuilder() {
           </>)}
         </section>
 
-        {/* Inspector */}
-        <aside data-testid="vb-inspector" inert={liveView} aria-disabled={liveView || undefined} className={`${panel} min-h-0 overflow-auto p-4 ${liveView ? "opacity-40" : ""}`}>
-          {liveView ? <p data-testid="vb-live-hint" className="mb-3 rounded-[10px] border border-[#FF6A00]/40 bg-[#FF6A00]/10 p-2 font-mono text-[11px] text-[#FFB27A]">Live shows /stream as it is on air. Editing is off here: pick Countdown or Program to edit the layout.</p> : null}
+        {/* Inspector — hidden on Live (multiview needs the space); fully present on Countdown / Program */}
+        {!liveView ? (
+        <aside data-testid="vb-inspector" className={`${panel} min-h-0 overflow-auto p-4`}>
           {sel.kind === "strap" ? (() => {
             const s = straps.find((x) => x.id === sel.id)
             if (!s) return <p className="text-sm text-white/50">Pick a speaker.</p>
@@ -469,6 +469,7 @@ export function VisualsBuilder() {
             )
           })()}
         </aside>
+        ) : null}
       </div>
     </main>
   )
