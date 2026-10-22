@@ -7,8 +7,8 @@ import { wallTimeInZone } from "@/lib/countdown"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import type { FailoverEvent, FailoverSettings, ReturnStatus, SourceHealth } from "@/lib/program-source"
 import type { InputReadout } from "@/lib/input-state"
-import { stageScreen, testClockStale, type StageOptions } from "@/lib/stage"
-import { isScene, LOGO_IDS, SCENE_IDS, type LogoId, type SceneId } from "@/lib/visuals-assets"
+import { CARD_OVERLAYS, isCardOverlay, stageScreen, testClockStale, type CardOverlay, type StageOptions } from "@/lib/stage"
+import { LOGO_IDS, type LogoId, type SceneId } from "@/lib/visuals-assets"
 import { clampHold, CORNERS, parseTalkTimer, sanitizeTickerItems, talkAdjust, talkPause, talkResume, talkStart, TALK_MAX_SEC, TALK_MODES, TALK_STOPPED, TICKER_TYPES, visualText, type TalkMode, type TickerType, STRAP_MODES, STRAP_MOTIONS, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export const JUMPS = [
@@ -19,9 +19,9 @@ export const JUMPS = [
 ] as const
 
 export type Screen = "break" | "hold" | "welcome" | SceneId | "program" | "end" | "countdown"
-export const SCREENS: readonly Screen[] = ["countdown", "break", "hold", "welcome", ...SCENE_IDS, "program", "end"]
+export const SCREENS: readonly Screen[] = ["countdown", ...CARD_OVERLAYS, "program", "end"]
 /** Full-screen cards (they cover program): break / hold / welcome and the extra scene cards. */
-export const isCard = (s: unknown): s is "break" | "hold" | "welcome" | SceneId => s === "break" || s === "hold" || s === "welcome" || isScene(s)
+export const isCard = (s: unknown): s is CardOverlay => isCardOverlay(s)
 
 export type TransportAction =
   | { type: "jump"; seconds: number }
@@ -115,8 +115,9 @@ export type TransportState = {
   stage: StageOptions
 }
 
-/** Actions that touch /stream in a way that's hard to undo: the deck asks for a second tap. */
-export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "screen:end", "screen:program", "screen:countdown", "screen:break", "screen:hold", "screen:welcome"])
+/** Actions that touch /stream in a way that's hard to undo: the deck asks for a second tap.
+ * Every screen/card switch (scene cards and back to LIVE too), on every device, live or not. */
+export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", ...SCREENS.map((s) => `screen:${s}` as const)])
 export function isRisky(action: TransportAction): boolean {
   return RISKY.has(action.type) || (action.type === "screen" && RISKY.has(`screen:${action.screen}`))
 }

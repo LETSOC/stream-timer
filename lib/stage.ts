@@ -3,7 +3,7 @@
  * so both always agree on defaults and ranges. Pure: safe to import from client components.
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
-import { DEFAULT_LOGOS, DEFAULT_QR, DEFAULT_SCENES, isScene, parseLogoIds, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
+import { DEFAULT_LOGOS, DEFAULT_QR, DEFAULT_SCENES, SCENE_IDS, parseLogoIds, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_LAYOUT, parseVisualsLayout, type VisualsLayout } from "@/lib/visuals-layout"
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
 import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
@@ -132,7 +132,14 @@ export type StageOptions = {
 }
 
 export type ImageFit = "cover" | "contain"
-export type Overlay = "none" | "break" | "hold" | "welcome" | SceneId
+/** Card overlays (single source of truth): the classic cards plus every scene card. Used by the stage
+ * parser, the transport screens and the desk, so a new card can't be dropped back to "none" anywhere. */
+export const CARD_OVERLAYS = ["break", "hold", "welcome", ...SCENE_IDS] as const
+export type CardOverlay = (typeof CARD_OVERLAYS)[number]
+export type Overlay = "none" | CardOverlay
+export const OVERLAYS: readonly Overlay[] = ["none", ...CARD_OVERLAYS]
+export const isCardOverlay = (v: unknown): v is CardOverlay => (CARD_OVERLAYS as readonly unknown[]).includes(v)
+export const isOverlay = (v: unknown): v is Overlay => v === "none" || isCardOverlay(v)
 
 export const DEFAULT_STAGE: StageOptions = {
   checker: 6,
@@ -376,7 +383,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     welcomeImage: pick("welcomeImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
     welcomeFit: pick("welcomeFit", (v) => (v === "contain" ? "contain" : "cover")),
     deskLive: pick("deskLive", (v) => v === true),
-    overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" || isScene(v) ? v : "none")),
+    overlay: pick("overlay", (v) => (isOverlay(v) ? v : "none")),
     program: pick("program", (v) => v === true),
     programSource: pick("programSource", (v) => (v === "backup" ? "backup" : "main")),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),

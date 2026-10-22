@@ -44,13 +44,14 @@ import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
-import { DEFAULT_STAGE, localClock, parseStage, serverClock, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { DEFAULT_STAGE, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
+import { SCENE_IDS, type SceneId } from "@/lib/visuals-assets"
 import { VisualsDeskSection } from "@/components/visuals-desk"
 import { VerticalCard } from "@/components/vertical-output"
 import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
@@ -348,7 +349,8 @@ export function OperatorConsole() {
     if (typeof stage.welcomeMessage === "string") setWelcomeMessage(stage.welcomeMessage)
     if (typeof stage.welcomeImage === "string") setWelcomeImage(stage.welcomeImage)
     if (stage.welcomeFit === "cover" || stage.welcomeFit === "contain") setWelcomeFit(stage.welcomeFit)
-    if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
+    // Every card (scene cards too): an unknown value here used to keep "none" and the next desk save took the card down.
+    if (isOverlay(stage.overlay)) setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
     if (typeof stage.program === "boolean") setProgram(stage.program)
     if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
@@ -1042,6 +1044,8 @@ export function OperatorConsole() {
               <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
               <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
               <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
+              {/* Scene cards (builder › Scenes): two clicks, like every card. */}
+              {SCENE_IDS.map((id) => <ConfirmButton key={id} data-testid={`show-${id}`} className={`${pillClass(overlay === id ? "solid" : "outline")} whitespace-nowrap`} confirmLabel={`Show ${SCENE_DESK_LABEL[id]} · confirm`} onConfirm={() => showScreen(id)}>{overlay === id ? `● ${SCENE_DESK_LABEL[id]} on` : `Show ${SCENE_DESK_LABEL[id]}`}</ConfirmButton>)}
               <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
             </div>
@@ -2571,6 +2575,7 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   )
 }
 
+const SCENE_DESK_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", standby: "Standby", showreel: "Showreel" }
 const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
