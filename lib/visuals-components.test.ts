@@ -221,3 +221,26 @@ test("ticker: Planner and Social keep separate lists; legacy single list migrate
   const ds = deckState({ ...state(st), rev: 1, testSetAt: null }, T0)
   assert.deepEqual([ds.visuals?.tickerPlannerItems, ds.visuals?.tickerSocialItems], [["p1"], ["s1", "s2"]])
 })
+
+test("scene cards survive the stage parser + desk reconcile (regression: new cards reverted to LIVE)", async () => {
+  const { CARD_OVERLAYS, OVERLAYS, isOverlay } = await import("@/lib/stage")
+  const { SCENE_IDS } = await import("@/lib/visuals-assets")
+  for (const id of [...SCENE_IDS, "break", "hold", "welcome"]) {
+    assert.ok(isOverlay(id) && CARD_OVERLAYS.includes(id as never), id)
+    // what the desk re-saves after reading the stage must keep the card up
+    assert.equal(parseStage(parseStage({ overlay: id })).overlay, id)
+    assert.ok(SCREENS.includes(id as never))
+  }
+  assert.equal(parseStage({ overlay: "bogus" }).overlay, "none")
+  assert.deepEqual(OVERLAYS, ["none", ...CARD_OVERLAYS])
+  // the desk's load must accept every card (it used to whitelist only break/hold/welcome)
+  const src = fs.readFileSync(path.join(process.cwd(), "components/operator-console.tsx"), "utf8")
+  assert.match(src, /if \(isOverlay\(stage\.overlay\)\) setOverlay\(stage\.overlay\)/)
+})
+
+test("two-tap: every screen/card switch is risky, on any device, live or not", async () => {
+  const { isRisky } = await import("@/lib/transport")
+  for (const s of SCREENS) assert.ok(isRisky({ type: "screen", screen: s }), s)
+  const deck = fs.readFileSync(path.join(process.cwd(), "components/visuals-deck.tsx"), "utf8")
+  assert.doesNotMatch(deck, /scr === "program" && target !== "program"/)
+})

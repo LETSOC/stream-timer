@@ -134,12 +134,8 @@ export function VisualsDeck() {
           {SCENE_BUTTONS.map(([target, label]) => {
             const active = scr === target
             const cls = `${active ? SEL : target === "program" ? GO : PLAIN} min-h-11 px-1 text-[13px]`
-            // Full-screen card over a live program feed: two taps.
-            return scr === "program" && target !== "program" && !active ? (
-              <ConfirmButton key={target} data-testid={`vd-scene-${target}`} disabled={off} confirmLabel="Tap again" className={cls} onConfirm={() => void act({ type: "screen", screen: target })}>{label}</ConfirmButton>
-            ) : (
-              <button key={target} type="button" data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} onClick={() => void act({ type: "screen", screen: target })} className={cls}>{label}</button>
-            )
+            // Every scene/card switch (LIVE too) takes two taps, on phone and desktop, program live or not.
+            return <ConfirmButton key={target} data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} confirmLabel="Tap again" className={cls} onConfirm={() => void act({ type: "screen", screen: target })}>{label}</ConfirmButton>
           })}
         </div>
         <p className="mt-2 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes.</p>
