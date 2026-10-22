@@ -3,6 +3,7 @@
  * so both always agree on defaults and ranges. Pure: safe to import from client components.
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
+import { DEFAULT_LAYOUT, parseVisualsLayout, type VisualsLayout } from "@/lib/visuals-layout"
 import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
 import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
@@ -55,6 +56,8 @@ export type StageOptions = {
   sponsorText: string
   /** Extra px @1080p in from the safe-zone line for straps, socials and timecode badges (0 = edge on the line). */
   overlayInset: number
+  /** Builder › Save: per-part corner / snap / gap / size, separately for the countdown screen and program. */
+  visualsLayout: VisualsLayout
   /** A/V diagnostics: labelled STREAM wall-clock timecode on /stream (TC2), live switch, default off. */
   streamTimecode: boolean
   streamTimecodeFps: number
@@ -139,6 +142,7 @@ export const DEFAULT_STAGE: StageOptions = {
   socialsOverlay: false,
   socialsCorner: "bottom-left",
   overlayInset: 0,
+  visualsLayout: DEFAULT_LAYOUT,
   streamVisuals: true,
   talkVisible: false,
   talkMode: "session",
@@ -267,6 +271,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     socialsOverlay: pick("socialsOverlay", (v) => v === true),
     socialsCorner: pick("socialsCorner", (v) => parseCorner(v)),
     overlayInset: pick("overlayInset", (v, f) => clampInset(v, f)),
+    visualsLayout: pick("visualsLayout", (v) => parseVisualsLayout(v)),
     streamVisuals: pick("streamVisuals", (v) => v !== false),
     talkVisible: pick("talkVisible", (v) => v === true),
     talkMode: pick("talkMode", (v) => parseTalkMode(v)),

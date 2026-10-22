@@ -44,7 +44,7 @@ export type TransportAction =
   /** A/V diagnostics: STREAM timecode on /stream (diagnostic only). */
   | { type: "timecode"; show?: boolean; fps?: number }
   /** Visuals layer: talk-ends pill (timer start/add/pause/resume/stop, Session/Festival), ticker, Q&A, Sponsored, and the /stream master switch. Applied at once. */
-  | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string }
+  | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string; talkPrefix?: string; festivalPrefix?: string }
 
 export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream", "clear"] as const
 export type VisualTarget = (typeof VISUAL_TARGETS)[number]
@@ -209,6 +209,9 @@ export function parseAction(value: unknown): TransportAction | null {
         if ((out.op === "start" || out.op === "add") && out.sec === undefined) return null
         if (TALK_MODES.includes(v.mode as TalkMode)) out.mode = v.mode as TalkMode
         if (typeof v.prefix === "string") out.prefix = v.prefix
+        // Separate fields (builder): set either prefix without touching the mode.
+        if (typeof v.talkPrefix === "string") out.talkPrefix = v.talkPrefix
+        if (typeof v.festivalPrefix === "string") out.festivalPrefix = v.festivalPrefix
       }
       if (out.target === "ticker") {
         if (TICKER_TYPES.includes(v.tickerType as TickerType)) out.tickerType = v.tickerType as TickerType
@@ -352,6 +355,8 @@ export type DeckState = {
     talkMode?: TalkMode
     talkEndsAt?: number | null
     talkPausedMs?: number | null
+    talkPrefix?: string
+    festivalPrefix?: string
     tickerVisible?: boolean
     tickerType?: TickerType
     tickerCount?: number
@@ -408,6 +413,8 @@ export function deckState(
       talkMode: state.stage.talkMode ?? "session",
       talkEndsAt: state.stage.talkEndsAt ?? null,
       talkPausedMs: state.stage.talkPausedMs ?? null,
+      talkPrefix: state.stage.talkPrefix ?? "",
+      festivalPrefix: state.stage.festivalPrefix ?? "",
       tickerVisible: state.stage.tickerVisible === true,
       tickerType: state.stage.tickerType ?? "planner",
       tickerCount: state.stage.tickerItems?.length ?? 0,
@@ -446,6 +453,10 @@ export function visualPatch(stage: StageOptions, action: Extract<TransportAction
       if (action.prefix !== undefined) {
         const t = visualText(action.prefix, "")
         if (t) patch[(action.mode ?? stage.talkMode) === "festival" ? "festivalPrefix" : "talkPrefix"] = t
+      }
+      for (const key of ["talkPrefix", "festivalPrefix"] as const) {
+        const t = action[key] === undefined ? "" : visualText(action[key], "")
+        if (t) patch[key] = t
       }
       const cur = parseTalkTimer(stage.talkEndsAt, stage.talkPausedMs)
       const t = action.op === "start" ? talkStart(action.sec ?? 0, now)
