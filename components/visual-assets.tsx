@@ -1,0 +1,87 @@
+"use client"
+
+/* eslint-disable @next/next/no-img-element -- OBS output: plain <img> for data: SVG and uploads */
+/**
+ * Visuals assets drawn on /stream, /overlay/visuals and the builder preview (1920x1080 in px × --px):
+ * logos 1–5, QR (animated / Logo QR) and the extra full-screen scene cards. No HTML injection:
+ * logos are <img> (data: SVG or /uploads/*), QR codes are React SVG from real qrcode modules.
+ */
+import type { CSSProperties } from "react"
+import { LOGO_BASE, logoSrc, QR_BASE_PX, qrBadgeBox, qrMatrix, qrRingCell, type LogoConfig, type LogoId, type QrConfig, type SceneCard } from "@/lib/visuals-assets"
+
+const px = (n: number) => `calc(${n} * var(--px))`
+
+export function LogoMark({ id, cfg, show }: { id: LogoId; cfg: LogoConfig; show: boolean }) {
+  const src = logoSrc(id, cfg)
+  const base = LOGO_BASE[id]
+  return (
+    <div data-testid={`vl-${id}`} data-on={show && src ? "1" : "0"} data-source={cfg.source} className={`vl-logo ${show && src ? "vl-on" : "vl-off"}`} style={{ width: px(base.w) }}>
+      {src ? <img src={src} alt="" draggable={false} style={{ display: "block", width: "100%", height: id === "logo5" ? "auto" : px(base.h), objectFit: "contain" }} /> : null}
+      {cfg.text ? <span className="vl-logo-text">{cfg.text}</span> : null}
+    </div>
+  )
+}
+
+/**
+ * Real, scannable QR on white (quiet zone 2 modules). `animated`: one accent cell steps around the
+ * quiet-zone ring every second (never over a module) and the code reveals in on show. `logo`: ECC H
+ * with a centre badge (≈26% side) in the badge colour.
+ */
+export function QrMark({ cfg, variant, show, now, testId }: { cfg: QrConfig; variant: "animated" | "logo"; show: boolean; now: number | null; testId: string }) {
+  const m = qrMatrix(cfg.url, variant === "logo" ? "H" : "M")
+  const q = 2
+  const n = m ? m.size + q * 2 : 1
+  let d = ""
+  if (m) for (let y = 0; y < m.size; y++) for (let x = 0; x < m.size; x++) if (m.dark[y * m.size + x]) d += `M${x + q} ${y + q}h1v1h-1z`
+  const badge = m && variant === "logo" ? qrBadgeBox(m.size) : null
+  const ring = m && variant === "animated" && now !== null ? qrRingCell(m.size, Math.floor(now / 1000)) : null
+  const on = show && Boolean(m)
+  return (
+    <div data-testid={testId} data-on={on ? "1" : "0"} data-variant={variant} data-modules={m?.size ?? 0} className={`vl-qr vl-qr-${variant} ${on ? "vl-on" : "vl-off"}`} style={{ width: px(QR_BASE_PX) }}>
+      {m ? (
+        <svg viewBox={`0 0 ${n} ${n}`} shapeRendering="crispEdges" role="img" aria-label={`QR code: ${cfg.url}`} style={{ display: "block", width: "100%", height: "auto", borderRadius: px(4) }}>
+          <rect width={n} height={n} fill="#ffffff" />
+          <path d={d} fill={cfg.color} />
+          {ring ? <rect data-testid={`${testId}-step`} x={ring.x + q} y={ring.y + q} width={1} height={1} fill={cfg.accent} /> : null}
+          {badge ? (
+            <g data-testid={`${testId}-badge`}>
+              <rect x={badge.x + q} y={badge.y + q} width={badge.w} height={badge.w} rx={0.4} fill={cfg.badgeColor} />
+              {cfg.badgeText ? <text x={badge.x + q + badge.w / 2} y={badge.y + q + badge.w / 2} textAnchor="middle" dominantBaseline="central" fill="#ffffff" fontWeight={700} fontSize={badge.w * 0.5} fontFamily="Instrument Sans, Arial, sans-serif">{cfg.badgeText}</text> : null}
+            </g>
+          ) : null}
+        </svg>
+      ) : null}
+      {variant === "animated" && (cfg.caption || cfg.caption2) ? (
+        <span className="vl-qr-caption">{cfg.caption}{cfg.caption2 ? <><br />{cfg.caption2}</> : null}</span>
+      ) : null}
+    </div>
+  )
+}
+
+/** Full-screen scene card from the design (HOLD 05/06/07, STANDBY, SHOWREEL): pill + title + subline + dots. */
+export function SceneCardView({ id, card, qr, now, className = "" }: { id: string; card: SceneCard; qr?: QrConfig; now?: number | null; className?: string }) {
+  const image = card.bgMode !== "solid" && card.image ? card.image : ""
+  const bg: CSSProperties = {
+    backgroundColor: card.bg,
+    backgroundImage: card.bgMode === "image" && image ? `url("${image}")` : card.gradient ? "linear-gradient(135deg,#2a1a1a 0%,#1a1a2a 100%)" : "none",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+  }
+  return (
+    <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
+      <div className="visuals-layer" style={{ pointerEvents: "none" }}>
+        {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
+        <div className="scene-pill"><span className="scene-dot" style={{ background: card.dot }} /><span>{card.pill}</span></div>
+        <div className="scene-center">
+          {card.bgMode === "hero" && image ? <img src={image} alt="" draggable={false} className="scene-hero" /> : null}
+          <div data-testid="scene-title" className="scene-title">{card.label}</div>
+          {card.sub ? <div className="scene-sub">{card.sub}</div> : null}
+          <div className="scene-dots"><i /><i /><i /></div>
+        </div>
+        {card.showQr && qr?.url ? (
+          <div className="scene-qr"><QrMark cfg={qr} variant="animated" show now={now ?? null} testId="scene-qr" /></div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
