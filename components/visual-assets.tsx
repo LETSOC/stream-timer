@@ -108,7 +108,8 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   }, [video, wantSound])
   useShowreelTap(videoRef, video)
   const onEnded = () => {
-    if (!onAir || !card.autoSwitch || !video) return
+    // Browser capture only: viewers, the builder Live tab and desk previews start the video at other times and would cut early.
+    if (!onAir || !card.autoSwitch || !video || !isCapturePage()) return
     void fetch("/api/public/showreel-ended", { method: "POST" }).catch(() => undefined)
   }
   const bg: CSSProperties = {
