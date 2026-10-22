@@ -360,6 +360,7 @@ export function VisualsBuilder() {
                   {c.video ? <span className="truncate font-mono text-[10px] text-white/50">{c.video}</span> : <span className="font-mono text-[10px] text-white/40">No video</span>}
                   {c.video ? <button type="button" className={btn} onClick={() => setScene(id, { video: "" })}>Remove video</button> : null}
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-videofront" checked={c.videoFront} onChange={(e) => setScene(id, { videoFront: e.target.checked })} className="accent-[#D9FF43]" /> Video in front (above card text and QR)</label>
+                  <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-pausebed" checked={c.pauseBed} onChange={(e) => setScene(id, { pauseBed: e.target.checked })} className="accent-[#D9FF43]" /> Pause audio bed while the video plays</label>
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-autoswitch" checked={c.autoSwitch} onChange={(e) => setScene(id, { autoSwitch: e.target.checked })} className="accent-[#D9FF43]" /> Auto-switch to Program when the video ends</label>
                   <p className="font-mono text-[10px] text-white/45">Plays on the scene card with sound. In OBS, enable “Control audio via OBS” on the Browser Source. Auto-switch only fires on the real /stream output.</p>
                 </div>
