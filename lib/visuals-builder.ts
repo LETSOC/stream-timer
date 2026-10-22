@@ -106,3 +106,13 @@ export function previewStage(saved: Record<string, unknown>, live: Record<string
     qrLogoOn: true,
   }
 }
+
+/**
+ * Builder › Program preview: which relay input to play behind the overlays (the one on air, main or
+ * backup, same as /stream), or null for the placeholder (feed toggle off, or no program arriving).
+ */
+export function builderProgramFeed(state: { programSource?: "main" | "backup"; programReady?: boolean | null; programSources?: { main?: { ready?: boolean }; backup?: { ready?: boolean } } | null } | null, enabled: boolean): { path: string | null; source: "main" | "backup"; signal: boolean } {
+  const source = state?.programSource === "backup" ? "backup" : "main"
+  const signal = state?.programSources?.[source]?.ready ?? state?.programReady === true
+  return { path: enabled && signal ? (source === "backup" ? "program-backup" : "program") : null, source, signal }
+}

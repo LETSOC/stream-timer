@@ -120,3 +120,12 @@ test("deck state exposes both talk prefixes", () => {
   assert.equal(s.visuals?.talkPrefix, DEFAULT_STAGE.talkPrefix)
   assert.equal(s.visuals?.festivalPrefix, "F")
 })
+
+test("builder program feed: on-air input when signal, placeholder when off or no signal", async () => {
+  const { builderProgramFeed } = await import("@/lib/visuals-builder")
+  assert.deepEqual(builderProgramFeed({ programSource: "main", programReady: true }, true), { path: "program", source: "main", signal: true })
+  assert.deepEqual(builderProgramFeed({ programSource: "backup", programReady: true, programSources: { main: { ready: true }, backup: { ready: true } } }, true), { path: "program-backup", source: "backup", signal: true })
+  assert.deepEqual(builderProgramFeed({ programSource: "backup", programReady: true, programSources: { main: { ready: true }, backup: { ready: false } } }, true), { path: null, source: "backup", signal: false })
+  assert.equal(builderProgramFeed({ programSource: "main", programReady: true }, false).path, null)
+  assert.deepEqual(builderProgramFeed(null, true), { path: null, source: "main", signal: false })
+})

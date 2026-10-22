@@ -18,7 +18,8 @@ import { endInstant, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import { CORNER_LABEL, CORNERS, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
-import { addStrap, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
+import { addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
+import { StreamPlayer } from "@/components/stream-player"
 
 type Sel = { kind: "part"; part: LayoutPart | "ticker" } | { kind: "strap"; id: string } | { kind: "scene"; id: SceneId }
 
@@ -85,6 +86,8 @@ export function VisualsBuilder() {
   const [guides, setGuides] = useState(true)
   const [showAll, setShowAll] = useState(true)
   /** Preview only: countdown-page parts hidden while placing overlays (never saved, /stream unaffected). */
+  // Program preview background: the live relay feed (default) or the light placeholder.
+  const [liveFeed, setLiveFeed] = useState(true)
   const [cdHide, setCdHide] = useState<Partial<Record<CountdownPart, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null)
@@ -106,6 +109,7 @@ export function VisualsBuilder() {
 
   const savedStage = useMemo(() => (loaded ? parseStage(loaded.stage) : null), [loaded])
   const live = state?.visuals
+  const feed = builderProgramFeed(state, screen === "program" && liveFeed)
   const liveFields = useMemo(() => (live ? Object.fromEntries(Object.entries(live).filter(([k]) => k !== "straps" && k !== "tickerCount")) : undefined), [live])
   const event = (loaded?.event ?? DEFAULT_EVENT) as EventConfig
   const stage = useMemo(() => (loaded && draft ? previewStage(loaded.stage, liveFields, draft, { showAll, strapId: sel.kind === "strap" ? sel.id : undefined, now, logo: sel.kind === "part" && (LOGO_IDS as readonly string[]).includes(sel.part) ? (sel.part as LogoId) : undefined }) : null), [loaded, draft, liveFields, showAll, sel, now])
@@ -247,16 +251,22 @@ export function VisualsBuilder() {
 
         {/* Preview */}
         <section className="flex min-h-0 flex-col gap-2">
-          <div data-testid="vb-preview" data-screen={screen} className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-[#1a1a1a]">
+          <div data-testid="vb-preview" data-screen={screen} className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-[#1a1a1a] [&_.visuals-layer]:pointer-events-none">
             {screen === "countdown" ? (
               <CountdownStage event={event} checker={stage.checker} showMeta={stage.showMeta} showLink={stage.showLink} lineSpacing={stage.lineSpacing} blockGap={stage.blockGap}
                 clockScale={stage.clockScale} clockText={stage.clockText} logoUrl={stage.logoUrl} speakers={stage.speakers} gallerySeconds={stage.gallerySeconds} galleryPause={stage.galleryPause}
                 galleryOffset={stage.galleryOffset} galleryScale={stage.galleryScale} social={socialLook(stage)} countdownStrokePx={stage.countdownStrokePx} countdownStrokeColor={stage.countdownStrokeColor}
                 hide={cdHide} className="absolute inset-0 h-full w-full" />
             ) : (
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,#3a3a44,#141414_70%)]">
-                <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-mono text-[11px] tracking-[0.3em] text-white/25 uppercase">Program feed</span>
-              </div>
+              // Live program behind the overlays: the desk's relay player (WebRTC, HLS fallback), on-air input, muted by default.
+              feed.path ? (
+                <div data-testid="vb-program-live" data-source={feed.source} className="absolute inset-0 bg-black"><StreamPlayer key={feed.path} src={`/api/relay/hls/${feed.path}/index.m3u8`} scope="builder-program" /></div>
+              ) : (
+                <div data-testid="vb-program-placeholder" className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,#3a3a44,#141414_70%)]">
+                  <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-mono text-[11px] tracking-[0.3em] text-white/25 uppercase">Program feed</span>
+                  {liveFeed && !feed.signal ? <span data-testid="vb-program-nosignal" className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[10px] tracking-[0.15em] text-[#FF6A00] uppercase">No program signal</span> : null}
+                </div>
+              )
             )}
             <VisualsLayer stage={stage} event={event} screen={screen} now={now} eventEndMs={eventEndMs} />
             {sel.kind === "scene" ? <SceneCardView id={sel.id} card={draft.scenes[sel.id]} qr={draft.qr} now={now} className="absolute inset-0 z-40 h-full" /> : null}
@@ -274,7 +284,14 @@ export function VisualsBuilder() {
               {COUNTDOWN_PARTS.map((part) => <button key={part} type="button" data-testid={`vb-cd-hide-${part}`} aria-pressed={Boolean(cdHide[part])} onClick={() => setCdHide({ ...cdHide, [part]: !cdHide[part] })} className={chip(Boolean(cdHide[part]))}>{COUNTDOWN_PART_LABEL[part]}</button>)}
               <button type="button" data-testid="vb-cd-hide-reset" onClick={() => setCdHide({})} className={btn}>Show page</button>
             </div>
-          ) : null}
+          ) : (
+            <div data-testid="vb-program-feed" className="flex flex-wrap items-center gap-1">
+              <span className={`${mono} mr-1`}>Program background</span>
+              <button type="button" data-testid="vb-feed-live" aria-pressed={liveFeed} onClick={() => setLiveFeed(true)} className={chip(liveFeed)}>Live feed ({feed.source})</button>
+              <button type="button" data-testid="vb-feed-placeholder" aria-pressed={!liveFeed} onClick={() => setLiveFeed(false)} className={chip(!liveFeed)}>Placeholder</button>
+              <span className="font-mono text-[10px] text-white/45">Muted; hover the picture for sound. Retries on its own when program arrives.</span>
+            </div>
+          )}
           <p className="font-mono text-[11px] text-white/45">1920×1080 scaled · {screen === "countdown" ? "Countdown screen" : "Program"} · {showAll ? "every part forced on in the preview only" : "showing what is on air now"} · <span className="text-[#C6FF00]">lime = safe 5%</span> · <span className="text-[#FF6A00]">orange = edge {EDGE_PX}px</span></p>
         </section>
 
