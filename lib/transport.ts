@@ -47,7 +47,7 @@ export type TransportAction =
   /** A/V diagnostics: STREAM timecode on /stream (diagnostic only). */
   | { type: "timecode"; show?: boolean; fps?: number }
   /** Visuals layer: talk-ends pill (timer start/add/pause/resume/stop, Session/Festival), ticker, Q&A, Sponsored, and the /stream master switch. Applied at once. */
-  | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string; talkPrefix?: string; festivalPrefix?: string; logo?: LogoId }
+  | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string; talkPrefix?: string; festivalPrefix?: string; logo?: LogoId; /** ticker: which list `items` replaces (default: the type now showing) */ list?: TickerType }
 
 export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream", "clear", "logo", "qr", "qrLogo"] as const
 export type VisualTarget = (typeof VISUAL_TARGETS)[number]
@@ -219,6 +219,7 @@ export function parseAction(value: unknown): TransportAction | null {
       if (out.target === "ticker") {
         if (TICKER_TYPES.includes(v.tickerType as TickerType)) out.tickerType = v.tickerType as TickerType
         if (Array.isArray(v.items) || typeof v.items === "string") out.items = sanitizeTickerItems(v.items)
+        if (TICKER_TYPES.includes(v.list as TickerType)) out.list = v.list as TickerType
       }
       if ((out.target === "qa" || out.target === "sponsor") && typeof v.text === "string") out.text = v.text
       if (out.target === "logo") {
@@ -368,6 +369,8 @@ export type DeckState = {
     tickerType?: TickerType
     tickerCount?: number
     tickerItems?: string[]
+    tickerPlannerItems?: string[]
+    tickerSocialItems?: string[]
     qaText?: string
     sponsorText?: string
     qaVisible?: boolean
@@ -429,6 +432,8 @@ export function deckState(
       tickerType: state.stage.tickerType ?? "planner",
       tickerCount: state.stage.tickerItems?.length ?? 0,
       tickerItems: state.stage.tickerItems ?? [],
+      tickerPlannerItems: state.stage.tickerPlannerItems ?? [],
+      tickerSocialItems: state.stage.tickerSocialItems ?? [],
       qaText: state.stage.qaText ?? "",
       sponsorText: state.stage.sponsorText ?? "",
       qaVisible: state.stage.qaVisible === true,
@@ -493,8 +498,14 @@ export function visualPatch(stage: StageOptions, action: Extract<TransportAction
       return show === undefined ? {} : { qrOn: show }
     case "qrLogo":
       return show === undefined ? {} : { qrLogoOn: show }
-    case "ticker":
-      return { ...(show === undefined ? {} : { tickerVisible: show }), ...(action.tickerType ? { tickerType: action.tickerType } : {}), ...(action.items ? { tickerItems: action.items } : {}) }
+    case "ticker": {
+      // Planner and Social keep their own lists; the bar shows the current type's list.
+      const type = action.tickerType ?? stage.tickerType
+      const list = action.list ?? type
+      const planner = action.items && list === "planner" ? action.items : stage.tickerPlannerItems ?? []
+      const social = action.items && list === "social" ? action.items : stage.tickerSocialItems ?? []
+      return { ...(show === undefined ? {} : { tickerVisible: show }), tickerType: type, tickerPlannerItems: planner, tickerSocialItems: social, tickerItems: type === "social" ? social : planner }
+    }
     case "qa":
     case "sponsor": {
       const key = action.target === "qa" ? ({ v: "qaVisible", t: "qaText" } as const) : ({ v: "sponsorVisible", t: "sponsorText" } as const)

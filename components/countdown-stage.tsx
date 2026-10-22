@@ -1,6 +1,6 @@
 "use client"
 
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { useEffect, useRef, useState } from "react"
 import {
   formatBannerDate,
@@ -21,7 +21,14 @@ import { imageReady, useImagesReady, waitForImage } from "@/lib/image-preload"
 import { QrImage } from "@/components/qr-image"
 import { SocialCircles, type SocialLook } from "@/components/social-circles"
 
+/** Countdown page parts the builder preview can hide (never used on /stream). */
+export const COUNTDOWN_PARTS = ["background", "badge", "title", "meta", "rsvp", "digits", "socials", "qr", "logo", "link", "gallery"] as const
+export type CountdownPart = (typeof COUNTDOWN_PARTS)[number]
+export const COUNTDOWN_PART_LABEL: Record<CountdownPart, string> = { background: "Background", badge: "LIVE COUNTDOWN line", title: "Event title", meta: "Date / time / venue", rsvp: "RSVP + QR", digits: "Countdown digits", socials: "Social icons", qr: "Rolling QR", logo: "Logo", link: "Events link", gallery: "Speaker gallery" }
+
 type CountdownStageProps = {
+  /** Builder preview only: parts to hide (kept in layout). */
+  hide?: Partial<Record<CountdownPart, boolean>>
   event: EventConfig
   className?: string
   checker?: number
@@ -46,7 +53,10 @@ type CountdownStageProps = {
   countdownStrokeColor?: string
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -86, galleryScale = 80, clock, social, countdownStrokePx = 2, countdownStrokeColor = "#ffffff" }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -86, galleryScale = 80, clock, social, countdownStrokePx = 2, countdownStrokeColor = "#ffffff", hide }: CountdownStageProps) {
+  // Builder preview only: hide distracting parts (layout kept, so overlays sit where they will on air).
+  const hid = (part: CountdownPart): CSSProperties | undefined => (hide?.[part] ? { visibility: "hidden" } : undefined)
+  const wrap = (part: CountdownPart, node: ReactNode) => (hide?.[part] ? <span data-cd-hidden={part} style={{ display: "contents", visibility: "hidden" }}>{node}</span> : node)
   const { name, date, time, endTime, timeZone, venue, rsvpUrl, badge, rsvpLabel, scanLabel, joinLabel, eventLink, eventLinkLabel, xUrl, facebookUrl, linkedinUrl, instagramUrl, youtubeUrl } = event
   const target = wallTimeInZone(date, time, timeZone)
   const valid = Number.isFinite(target.getTime())
@@ -71,14 +81,14 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
     >
       <div
         className={cn("pointer-events-none absolute inset-0", transparent ? "" : "stage-bg")}
-        style={transparent ? { background: "transparent" } : undefined}
+        style={transparent || hide?.background ? { background: hide?.background ? "#1a1a1a" : "transparent" } : undefined}
       />
       {live && !transparent ? <div className="live-wash pointer-events-none absolute inset-0" /> : null}
-      <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />
+      {wrap("qr", <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />)}
 
       <div data-testid="stage-content" className="relative z-10 h-full" style={{ padding: "var(--inset) var(--safe) var(--safe) var(--inset)", ...gate }}>
         <div className="flex min-w-0 max-w-[58%] flex-col justify-start">
-          <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]">
+          <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]" style={hid("badge")}>
             <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
               {live ? "LIVE" : badge}
             </span>
@@ -89,17 +99,17 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
               </div>
             ) : null}
           </div>
-          <h1 className="stage-h1 m-0 max-w-full text-white" style={{ lineHeight: lineSpacing }}>
+          <h1 className="stage-h1 m-0 max-w-full text-white" style={{ lineHeight: lineSpacing, ...hid("title") }}>
             {name.trim() || "Untitled event"}
           </h1>
 
-          <ul className="mt-[1.4cqi] m-0 flex list-none flex-col gap-[0.45cqi] p-0">
+          <ul className="mt-[1.4cqi] m-0 flex list-none flex-col gap-[0.45cqi] p-0" style={hid("meta")}>
             <MetaRow icon={<CalendarIcon />}>{now ? dateLabel : date}</MetaRow>
             <MetaRow icon={<ClockIcon />}>{timeLabel}</MetaRow>
             <MetaRow icon={<PinIcon />}>{venue}</MetaRow>
           </ul>
 
-          <div className="flex items-center gap-[1.4cqi]" style={{ marginTop: `${blockGap}cqi` }}>
+          <div className="flex items-center gap-[1.4cqi]" style={{ marginTop: `${blockGap}cqi`, ...hid("rsvp") }}>
             <a
               className="stage-rsvp inline-flex items-center justify-center text-white no-underline"
               style={{ backgroundColor: "#ff3c00", opacity: 1 }}
@@ -112,10 +122,10 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             <QrSlot label={scanLabel} url={safeUrl(rsvpUrl, "")} />
           </div>
 
-          <div className="mt-[1.6cqi]">
+          <div className="mt-[1.6cqi]" style={hid("digits")}>
             <ClockDisplay remaining={remaining} valid={valid} ready={Boolean(now)} scale={clockScale} textScale={clockText} />
           </div>
-          <SocialCircles
+          {wrap("socials", <SocialCircles
             className="mt-[1.5cqi]"
             look={social}
             links={[
@@ -125,7 +135,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
               { label: "Instagram", href: instagramUrl, icon: <InstagramIcon /> },
               { label: "YouTube", href: youtubeUrl, icon: <YouTubeIcon /> },
             ]}
-          />
+          />)}
         </div>
       </div>
       <div className="pointer-events-none absolute top-1/2 right-[6%] z-10 flex w-[34%] -translate-y-1/2 flex-col items-center" style={gate}>
@@ -133,9 +143,10 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           src={logoSrc}
           alt="hyphen. Cultures, communities, connections. Presented with Emerald."
           className="h-auto w-[90%] select-none"
+          style={hid("logo")}
           draggable={false}
         />
-        {showLink ? (
+        {showLink && !hide?.link ? (
           <a
             href={safeUrl(eventLink, "#")}
             target="_blank"
@@ -146,7 +157,7 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
           </a>
         ) : null}
       </div>
-      <SpeakerGallery speakers={speakers} seconds={gallerySeconds} pause={galleryPause} offset={galleryOffset} scale={galleryScale} active={Boolean(remaining && !remaining.done)} />
+      {hide?.gallery ? null : <SpeakerGallery speakers={speakers} seconds={gallerySeconds} pause={galleryPause} offset={galleryOffset} scale={galleryScale} active={Boolean(remaining && !remaining.done)} />}
     </div>
   )
 }

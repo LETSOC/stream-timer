@@ -217,10 +217,10 @@ export function VisualsDeck() {
       <Row title="Ticker" on={lights?.ticker ?? false} label={lights?.ticker ? "SHOWING" : v?.tickerVisible ? "NO ITEMS" : "HIDDEN"} testId="vd-ticker">
         {showHide(v?.tickerVisible ?? false, "ticker", "vd-ticker")}
         <div className="mt-2 grid grid-cols-2 gap-2">
-          {(["planner", "social"] as const).map((t) => <button key={t} type="button" data-testid={`vd-ticker-${t}`} disabled={off} aria-pressed={v?.tickerType === t} onClick={() => void visual({ target: "ticker", tickerType: t })} className={v?.tickerType === t ? SEL : PLAIN}>{t === "planner" ? "Planner" : "Social"}</button>)}
+          {(["planner", "social"] as const).map((t) => <button key={t} type="button" data-testid={`vd-ticker-${t}`} disabled={off} aria-pressed={v?.tickerType === t} onClick={() => { setTickerDraft(null); void visual({ target: "ticker", tickerType: t }) }} className={v?.tickerType === t ? SEL : PLAIN}>{t === "planner" ? `Planner (${v?.tickerPlannerItems?.length ?? 0})` : `Social (${v?.tickerSocialItems?.length ?? 0})`}</button>)}
         </div>
-        <textarea data-testid="vd-ticker-items" rows={4} placeholder="One item per line" value={tickerDraft ?? (v?.tickerItems ?? []).join("\n")} onChange={(e) => setTickerDraft(e.target.value)} className="mt-2 w-full rounded-[12px] border border-white/20 bg-black p-3 text-[15px] text-white" />
-        <button type="button" data-testid="vd-ticker-save" disabled={off || tickerDraft === null} onClick={() => tickerDraft !== null && void visual({ target: "ticker", items: sanitizeTickerItems(tickerDraft) }, "Ticker saved").then((ok) => ok && setTickerDraft(null))} className={`${PLAIN} mt-2 w-full`}>Save items</button>
+        <textarea data-testid="vd-ticker-items" data-list={v?.tickerType ?? "planner"} rows={4} placeholder={`${v?.tickerType === "social" ? "Social" : "Planner"} items, one per line`} value={tickerDraft ?? ((v?.tickerType === "social" ? v?.tickerSocialItems : v?.tickerPlannerItems) ?? v?.tickerItems ?? []).join("\n")} onChange={(e) => setTickerDraft(e.target.value)} className="mt-2 w-full rounded-[12px] border border-white/20 bg-black p-3 text-[15px] text-white" />
+        <button type="button" data-testid="vd-ticker-save" disabled={off || tickerDraft === null} onClick={() => tickerDraft !== null && void visual({ target: "ticker", items: sanitizeTickerItems(tickerDraft), list: v?.tickerType ?? "planner" }, "Ticker saved").then((ok) => ok && setTickerDraft(null))} className={`${PLAIN} mt-2 w-full`}>Save {v?.tickerType === "social" ? "Social" : "Planner"} items</button>
       </Row>
 
       <Row title="Q&A" on={lights?.qa ?? false} label={lights?.qa ? "SHOWING" : "HIDDEN"} testId="vd-qa">
