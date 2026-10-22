@@ -5,7 +5,7 @@
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { DEFAULT_LOGOS, DEFAULT_QR, DEFAULT_SCENES, SCENE_IDS, parseLogoIds, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_LAYOUT, parseVisualsLayout, type VisualsLayout } from "@/lib/visuals-layout"
-import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
+import { safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
 import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export type StageOptions = {
@@ -100,8 +100,8 @@ export type StageOptions = {
   endBody: string
   endQrUrl: string
   endButton: string
-  /** Optional HH:MM override for when the end card shows. Empty = use the event end time. */
-  endAt: string
+  /** End card adjustment: signed minutes from the planned Event › End time (−2 = 2 min early). 0 = as planned. */
+  endOffsetMin: number
   forceEnd: boolean
   holdCountdown: boolean
   /** Break / hold overlay cards. `overlay` is the live switch; it beats the end card and countdown. */
@@ -211,7 +211,7 @@ export const DEFAULT_STAGE: StageOptions = {
   endBody: "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.",
   endQrUrl: "https://linktr.ee/onlinehyphen",
   endButton: "Watch replay — coming soon",
-  endAt: "",
+  endOffsetMin: 0,
   forceEnd: false,
   holdCountdown: false,
   breakTitle: "We'll be right back",
@@ -263,12 +263,13 @@ function text(value: unknown, fallback: string, max = TEXT_MAX) {
   return typeof value === "string" && value.trim() ? value.slice(0, max) : fallback
 }
 
-/** "" (use event end) or a valid HH:MM; anything else falls back. */
-export function parseEndAt(value: unknown, fallback = ""): string {
-  if (typeof value !== "string") return fallback
-  const v = value.trim()
-  if (v === "") return ""
-  return isValidTime(v) ? v : fallback
+/** Max end adjustment either way (minutes). */
+export const END_OFFSET_MAX = 720
+/** Whole minutes in ±END_OFFSET_MAX (numeric strings accepted); anything else falls back. */
+export function parseEndOffset(value: unknown, fallback = 0): number {
+  const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value
+  if (typeof n !== "number" || !Number.isFinite(n)) return fallback
+  return Math.max(-END_OFFSET_MAX, Math.min(END_OFFSET_MAX, Math.round(n)))
 }
 
 /**
@@ -365,7 +366,8 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     endBody: pick("endBody", (v) => text(v, DEFAULT_STAGE.endBody, BODY_MAX)),
     endQrUrl: pick("endQrUrl", (v) => safeUrl(v, DEFAULT_STAGE.endQrUrl)),
     endButton: pick("endButton", (v) => text(v, DEFAULT_STAGE.endButton)),
-    endAt: pick("endAt", (v, f) => parseEndAt(v, f)),
+    // Old clock-time `endAt` (no date: could carry over to another day) is dropped, not converted.
+    endOffsetMin: pick("endOffsetMin", (v, f) => parseEndOffset(v, f)),
     forceEnd: pick("forceEnd", (v) => v === true),
     holdCountdown: pick("holdCountdown", (v) => v === true),
     breakTitle: pick("breakTitle", (v) => text(v, DEFAULT_STAGE.breakTitle)),
@@ -390,10 +392,6 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
   }
 }
 
-/** When the end card should show: the override if set, else the event's end time. */
-export function effectiveEndTime(stage: Pick<StageOptions, "endAt">, eventEndTime: string): string {
-  return stage.endAt || eventEndTime
-}
 
 // ---------- test clock ----------
 
@@ -413,14 +411,15 @@ export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[
  * What /stream shows, in order of precedence:
  * break/hold/welcome overlay  >  forced end / due end-card override  >  OBS program feed  >  end card (past Event › End time unless held)  >  countdown.
  *
- * End card override (ported from agent-forge): when an override time (`endAt`, e.g. deck "End in 2m") is due, or End is
+ * End card override (ported from agent-forge): when an adjusted end (`endOffsetMin` ≠ 0, e.g. deck −1/+5) is due, or End is
  * forced, the end card cuts over Program. The plain Event › End time does NOT pre-empt Program (a running show is never
  * cut by the schedule alone). After it fires, tap Program or Countdown to stay past the end: that sets holdCountdown.
  */
-export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endAt?: string }, pastEnd: boolean): "break" | "hold" | "welcome" | SceneId | "program" | "end" | "countdown" {
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endOffsetMin?: number }, pastEnd: boolean): "break" | "hold" | "welcome" | SceneId | "program" | "end" | "countdown" {
   if (stage.overlay !== "none") return stage.overlay
   if (stage.forceEnd) return "end"
-  if (stage.endAt && pastEnd && !stage.holdCountdown) return "end"
+  // An adjusted end (offset ≠ 0) is an operator decision: when due it cuts over Program, as the old override did.
+  if (stage.endOffsetMin && pastEnd && !stage.holdCountdown) return "end"
   if (stage.program) return "program"
   if (!stage.holdCountdown && pastEnd) return "end"
   return "countdown"

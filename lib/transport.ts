@@ -7,7 +7,7 @@ import { wallTimeInZone } from "@/lib/countdown"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import type { FailoverEvent, FailoverSettings, ReturnStatus, SourceHealth } from "@/lib/program-source"
 import type { InputReadout } from "@/lib/input-state"
-import { CARD_OVERLAYS, isCardOverlay, stageScreen, testClockStale, type CardOverlay, type StageOptions } from "@/lib/stage"
+import { CARD_OVERLAYS, END_OFFSET_MAX, isCardOverlay, stageScreen, testClockStale, type CardOverlay, type StageOptions } from "@/lib/stage"
 import { LOGO_IDS, type LogoId, type SceneId } from "@/lib/visuals-assets"
 import { clampHold, CORNERS, parseTalkTimer, sanitizeTickerItems, talkAdjust, talkPause, talkResume, talkStart, TALK_MAX_SEC, TALK_MODES, TALK_STOPPED, TICKER_TYPES, visualText, type TalkMode, type TickerType, STRAP_MODES, STRAP_MOTIONS, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
@@ -32,10 +32,13 @@ export type TransportAction =
   | { type: "restore" }
   | { type: "screen"; screen: Screen }
   | { type: "mode"; live: boolean }
-  /** Quick action: push the end time later. Extends the end card override if one is set, else Event › End time. */
+  /** Quick action: move the planned Event › End time. */
   | { type: "extendEnd"; minutes: number }
-  /** Undo for extendEnd: put both end times back exactly as they were. */
-  | { type: "setEnd"; endTime: string; endAt: string }
+  /** End card adjustment from the planned end: step by ±minutes (deck −5/−1/+1/+5), or clear back to planned. Two taps. */
+  | { type: "endOffset"; minutes: number }
+  | { type: "endOffset"; clear: true }
+  /** Undo: put the planned end and the adjustment back exactly as they were. */
+  | { type: "setEnd"; endTime: string; endOffsetMin: number }
   /** Program feed input: Main (OBS) or Backup. Doesn't change the screen. */
   | { type: "programSource"; source: "main" | "backup" }
   /** /stream in-page audio routing: raw program audio and/or the bed (applied at once, synced). */
@@ -92,8 +95,9 @@ export function endInstant(date: string, start: string, end: string, timeZone: s
  * Shortening must not put the end before the start or before now (the shown clock, incl. test clock);
  * end times before the start roll to the next day (endInstant), so 00:05 − 10 = 23:55 works.
  */
-export function endGuard(state: Pick<TransportState, "event" | "testUntil" | "pausedAt">, to: string, now: number): string | null {
-  const end = endInstant(state.event.date, state.event.time, to, state.event.timeZone).getTime()
+export function endGuard(state: Pick<TransportState, "event" | "testUntil" | "pausedAt">, to: string, now: number, offsetMin = 0): string | null {
+  const end = endInstant(state.event.date, state.event.time, to, state.event.timeZone).getTime() + offsetMin * 60_000
+  if (offsetMin) to = hhmmAt(end, state.event.timeZone)
   const start = eventTarget(state.event).getTime()
   if (!Number.isFinite(end)) return "The end time is not valid."
   if (Number.isFinite(start) && end <= start) return `Can't end at ${to}: that's before the start (${state.event.time}).`
@@ -102,10 +106,36 @@ export function endGuard(state: Pick<TransportState, "event" | "testUntil" | "pa
 }
 
 /** Where extendEnd writes, and the time it lands on. */
-export function extendTarget(endTime: string, endAt: string, minutes: number): { field: "endAt" | "endTime"; from: string; to: string } {
-  const field = endAt ? "endAt" : "endTime"
-  const from = endAt || endTime
-  return { field, from, to: addMinutes(from, minutes) }
+export function extendTarget(endTime: string, minutes: number): { field: "endTime"; from: string; to: string } {
+  return { field: "endTime", from: endTime, to: addMinutes(endTime, minutes) }
+}
+
+/** Deck steps for the end card adjustment (minutes). */
+export const END_STEPS = [-5, -1, 1, 5] as const
+
+/** When the end card shows: planned Event › End time on the event date, plus the signed adjustment. */
+export function endCardAt(date: string, start: string, endTime: string, timeZone: string, offsetMin = 0): number {
+  return endInstant(date, start, endTime, timeZone).getTime() + (offsetMin || 0) * 60_000
+}
+
+/** "−2m" / "+10m" / "" (as planned). */
+export function formatOffset(min: number): string {
+  if (!min) return ""
+  return `${min < 0 ? "−" : "+"}${Math.abs(min)}m`
+}
+
+/** HH:MM of an instant in the event zone. */
+export function hhmmAt(ms: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: timeZone || "UTC", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(ms))
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00"
+  return `${get("hour")}:${get("minute")}`
+}
+
+/** "Ends 16:13 (−2m)" or "Ends 16:15" (planned). */
+export function endsLabel(date: string, start: string, endTime: string, timeZone: string, offsetMin: number): string {
+  const at = endCardAt(date, start, endTime, timeZone, offsetMin)
+  if (!Number.isFinite(at)) return `Ends ${endTime}`
+  return `Ends ${hhmmAt(at, timeZone)}${offsetMin ? ` (${formatOffset(offsetMin)})` : ""}`
 }
 
 export type TransportState = {
@@ -117,7 +147,7 @@ export type TransportState = {
 
 /** Actions that touch /stream in a way that's hard to undo: the deck asks for a second tap.
  * Every screen/card switch (scene cards and back to LIVE too), on every device, live or not. */
-export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", ...SCREENS.map((s) => `screen:${s}` as const)])
+export const RISKY: ReadonlySet<TransportAction["type"] | `screen:${Screen}`> = new Set(["goLive", "reset", "restore", "endOffset", ...SCREENS.map((s) => `screen:${s}` as const)])
 export function isRisky(action: TransportAction): boolean {
   return RISKY.has(action.type) || (action.type === "screen" && RISKY.has(`screen:${action.screen}`))
 }
@@ -178,9 +208,12 @@ export function parseAction(value: unknown): TransportAction | null {
     case "extendEnd":
       return EXTENDS.includes(v.minutes as (typeof EXTENDS)[number]) ? { type: "extendEnd", minutes: v.minutes as number } : null
     case "setEnd":
-      return typeof v.endTime === "string" && HHMM.test(v.endTime) && typeof v.endAt === "string" && (v.endAt === "" || HHMM.test(v.endAt))
-        ? { type: "setEnd", endTime: v.endTime, endAt: v.endAt }
+      return typeof v.endTime === "string" && HHMM.test(v.endTime) && typeof v.endOffsetMin === "number" && Number.isInteger(v.endOffsetMin) && Math.abs(v.endOffsetMin) <= END_OFFSET_MAX
+        ? { type: "setEnd", endTime: v.endTime, endOffsetMin: v.endOffsetMin }
         : null
+    case "endOffset":
+      if (v.clear === true) return { type: "endOffset", clear: true }
+      return END_STEPS.includes(v.minutes as (typeof END_STEPS)[number]) ? { type: "endOffset", minutes: v.minutes as number } : null
     case "programSource":
       return v.source === "main" || v.source === "backup" ? { type: "programSource", source: v.source } : null
     case "streamAudio": {
@@ -269,9 +302,9 @@ export function applyTransport(state: TransportState, action: TransportAction, n
     }
     case "reset":
       // An end card override set while a test clock ran is a test-time HH:MM: it must not stick into the real run.
-      return next({ testUntil: null, pausedAt: null }, testClockOn(state) ? { endAt: "" } : {})
+      return next({ testUntil: null, pausedAt: null }, testClockOn(state) ? { endOffsetMin: 0 } : {})
     case "restore":
-      return next({ event: { ...state.event, date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }, testUntil: null, pausedAt: null }, testClockOn(state) ? { endAt: "" } : {})
+      return next({ event: { ...state.event, date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }, testUntil: null, pausedAt: null }, testClockOn(state) ? { endOffsetMin: 0 } : {})
     case "screen": {
       const overlay = isCard(action.screen) ? action.screen : "none"
       const overlayAt = overlay === "none" ? null : overlay === state.stage.overlay ? state.stage.overlayAt ?? now : now
@@ -284,34 +317,35 @@ export function applyTransport(state: TransportState, action: TransportAction, n
     case "mode":
       return next({}, { deskLive: action.live })
     case "extendEnd": {
-      const from = state.stage.endAt || state.event.endTime
+      const from = state.event.endTime
       if (!HHMM.test(from)) return { ok: false, error: "The end time is not valid." }
-      const { field, to } = extendTarget(state.event.endTime, state.stage.endAt, action.minutes)
+      const { to } = extendTarget(from, action.minutes)
       // The end must move by exactly the minutes (else it wrapped past the start onto another day).
       const at = (t: string) => endInstant(state.event.date, state.event.time, t, state.event.timeZone).getTime()
       if (Math.abs(at(to) - at(from) - action.minutes * 60_000) > 60_000) return { ok: false, error: action.minutes < 0 ? `Can't end at ${to}: that's before the start (${state.event.time}).` : `Can't extend past ${to}: the end would be more than a day after the start.` }
-      const guard = endGuard(state, to, now)
+      const guard = endGuard(state, to, now, state.stage.endOffsetMin)
       if (guard) return { ok: false, error: guard }
       // forceEnd (operator chose "end") stays; otherwise the new end time decides countdown/LIVE vs end card.
       // A new end time is a decision about the end: an earlier "Countdown" hold must not keep the end card away.
-      return field === "endAt" ? next({}, { endAt: to, holdCountdown: false }) : next({ event: { ...state.event, endTime: to } }, { holdCountdown: false })
+      return next({ event: { ...state.event, endTime: to } }, { holdCountdown: false })
+    }
+    case "endOffset": {
+      const offset = "clear" in action ? 0 : state.stage.endOffsetMin + action.minutes
+      if (Math.abs(offset) > END_OFFSET_MAX) return { ok: false, error: `The end can move at most ${END_OFFSET_MAX / 60} h either way.` }
+      // Clearing (back to the planned end) is always allowed; a new adjustment must land after the doors and after now.
+      if (offset !== 0) {
+        const guard = endGuard(state, state.event.endTime, now, offset)
+        if (guard) return { ok: false, error: guard }
+      }
+      return next({}, { endOffsetMin: offset, holdCountdown: false })
     }
     case "programSource":
       return next({}, { programSource: action.source })
     case "streamAudio":
       return next({}, { ...(action.program === undefined ? {} : { streamProgramAudio: action.program }), ...(action.bed === undefined ? {} : { streamBedAudio: action.bed }) })
-    case "setEnd": {
-      // New override (End in 2m/5m): must land after the start and after now, else it rolls to the next day or
-      // sits before the doors. Undo back to an earlier value / clearing it is always allowed.
-      if (action.endAt && action.endAt !== state.stage.endAt) {
-        const start = eventTarget(state.event).getTime()
-        // Before the doors, an HH:MM earlier than the start means "tomorrow" (endInstant): that's never what End in Nm meant.
-        if (effectiveNow(state, now) < start && action.endAt < state.event.time) return { ok: false, error: `Can't end at ${action.endAt}: that's before the doors open (${state.event.time}).` }
-        const guard = endGuard(state, action.endAt, now)
-        if (guard) return { ok: false, error: guard }
-      }
-      return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt, holdCountdown: false })
-    }
+    case "setEnd":
+      // Undo: exactly as it was before (no guard).
+      return next({ event: { ...state.event, endTime: action.endTime } }, { endOffsetMin: action.endOffsetMin, holdCountdown: false })
     case "strap": {
       const id = action.id ?? state.stage.strapId
       if (action.mode && action.mode !== "out" && !state.stage.straps.some((p) => p.id === id)) return { ok: false, error: "Pick a saved strap first." }
@@ -359,7 +393,7 @@ export type DeckState = {
   overlayAt: number | null
   forceEnd: boolean
   holdCountdown: boolean
-  endAt: string
+  endOffsetMin: number
   /** Visuals deck: strap presets (text only) and the live overlay state. */
   visuals?: {
     straps: StrapPreset[]
@@ -423,7 +457,7 @@ export function deckState(
     overlayAt: state.stage.overlayAt,
     forceEnd: state.stage.forceEnd,
     holdCountdown: state.stage.holdCountdown,
-    endAt: state.stage.endAt,
+    endOffsetMin: state.stage.endOffsetMin,
     visuals: {
       straps: state.stage.straps ?? [],
       strapId: state.stage.strapId ?? "",
@@ -465,7 +499,7 @@ export function deckScreen(s: DeckState, now: number): Screen {
   const stale = s.testStale
   const clock = { event: { date: s.date, time: s.time, timeZone: s.timeZone } as EventConfig, testUntil: stale ? null : s.testUntil, pausedAt: stale ? null : s.pausedAt }
   const at = effectiveNow(clock, now)
-  const end = endInstant(s.date, s.time, s.endAt || s.endTime, s.timeZone).getTime()
+  const end = endCardAt(s.date, s.time, s.endTime, s.timeZone, s.endOffsetMin)
   return stageScreen(s, Number.isFinite(end) && end <= at)
 }
 
