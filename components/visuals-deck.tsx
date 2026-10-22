@@ -14,8 +14,8 @@ const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "
 
 /**
  * Phone deck for the Visuals layer (/stream + /overlay/*). One row per component with an on-air light;
- * every tap applies at once over the deck WebSocket. Strap presets are edited on the desk › Visuals
- * (builder at /visuals/builder comes later). Risky taps (layer OFF, Clear all) need two taps.
+ * every tap applies at once over the deck WebSocket. Strap presets and layout are edited in the
+ * builder (/visuals/builder) or the desk › Visuals. Risky taps (layer OFF, Clear all) need two taps.
  */
 const BTN = "min-h-12 rounded-[14px] px-2 text-[15px] font-black touch-manipulation disabled:opacity-35"
 const GO = `${BTN} bg-[#12b76a] text-black`
@@ -102,6 +102,7 @@ export function VisualsDeck() {
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]}`} />
           {LINK_LABEL[link]}
         </span>
+        <Link href="/visuals/builder" data-testid="visuals-builder-link" className="rounded-full border border-[#D9FF43]/60 px-3 py-1 font-mono text-[12px] text-[#D9FF43] no-underline">Builder</Link>
         <Link href="/deck" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Deck</Link>
         <Link href="/" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Desk</Link>
       </header>

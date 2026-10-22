@@ -48,7 +48,7 @@ export function VisualsDeskSection({ straps, accent, text, viewKey, onStraps, on
             <a href={`${o.path}?checker=1`} target="_blank" rel="noreferrer" className="rounded-full border border-black/30 px-3 py-1 text-black no-underline">Open</a>
           </div>
         ))}
-        <p className="font-mono text-[12px] text-black/70">Go IN / OUT / LOOP and show or hide the socials from the phone <Link href="/visuals" data-testid="desk-visuals-link" className="underline">Visuals deck</Link>.</p>
+        <p className="font-mono text-[12px] text-black/70">Go IN / OUT / LOOP and show or hide the socials from the phone <Link href="/visuals" data-testid="desk-visuals-link" className="underline">Visuals deck</Link>. Build speakers and layout in the <Link href="/visuals/builder" data-testid="desk-builder-link" className="underline">Visuals builder</Link>.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
