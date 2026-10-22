@@ -186,9 +186,11 @@ export function VisualsBuilder() {
   const setLogo = (id: LogoId, p: Partial<LogoConfig>) => setDraft({ ...draft, logos: { ...draft.logos, [id]: { ...draft.logos[id], ...p } } })
   const setQr = (p: Partial<QrConfig>) => setDraft({ ...draft, qr: { ...draft.qr, ...p } })
   const setScene = (id: SceneId, p: Partial<SceneCard>) => setDraft({ ...draft, scenes: { ...draft.scenes, [id]: { ...draft.scenes[id], ...p } } })
-  async function upload(file: File, kind: "logo" | "card"): Promise<string | null> {
-    if (file.size > 5_000_000) { setNote({ tone: "error", text: "File is over 5 MB." }); return null }
-    const res = await fetch(`/api/upload${kind === "logo" ? "?kind=logo" : ""}`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file })
+  async function upload(file: File, kind: "logo" | "card" | "video"): Promise<string | null> {
+    const limit = kind === "video" ? 100_000_000 : 5_000_000
+    if (file.size > limit) { setNote({ tone: "error", text: kind === "video" ? "Video is over 100 MB." : "File is over 5 MB." }); return null }
+    const q = kind === "logo" ? "?kind=logo" : kind === "video" ? "?kind=video" : ""
+    const res = await fetch(`/api/upload${q}`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file })
     const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
     if (!res.ok || !body.url) { setNote({ tone: "error", text: body.error ?? `Upload failed (${res.status})` }); return null }
     return body.url
@@ -352,6 +354,14 @@ export function VisualsBuilder() {
                 ) : null}
                 {c.bgMode === "image" ? <Slider label="Dim" testId="vb-scene-dim" unit="%" value={c.dim} range={{ min: 0, max: 90 }} onChange={(n) => setScene(id, { dim: n })} /> : null}
                 <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={c.showQr} onChange={(e) => setScene(id, { showQr: e.target.checked })} className="accent-[#D9FF43]" /> Animated QR bottom-right (QR link)</label>
+                                <div className="grid gap-2 rounded-[10px] border border-[#2a2a2a] p-2">
+                  <Label>Showreel video (local MP4, with audio)</Label>
+                  <input type="file" data-testid="vb-scene-video" accept="video/mp4" className="text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f, "video").then((url) => url && setScene(id, { video: url })) }} />
+                  {c.video ? <span className="truncate font-mono text-[10px] text-white/50">{c.video}</span> : <span className="font-mono text-[10px] text-white/40">No video</span>}
+                  {c.video ? <button type="button" className={btn} onClick={() => setScene(id, { video: "" })}>Remove video</button> : null}
+                  <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-autoswitch" checked={c.autoSwitch} onChange={(e) => setScene(id, { autoSwitch: e.target.checked })} className="accent-[#D9FF43]" /> Auto-switch to Program when the video ends</label>
+                  <p className="font-mono text-[10px] text-white/45">Plays on the scene card with sound. In OBS, enable “Control audio via OBS” on the Browser Source. Auto-switch only fires on the real /stream output.</p>
+                </div>
                 <p className="font-mono text-[10px] text-white/45">Applies on Save. Put it on air from the deck › Scenes (two taps while program is live).</p>
               </div>
             )

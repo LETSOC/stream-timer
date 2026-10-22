@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 /* eslint-disable @next/next/no-img-element -- OBS output: plain <img> for data: SVG and uploads */
 /**
  * Visuals assets drawn on /stream, /overlay/visuals and the builder preview (1920x1080 in px × --px):
@@ -59,16 +60,35 @@ export function QrMark({ cfg, variant, show, now, testId }: { cfg: QrConfig; var
 }
 
 /** Full-screen scene card from the design (HOLD 05/06/07, STANDBY, SHOWREEL): pill + title + subline + dots. */
-export function SceneCardView({ id, card, qr, now, className = "" }: { id: string; card: SceneCard; qr?: QrConfig; now?: number | null; className?: string }) {
+export function SceneCardView({ id, card, qr, now, className = "", onAir = false }: { id: string; card: SceneCard; qr?: QrConfig; now?: number | null; className?: string; /** Real /stream output: ended + autoSwitch cuts to Program. Preview stays quiet. */ onAir?: boolean }) {
   const image = card.bgMode !== "solid" && card.image ? card.image : ""
+  const video = card.video || ""
+  const videoRef = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el || !video) return
+    el.muted = false
+    void el.play().catch(() => {
+      // Autoplay with sound refused: start muted so the picture still runs, then try sound.
+      el.muted = true
+      void el.play().catch(() => undefined)
+    })
+  }, [video])
+  const onEnded = () => {
+    if (!onAir || !card.autoSwitch || !video) return
+    void fetch("/api/public/showreel-ended", { method: "POST" }).catch(() => undefined)
+  }
   const bg: CSSProperties = {
     backgroundColor: card.bg,
-    backgroundImage: card.bgMode === "image" && image ? `url("${image}")` : card.gradient ? "linear-gradient(135deg,#2a1a1a 0%,#1a1a2a 100%)" : "none",
+    backgroundImage: !video && card.bgMode === "image" && image ? `url("${image}")` : !video && card.gradient ? "linear-gradient(135deg,#2a1a1a 0%,#1a1a2a 100%)" : "none",
     backgroundSize: "cover",
     backgroundPosition: "center",
   }
   return (
     <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
+      {video ? (
+        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
+      ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none" }}>
         {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
         <div className="scene-pill"><span className="scene-dot" style={{ background: card.dot }} /><span>{card.pill}</span></div>

@@ -55,7 +55,7 @@ const line = (v: unknown, f = "") => (typeof v === "string" ? v.replace(/\s+/g, 
 
 /** Uploaded images only: our own /uploads/<hash>.<ext> (operator upload, data dir). */
 export function uploadPath(v: unknown): string {
-  return typeof v === "string" && /^\/uploads\/[a-f0-9]{32}\.(png|jpg|webp|gif|svg)$/.test(v) ? v : ""
+  return typeof v === "string" && /^\/uploads\/[a-f0-9]{32}\.(png|jpg|webp|gif|svg|mp4)$/.test(v) ? v : ""
 }
 
 /**
@@ -203,9 +203,9 @@ export type SceneId = (typeof SCENE_IDS)[number]
 export const SCENE_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", standby: "STANDBY", showreel: "SHOWREEL" }
 export const SCENE_BG_MODES = ["solid", "image", "hero"] as const
 export type SceneBgMode = (typeof SCENE_BG_MODES)[number]
-export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean }
+export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean }
 
-const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, ...extra })
+const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, ...extra })
 export const DEFAULT_SCENES: Record<SceneId, SceneCard> = {
   hold05: scene("Break", "Stretch • Refill • 15 min", "#c6ff00", "HOLD 05 • BREAK"),
   hold06: scene("Starting Soon", "Doors opening • Get comfy", "#ffd400", "HOLD 06 • STARTING SOON"),
@@ -235,6 +235,8 @@ export function parseScene(v: unknown, f: SceneCard): SceneCard {
     image: "image" in r ? uploadPath(r.image) : f.image,
     dim,
     showQr: typeof r.showQr === "boolean" ? r.showQr : f.showQr,
+    video: "video" in r ? uploadPath(r.video) : f.video,
+    autoSwitch: typeof r.autoSwitch === "boolean" ? r.autoSwitch : f.autoSwitch,
   }
 }
 export function parseScenes(v: unknown, base: Record<SceneId, SceneCard> = DEFAULT_SCENES): Record<SceneId, SceneCard> {
