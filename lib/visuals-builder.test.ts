@@ -129,3 +129,15 @@ test("builder program feed: on-air input when signal, placeholder when off or no
   assert.equal(builderProgramFeed({ programSource: "main", programReady: true }, false).path, null)
   assert.deepEqual(builderProgramFeed(null, true), { path: null, source: "main", signal: false })
 })
+
+test("builder Live tab: real /stream muted, only mounted while selected, /stream untouched", async () => {
+  const fs = await import("node:fs")
+  const src = fs.readFileSync("components/visuals-builder.tsx", "utf8")
+  assert.match(src, /src="\/stream\?mute=1"/)
+  assert.match(src, /\{liveView \? <LiveMonitor \/> : \(/)
+  assert.match(src, /data-testid="vb-screen-live"[\s\S]{0,200}>Live<\/button>/)
+  // the existing mute param still mutes program and bed on /stream
+  const view = fs.readFileSync("components/stream-view.tsx", "utf8")
+  assert.match(view, /muted=\{params\.get\("mute"\) === "1" \|\| !isAir\}/)
+  assert.match(view, /urlMute=\{params\.get\("mute"\) === "1"\}/)
+})

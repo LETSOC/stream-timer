@@ -7,7 +7,7 @@
  * deck socket and are marked "applies live". The preview is the real VisualsLayer at 1920x1080, scaled.
  */
 import Link from "next/link"
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
 import { VisualsLayer } from "@/components/visuals-layer"
 import { SceneCardView } from "@/components/visual-assets"
@@ -88,6 +88,8 @@ export function VisualsBuilder() {
   /** Preview only: countdown-page parts hidden while placing overlays (never saved, /stream unaffected). */
   // Program preview background: the live relay feed (default) or the light placeholder.
   const [liveFeed, setLiveFeed] = useState(true)
+  // Live: the real /stream page in an iframe (only mounted while selected).
+  const [liveView, setLiveView] = useState(false)
   const [cdHide, setCdHide] = useState<Partial<Record<CountdownPart, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null)
@@ -198,7 +200,8 @@ export function VisualsBuilder() {
         <h1 className="text-[15px] font-semibold tracking-tight">Visuals builder</h1>
         <span className="font-mono text-[11px] text-white/45">{LINK_LABEL[link]}</span>
         <div className="ml-6 flex gap-1" role="group" aria-label="Screen">
-          {(["countdown", "program"] as const).map((s) => <button key={s} type="button" data-testid={`vb-screen-${s}`} aria-pressed={screen === s} onClick={() => setScreen(s)} className={chip(screen === s)}>{s === "countdown" ? "Countdown" : "Program"}</button>)}
+          {(["countdown", "program"] as const).map((s) => <button key={s} type="button" data-testid={`vb-screen-${s}`} aria-pressed={!liveView && screen === s} onClick={() => { setScreen(s); setLiveView(false) }} className={chip(!liveView && screen === s)}>{s === "countdown" ? "Countdown" : "Program"}</button>)}
+          <button type="button" data-testid="vb-screen-live" aria-pressed={liveView} title="The real /stream page, muted: what goes on air" onClick={() => setLiveView(true)} className={chip(liveView)}>Live</button>
         </div>
         <button type="button" data-testid="vb-guides" aria-pressed={guides} onClick={() => setGuides(!guides)} className={chip(guides)}>Safe-area guides</button>
         <button type="button" data-testid="vb-showall" aria-pressed={showAll} onClick={() => setShowAll(!showAll)} className={chip(showAll)}>Show all overlays (preview)</button>
@@ -251,6 +254,7 @@ export function VisualsBuilder() {
 
         {/* Preview */}
         <section className="flex min-h-0 flex-col gap-2">
+          {liveView ? <LiveMonitor /> : (<>
           <div data-testid="vb-preview" data-screen={screen} className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-[#1a1a1a] [&_.visuals-layer]:pointer-events-none">
             {screen === "countdown" ? (
               <CountdownStage event={event} checker={stage.checker} showMeta={stage.showMeta} showLink={stage.showLink} lineSpacing={stage.lineSpacing} blockGap={stage.blockGap}
@@ -293,10 +297,12 @@ export function VisualsBuilder() {
             </div>
           )}
           <p className="font-mono text-[11px] text-white/45">1920×1080 scaled · {screen === "countdown" ? "Countdown screen" : "Program"} · {showAll ? "every part forced on in the preview only" : "showing what is on air now"} · <span className="text-[#C6FF00]">lime = safe 5%</span> · <span className="text-[#FF6A00]">orange = edge {EDGE_PX}px</span></p>
+          </>)}
         </section>
 
         {/* Inspector */}
-        <aside data-testid="vb-inspector" className={`${panel} min-h-0 overflow-auto p-4`}>
+        <aside data-testid="vb-inspector" inert={liveView} aria-disabled={liveView || undefined} className={`${panel} min-h-0 overflow-auto p-4 ${liveView ? "opacity-40" : ""}`}>
+          {liveView ? <p data-testid="vb-live-hint" className="mb-3 rounded-[10px] border border-[#FF6A00]/40 bg-[#FF6A00]/10 p-2 font-mono text-[11px] text-[#FFB27A]">Live shows /stream as it is on air. Editing is off here: pick Countdown or Program to edit the layout.</p> : null}
           {sel.kind === "strap" ? (() => {
             const s = straps.find((x) => x.id === sel.id)
             if (!s) return <p className="text-sm text-white/50">Pick a speaker.</p>
@@ -464,5 +470,35 @@ export function VisualsBuilder() {
         </aside>
       </div>
     </main>
+  )
+}
+
+/**
+ * Live monitor: the real /stream page (?mute=1, the existing mute param: program and bed audio off),
+ * 1920x1080 scaled to fit, like OBS's program monitor. Only mounted while the Live tab is selected.
+ * An operator session may view /stream without the OBS view key (same as the phone deck's preview).
+ */
+function LiveMonitor() {
+  const box = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(0.4)
+  const [gen, setGen] = useState(0)
+  useEffect(() => {
+    const node = box.current
+    if (!node) return
+    const observer = new ResizeObserver(() => setScale(node.clientWidth / 1920))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <>
+      <div ref={box} data-testid="vb-live" className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black">
+        <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1920, height: 1080, transform: `scale(${scale})` }} />
+        <span data-testid="vb-live-onair" className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.15em] text-white uppercase"><span className="size-1.5 rounded-full bg-white" />On air</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" data-testid="vb-live-reload" onClick={() => setGen((g) => g + 1)} className="rounded-full border border-white/20 px-3 py-1 font-mono text-[11px] text-white hover:bg-white/10">Reload</button>
+        <span className="font-mono text-[10px] text-white/45">/stream?mute=1 · muted · what goes on air (program, cards, overlays). A viewer like OBS, a little behind the real output.</span>
+      </div>
+    </>
   )
 }
