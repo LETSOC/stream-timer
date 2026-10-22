@@ -244,3 +244,20 @@ test("two-tap: every screen/card switch is risky, on any device, live or not", a
   const deck = fs.readFileSync(path.join(process.cwd(), "components/visuals-deck.tsx"), "utf8")
   assert.doesNotMatch(deck, /scr === "program" && target !== "program"/)
 })
+
+test("every scene card has a renderer on /stream and in the desk preview (regression: desk preview fell back to the countdown)", async () => {
+  const { CARD_OVERLAYS } = await import("@/lib/stage")
+  const { isScene } = await import("@/lib/visuals-assets")
+  const classic = CARD_OVERLAYS.filter((c) => !isScene(c))
+  assert.deepEqual(classic, ["break", "hold", "welcome"])
+  const read = (f: string) => fs.readFileSync(path.join(process.cwd(), f), "utf8")
+  assert.match(read("components/stream-view.tsx"), /isScene\(shownScreen\) \? \(\s*<SceneCardView id=\{shownScreen\}/)
+  assert.match(read("components/operator-console.tsx"), /isScene\(previewScreen\) \? \([\s\S]{0,120}<SceneCardView id=\{previewScreen\}/)
+  const React = await import("react")
+  const { renderToStaticMarkup } = await import("react-dom/server")
+  const { SceneCardView } = await import("@/components/visual-assets")
+  for (const id of SCENE_IDS) {
+    const html = renderToStaticMarkup(React.createElement(SceneCardView, { id, card: DEFAULT_SCENES[id], now: 0 }))
+    assert.ok(html.includes(DEFAULT_SCENES[id].label) && html.includes(DEFAULT_SCENES[id].pill), id)
+  }
+})

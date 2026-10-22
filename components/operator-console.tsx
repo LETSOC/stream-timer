@@ -51,7 +51,8 @@ import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/secti
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
-import { SCENE_IDS, type SceneId } from "@/lib/visuals-assets"
+import { isScene, SCENE_IDS, type SceneId } from "@/lib/visuals-assets"
+import { SceneCardView } from "@/components/visual-assets"
 import { VisualsDeskSection } from "@/components/visuals-desk"
 import { VerticalCard } from "@/components/vertical-output"
 import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
@@ -1400,6 +1401,9 @@ export function OperatorConsole() {
                 since={overlayAt}
                 clock={now}
               />
+            ) : isScene(previewScreen) ? (
+              // Scene cards (HOLD 05/06/07, Standby, Showreel): same renderer as /stream.
+              <SceneCardView id={previewScreen} card={visuals.scenes[previewScreen]} qr={visuals.qr} now={now ? now.getTime() : null} className="absolute inset-0 z-10 h-full w-full" />
             ) : previewScreen === "end" ? (
               <EndStreamPage card={{
                 title: endTitle,
