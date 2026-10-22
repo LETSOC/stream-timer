@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 /* eslint-disable @next/next/no-img-element -- OBS output: plain <img> for data: SVG and uploads */
 /**
  * Visuals assets drawn on /stream, /overlay/visuals and the builder preview (1920x1080 in px × --px):
@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react"
  */
 import type { CSSProperties } from "react"
 import { LOGO_BASE, logoSrc, QR_BASE_PX, qrBadgeBox, qrMatrix, qrRingCell, type LogoConfig, type LogoId, type QrConfig, type SceneCard } from "@/lib/visuals-assets"
+import { isViewerMuted, subscribeViewerMute, viewerHasChosen } from "@/components/stream-audio-overlay"
 
 const px = (n: number) => `calc(${n} * var(--px))`
 
@@ -64,16 +65,20 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   const image = card.bgMode !== "solid" && card.image ? card.image : ""
   const video = card.video || ""
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [, setPin] = useState(0)
+  useEffect(() => subscribeViewerMute(() => setPin((n) => n + 1)), [])
+  // Same rule as the program player: sound on unless the viewer muted. OBS Browser Source has no viewer choice, so it plays.
+  const wantSound = !(viewerHasChosen() && isViewerMuted())
   useEffect(() => {
     const el = videoRef.current
     if (!el || !video) return
-    el.muted = false
+    el.muted = !wantSound
     void el.play().catch(() => {
-      // Autoplay with sound refused: start muted so the picture still runs, then try sound.
+      // Autoplay with sound refused (normal browser tab): keep the picture, muted. A tap on the stream unmute turns it back on.
       el.muted = true
       void el.play().catch(() => undefined)
     })
-  }, [video])
+  }, [video, wantSound])
   const onEnded = () => {
     if (!onAir || !card.autoSwitch || !video) return
     void fetch("/api/public/showreel-ended", { method: "POST" }).catch(() => undefined)

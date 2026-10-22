@@ -21,7 +21,7 @@ export function StreamBed({ plan, urlMute = false, screenIsProgram = false, prog
   const audio = useRef<HTMLAudioElement | null>(null)
   const [, setPin] = useState(0)
   useEffect(() => subscribeViewerMute(() => setPin((n) => n + 1)), [])
-  const quiet = muted || bedGainMuted({ urlMute, screenIsProgram, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
+  const quiet = hold || muted || bedGainMuted({ urlMute, screenIsProgram, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
   const index = useRef(0)
   const tone = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null)
   const files = plan?.mode === "bed" ? plan.files : []
@@ -34,12 +34,13 @@ export function StreamBed({ plan, urlMute = false, screenIsProgram = false, prog
     if (!el || !filesKey) return
     const list = filesKey.split(",")
     index.current = plan?.shuffle ? Math.floor(Math.random() * list.length) : 0
-    const play = () => { el.src = `/api/audio/stream/${list[index.current]}${q}`; void el.play().catch(() => undefined) }
-    const ended = () => { index.current = nextIndex(index.current, list.length, plan?.shuffle === true); play() }
+    const held = () => el.dataset.hold === "1"
+    const play = () => { if (held()) return; el.src = `/api/audio/stream/${list[index.current]}${q}`; void el.play().catch(() => undefined) }
+    const ended = () => { if (held()) return; index.current = nextIndex(index.current, list.length, plan?.shuffle === true); play() }
     el.addEventListener("ended", ended)
-    play()
+    if (!held()) play()
     // Autoplay blocked (interactive viewer): start on the first gesture.
-    const kick = () => { if (el.paused) void el.play().catch(() => undefined) }
+    const kick = () => { if (!held() && el.paused) void el.play().catch(() => undefined) }
     window.addEventListener("pointerdown", kick)
     return () => { el.removeEventListener("ended", ended); window.removeEventListener("pointerdown", kick); el.pause(); el.removeAttribute("src") }
   }, [filesKey, plan?.shuffle, q])
@@ -67,16 +68,12 @@ export function StreamBed({ plan, urlMute = false, screenIsProgram = false, prog
     if (t) t.gain.gain.setTargetAtTime(target, t.ctx.currentTime, 0.1)
   }, [quiet, vol, plan?.mode])
 
-  // Hold: pause the playlist (and silence the tone) while a showreel video is on air; resume after.
+  // Hold: pause the playlist while a showreel video is on air (volume is already 0 via quiet); resume after.
   useEffect(() => {
     const el = audio.current
-    if (hold) {
-      if (el && !el.paused) el.pause()
-      const t = tone.current
-      if (t) t.gain.gain.setTargetAtTime(0, t.ctx.currentTime, 0.05)
-      return
-    }
-    if (el && el.src && el.paused && !quiet) void el.play().catch(() => undefined)
+    if (!el) return
+    if (hold) { if (!el.paused) el.pause(); return }
+    if (el.src && el.paused && !quiet) void el.play().catch(() => undefined)
   }, [hold, quiet])
 
   if (!plan || plan.mode === "silent") return null
