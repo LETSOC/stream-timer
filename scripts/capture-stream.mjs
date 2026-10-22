@@ -23,6 +23,7 @@ import { chromium } from "playwright"
 import { plannedRefreshDue, relaunchBackoffMs } from "./chrome-life.mjs"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 import { captureCodeVersion } from "./code-version.mjs"
+import { clearShowreel, createShowreelQueue, pushShowreel, showreelBedGain, takeShowreel } from "./showreel-audio.mjs"
 import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames, targetJumped } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
@@ -268,6 +269,8 @@ const pageAudio = { main: { chunks: [], bytes: 0, at: 0, primed: false, levelMs:
 const PAGE_AUDIO = process.env.CAPTURE_PAGE_AUDIO === "1" // opt-in experiment; the reader path measures in sync
 const pageAudioLive = (source) => PAGE_AUDIO && Date.now() - pageAudio[source].at < 1000
 let pageSpliceAt = 0
+// Showreel (scene-card video) audio from the page (window.__showreelPcm). Empty → mix unchanged.
+const reelQ = createShowreelQueue()
 // The tap sees samples before they would be heard, and a video frame reaches the screencast only after
 // compositing; both are small and cancel (flash+beep through the full chain: ~0). Tunable.
 const PAGE_AV_BASE_MS = Math.max(-200, Math.min(500, Number(process.env.CAPTURE_PAGE_AV_MS ?? 0) || 0))
@@ -352,6 +355,8 @@ function pcmBlock(n, wallMs) {
   const curBed = bedLine.delayMs()
   bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
   const bed = bedLine.process(feeder ? feeder.readFloat(n, wallMs) : new Float32Array(n * 2))
+  // Showreel: off Program only; same picture delay as the page program path. Bed ducks while it flows.
+  const reel = prog.wanted ? (reelQ.bytes ? clearShowreel(reelQ) : undefined, null) : takeShowreel(reelQ, n, Math.max(35, Math.min(1500, PAGE_AV_BASE_MS + screencastLag() + sync.trimMs)))
   const out = Buffer.alloc(n * 4)
   // While the program (Main or Backup) is on air the bed/tone is suppressed: program audio only.
   // On entering the program the bed fades out once program audio first flows (no hole while the reader
@@ -363,8 +368,10 @@ function pcmBlock(n, wallMs) {
   for (let i = 0; i < n; i++) {
     if (prog.gain < target) prog.gain = Math.min(target, prog.gain + GAIN_STEP)
     else if (prog.gain > target) prog.gain = Math.max(target, prog.gain - GAIN_STEP)
-    let l = bed[i * 2] * prog.gain * 32767
-    let r = bed[i * 2 + 1] * prog.gain * 32767
+    const rg = reel || reelQ.gain < 1 ? showreelBedGain(reelQ, reel !== null, GAIN_STEP) : 1
+    let l = bed[i * 2] * prog.gain * rg * 32767
+    let r = bed[i * 2 + 1] * prog.gain * rg * 32767
+    if (reel) { l += reel.readInt16LE(i * 4); r += reel.readInt16LE(i * 4 + 2) }
     if (programPcm) {
       if (prog.ramp < 1) prog.ramp = Math.min(1, prog.ramp + 1 / 1440)
       const pl = Math.round(programPcm.readInt16LE(i * 4) * prog.ramp)
@@ -471,6 +478,8 @@ async function openBrowser(initial) {
     const max = Math.round(1.0 * RATE) * 4 // never more than 1s queued
     if (q.bytes > max) dropFrom(q, q.bytes - max)
   })
+  // Showreel video audio (scene cards): always on, separate from the program page-audio opt-in.
+  await page.exposeBinding("__showreelPcm", (_src, b64) => pushShowreel(reelQ, Buffer.from(String(b64), "base64")))
   page.on("crash", () => { if (!stopping && gen === browserGen) void relaunchBrowser("page crashed") })
   // DOM-ready + the page's own ready marker (not "networkidle": /stream polls forever, and slow
   // speaker images would otherwise hold the start for 20s).
