@@ -10,6 +10,33 @@ import { useEffect, useRef, useState } from "react"
 import type { CSSProperties } from "react"
 import { LOGO_BASE, logoSrc, QR_BASE_PX, qrBadgeBox, qrMatrix, qrRingCell, type LogoConfig, type LogoId, type QrConfig, type SceneCard } from "@/lib/visuals-assets"
 import { isViewerMuted, subscribeViewerMute, viewerHasChosen } from "@/components/stream-audio-overlay"
+import { isCapturePage } from "@/lib/player-diag"
+import { pcmChunkB64 } from "@/lib/showreel-tap"
+
+type ShowreelSend = (b64: string) => void
+/** Browser capture only (window.__showreelPcm): hand the scene video's decoded audio to the capture mix. */
+function useShowreelTap(videoRef: { current: HTMLVideoElement | null }, video: string) {
+  useEffect(() => {
+    const send = (window as unknown as { __showreelPcm?: ShowreelSend }).__showreelPcm
+    const el = videoRef.current
+    if (!send || !el || !video || !isCapturePage()) return
+    let ctx: AudioContext | null = null
+    try {
+      ctx = new AudioContext({ sampleRate: 48000 })
+      const node = ctx.createMediaElementSource(el)
+      const proc = ctx.createScriptProcessor(512, 2, 2)
+      proc.onaudioprocess = (e) => {
+        const l = e.inputBuffer.getChannelData(0)
+        const r = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : l
+        if (!el.paused && !el.ended) send(pcmChunkB64(l, r))
+      }
+      node.connect(proc)
+      proc.connect(ctx.destination) // keeps it running; writes silence
+      void ctx.resume()
+    } catch { /* no WebAudio: no showreel sound in the capture */ }
+    return () => { void ctx?.close() }
+  }, [videoRef, video])
+}
 
 const px = (n: number) => `calc(${n} * var(--px))`
 
@@ -79,6 +106,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
       void el.play().catch(() => undefined)
     })
   }, [video, wantSound])
+  useShowreelTap(videoRef, video)
   const onEnded = () => {
     if (!onAir || !card.autoSwitch || !video) return
     void fetch("/api/public/showreel-ended", { method: "POST" }).catch(() => undefined)
