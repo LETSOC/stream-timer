@@ -46,7 +46,7 @@ export type TransportAction =
   /** Visuals layer: talk-ends pill (timer start/add/pause/resume/stop, Session/Festival), ticker, Q&A, Sponsored, and the /stream master switch. Applied at once. */
   | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string }
 
-export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream"] as const
+export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream", "clear"] as const
 export type VisualTarget = (typeof VISUAL_TARGETS)[number]
 export const TALK_OPS = ["start", "add", "pause", "resume", "stop"] as const
 export type TalkOp = (typeof TALK_OPS)[number]
@@ -215,7 +215,7 @@ export function parseAction(value: unknown): TransportAction | null {
         if (Array.isArray(v.items) || typeof v.items === "string") out.items = sanitizeTickerItems(v.items)
       }
       if ((out.target === "qa" || out.target === "sponsor") && typeof v.text === "string") out.text = v.text
-      return Object.keys(out).length > 2 ? out : null
+      return out.target === "clear" || Object.keys(out).length > 2 ? out : null
     }
     case "timecode": {
       const out: Extract<TransportAction, { type: "timecode" }> = { type: "timecode" }
@@ -355,6 +355,9 @@ export type DeckState = {
     tickerVisible?: boolean
     tickerType?: TickerType
     tickerCount?: number
+    tickerItems?: string[]
+    qaText?: string
+    sponsorText?: string
     qaVisible?: boolean
     sponsorVisible?: boolean
   }
@@ -408,6 +411,9 @@ export function deckState(
       tickerVisible: state.stage.tickerVisible === true,
       tickerType: state.stage.tickerType ?? "planner",
       tickerCount: state.stage.tickerItems?.length ?? 0,
+      tickerItems: state.stage.tickerItems ?? [],
+      qaText: state.stage.qaText ?? "",
+      sponsorText: state.stage.sponsorText ?? "",
       qaVisible: state.stage.qaVisible === true,
       sponsorVisible: state.stage.sponsorVisible === true,
     },
@@ -430,6 +436,9 @@ export function visualPatch(stage: StageOptions, action: Extract<TransportAction
   switch (action.target) {
     case "stream":
       return show === undefined ? {} : { streamVisuals: show }
+    case "clear":
+      // Clear all overlays: everything off the picture (strap OUT, pills, ticker, socials). Timer keeps running; texts kept.
+      return { strapMode: "out", talkVisible: false, tickerVisible: false, qaVisible: false, sponsorVisible: false, socialsOverlay: false }
     case "talk": {
       const patch: Partial<StageOptions> = {}
       if (show !== undefined) patch.talkVisible = show
