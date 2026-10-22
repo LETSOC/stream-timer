@@ -87,8 +87,8 @@ export function VisualsBuilder() {
   const [guides, setGuides] = useState(true)
   const [showAll, setShowAll] = useState(true)
   /** Preview only: countdown-page parts hidden while placing overlays (never saved, /stream unaffected). */
-  // Program preview background: the live relay feed (default) or the light placeholder.
-  const [liveFeed, setLiveFeed] = useState(true)
+  // Program preview background: relay player (delayed reference), real /stream, or static placeholder.
+  const [programBg, setProgramBg] = useState<"relay" | "live" | "placeholder">("relay")
   // Live: the real /stream page in an iframe (only mounted while selected).
   const [liveView, setLiveView] = useState(false)
   const [cdHide, setCdHide] = useState<Partial<Record<CountdownPart, boolean>>>({})
@@ -112,7 +112,7 @@ export function VisualsBuilder() {
 
   const savedStage = useMemo(() => (loaded ? parseStage(loaded.stage) : null), [loaded])
   const live = state?.visuals
-  const feed = builderProgramFeed(state, screen === "program" && liveFeed)
+  const feed = builderProgramFeed(state, screen === "program" && programBg === "relay")
   const liveFields = useMemo(() => (live ? Object.fromEntries(Object.entries(live).filter(([k]) => k !== "straps" && k !== "tickerCount")) : undefined), [live])
   const event = (loaded?.event ?? DEFAULT_EVENT) as EventConfig
   const stage = useMemo(() => (loaded && draft ? previewStage(loaded.stage, liveFields, draft, { showAll, strapId: sel.kind === "strap" ? sel.id : undefined, now, logo: sel.kind === "part" && (LOGO_IDS as readonly string[]).includes(sel.part) ? (sel.part as LogoId) : undefined }) : null), [loaded, draft, liveFields, showAll, sel, now])
@@ -262,18 +262,19 @@ export function VisualsBuilder() {
                 clockScale={stage.clockScale} clockText={stage.clockText} logoUrl={stage.logoUrl} speakers={stage.speakers} gallerySeconds={stage.gallerySeconds} galleryPause={stage.galleryPause}
                 galleryOffset={stage.galleryOffset} galleryScale={stage.galleryScale} social={socialLook(stage)} countdownStrokePx={stage.countdownStrokePx} countdownStrokeColor={stage.countdownStrokeColor}
                 hide={cdHide} className="absolute inset-0 h-full w-full" />
+            ) : programBg === "live" ? (
+              // Real /stream (same as Live tab top): true overlay timing. Muted.
+              <iframe data-testid="vb-program-stream" title="/stream (program background)" src="/stream?mute=1" className="pointer-events-none absolute inset-0 h-full w-full border-0" />
+            ) : programBg === "relay" && feed.path ? (
+              // Relay player behind the overlays: follows Main/Backup, delayed reference, muted by default.
+              <div data-testid="vb-program-live" data-source={feed.source} className="absolute inset-0 bg-black"><StreamPlayer key={feed.path} src={`/api/relay/hls/${feed.path}/index.m3u8`} scope="builder-program" /></div>
             ) : (
-              // Live program behind the overlays: the desk's relay player (WebRTC, HLS fallback), on-air input, muted by default.
-              feed.path ? (
-                <div data-testid="vb-program-live" data-source={feed.source} className="absolute inset-0 bg-black"><StreamPlayer key={feed.path} src={`/api/relay/hls/${feed.path}/index.m3u8`} scope="builder-program" /></div>
-              ) : (
-                <div data-testid="vb-program-placeholder" className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,#3a3a44,#141414_70%)]">
-                  <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-mono text-[11px] tracking-[0.3em] text-white/25 uppercase">Program feed</span>
-                  {liveFeed && !feed.signal ? <span data-testid="vb-program-nosignal" className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[10px] tracking-[0.15em] text-[#FF6A00] uppercase">No program signal</span> : null}
-                </div>
-              )
+              <div data-testid="vb-program-placeholder" className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,#3a3a44,#141414_70%)]">
+                <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-mono text-[11px] tracking-[0.3em] text-white/25 uppercase">Program feed</span>
+                {programBg === "relay" && !feed.signal ? <span data-testid="vb-program-nosignal" className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-1 font-mono text-[10px] tracking-[0.15em] text-[#FF6A00] uppercase">No program signal</span> : null}
+              </div>
             )}
-            <VisualsLayer stage={stage} event={event} screen={screen} now={now} eventEndMs={eventEndMs} />
+            {programBg !== "live" || screen === "countdown" ? <VisualsLayer stage={stage} event={event} screen={screen} now={now} eventEndMs={eventEndMs} /> : null}
             {sel.kind === "scene" ? <SceneCardView id={sel.id} card={draft.scenes[sel.id]} qr={draft.qr} now={now} className="absolute inset-0 z-40 h-full" /> : null}
             {guides ? (
               <div aria-hidden data-testid="vb-guides-layer" className="pointer-events-none absolute inset-0 z-50">
@@ -292,9 +293,10 @@ export function VisualsBuilder() {
           ) : (
             <div data-testid="vb-program-feed" className="flex flex-wrap items-center gap-1">
               <span className={`${mono} mr-1`}>Program background</span>
-              <button type="button" data-testid="vb-feed-live" aria-pressed={liveFeed} onClick={() => setLiveFeed(true)} className={chip(liveFeed)}>Live feed ({feed.source})</button>
-              <button type="button" data-testid="vb-feed-placeholder" aria-pressed={!liveFeed} onClick={() => setLiveFeed(false)} className={chip(!liveFeed)}>Placeholder</button>
-              <span className="font-mono text-[10px] text-white/45">Muted; hover the picture for sound. Retries on its own when program arrives.</span>
+              <button type="button" data-testid="vb-feed-relay" aria-pressed={programBg === "relay"} onClick={() => setProgramBg("relay")} className={chip(programBg === "relay")}>Program background</button>
+              <button type="button" data-testid="vb-feed-live" aria-pressed={programBg === "live"} onClick={() => setProgramBg("live")} className={chip(programBg === "live")}>Live feed</button>
+              <button type="button" data-testid="vb-feed-placeholder" aria-pressed={programBg === "placeholder"} onClick={() => setProgramBg("placeholder")} className={chip(programBg === "placeholder")}>Placeholder</button>
+              <span className="font-mono text-[10px] text-white/45">{programBg === "live" ? "Real /stream, muted. True overlay timing (a little behind, like the Live tab)." : programBg === "relay" ? "Relay player, follows Main/Backup. Delayed reference only." : "Static. Good for placing without a feed."}</span>
             </div>
           )}
           <p className="font-mono text-[11px] text-white/45">1920×1080 scaled · {screen === "countdown" ? "Countdown screen" : "Program"} · {showAll ? "every part forced on in the preview only" : "showing what is on air now"} · <span className="text-[#C6FF00]">lime = safe 5%</span> · <span className="text-[#FF6A00]">orange = edge {EDGE_PX}px</span></p>
