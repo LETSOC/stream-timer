@@ -14,7 +14,8 @@ import { SocialCircles } from "@/components/social-circles"
 import { FacebookIcon, InstagramIcon, LinkedInIcon, XIcon, YouTubeIcon } from "@/components/countdown-stage"
 import type { EventConfig } from "@/lib/event"
 import { socialLook, type StageOptions } from "@/lib/stage"
-import { cornerOffsets, formatClock, parseTalkTimer, SAFE_X_PX, SAFE_Y_PX, strapVisible, talkPillValue, TICKER_GAP_PX, TICKER_H_PX, type Corner } from "@/lib/visuals"
+import { formatClock, parseTalkTimer, strapVisible, talkPillValue, TICKER_GAP_PX, TICKER_H_PX, type Corner } from "@/lib/visuals"
+import { cornerOrigin, layoutScreen, partCorner, placeOffsets, type LayoutPart } from "@/lib/visuals-layout"
 
 export type LayerScreen = "countdown" | "program" | "break" | "hold" | "welcome" | "end" | "overlay"
 
@@ -34,18 +35,31 @@ export function layerParts(stage: Pick<StageOptions, "streamVisuals" | "talkVisi
 }
 
 const px = (n?: number) => (n === undefined ? undefined : `calc(${n} * var(--px))`)
-function anchor(corner: Corner, inset: number, lift = 0): CSSProperties {
-  const o = cornerOffsets(corner, inset)
+/** Wrapper for one part: anchored at its corner (layout gap + snap), scaled from that corner. */
+function placeStyle(stage: StageOptions, screen: LayerScreen, part: LayoutPart, lift: number): { style: CSSProperties; corner: Corner } {
+  const ls = layoutScreen(screen)
+  const p = stage.visualsLayout[ls][part]
+  const corner = partCorner(ls, part, stage.visualsLayout, stage)
+  const o = placeOffsets(p, stage.overlayInset, lift, corner)
   return {
-    position: "absolute",
-    left: px(o.left), right: px(o.right), top: px(o.top), bottom: px(o.bottom === undefined ? undefined : o.bottom + lift),
-    display: "flex", flexDirection: "column",
-    alignItems: o.right !== undefined ? "flex-end" : "flex-start",
+    corner,
+    style: {
+      position: "absolute",
+      left: px(o.left), right: px(o.right), top: px(o.top), bottom: px(o.bottom),
+      display: "flex", flexDirection: "column",
+      alignItems: o.right !== undefined ? "flex-end" : "flex-start",
+      transform: p.size === 100 ? undefined : `scale(${p.size / 100})`,
+      transformOrigin: cornerOrigin(corner),
+    },
   }
 }
 
-function Pill({ show, kind, style, children, testId }: { show: boolean; kind: string; style: CSSProperties; children: ReactNode; testId: string }) {
-  return <div data-testid={testId} data-on={show ? "1" : "0"} className={`vl-pill vl-${kind} ${show ? "vl-on" : "vl-off"}`} style={style}>{children}</div>
+function Pill({ show, kind, place, children, testId }: { show: boolean; kind: string; place: { style: CSSProperties; corner: Corner }; children: ReactNode; testId: string }) {
+  return (
+    <div className="vl-place" data-part={kind} data-corner={place.corner} style={place.style}>
+      <div data-testid={testId} data-on={show ? "1" : "0"} className={`vl-pill vl-${kind} ${show ? "vl-on" : "vl-off"}`}>{children}</div>
+    </div>
+  )
 }
 
 export function VisualsLayer({ stage, event, screen, now, eventEndMs, className = "" }: {
@@ -59,11 +73,13 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
   className?: string
 }) {
   const parts = layerParts(stage, screen)
-  const inset = stage.overlayInset
   const lift = parts.ticker ? TICKER_H_PX + TICKER_GAP_PX : 0
   const preset = stage.straps.find((p) => p.id === stage.strapId) ?? null
   const strapOn = Boolean(parts.strap && preset && now !== null && strapVisible(stage.strapMode, stage.strapAt, stage.strapHoldSec, now))
   const talk = now === null ? { ms: null, over: false } : talkPillValue(stage.talkMode, parseTalkTimer(stage.talkEndsAt, stage.talkPausedMs), eventEndMs, now)
+  const at = (part: LayoutPart) => placeStyle(stage, screen, part, lift)
+  const strapAt = at("strap")
+  const socialsAt = at("socials")
   const paused = stage.talkMode === "session" && stage.talkPausedMs !== null
   return (
     <div aria-hidden data-testid="visuals-layer" data-screen={screen} className={`visuals-layer pointer-events-none ${className}`}>
@@ -74,23 +90,23 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
           <div className="vl-marquee">{[0, 1].map((copy) => <span key={copy} className="vl-ticker-run">{stage.tickerItems.map((item, i) => <span key={i} className="vl-ticker-item">{item}</span>)}</span>)}</div>
         </div>
       </div>
-      <Pill show={parts.talk} kind="talk" testId="vl-talk" style={{ position: "absolute", left: px(SAFE_X_PX + inset), top: px(SAFE_Y_PX + inset) }}>
+      <Pill show={parts.talk} kind="talk" testId="vl-talk" place={at("talk")}>
         <span className={`vl-rec ${talk.over ? "vl-rec-over" : ""}`} />
         <span className="vl-talk-prefix">{stage.talkMode === "festival" ? stage.festivalPrefix : stage.talkPrefix}</span>
         <span data-testid="vl-talk-clock" className={`vl-talk-clock ${talk.over ? "vl-over" : ""}`}>{formatClock(talk.ms)}{paused ? " ❚❚" : ""}</span>
       </Pill>
-      <Pill show={parts.sponsor} kind="sponsor" testId="vl-sponsor" style={{ position: "absolute", right: px(SAFE_X_PX + inset), top: px(SAFE_Y_PX + inset) }}>{stage.sponsorText}</Pill>
-      <Pill show={parts.qa} kind="qa" testId="vl-qa" style={{ position: "absolute", right: px(SAFE_X_PX + inset), bottom: px(SAFE_Y_PX + inset + lift) }}>{stage.qaText}</Pill>
+      <Pill show={parts.sponsor} kind="sponsor" testId="vl-sponsor" place={at("sponsor")}>{stage.sponsorText}</Pill>
+      <Pill show={parts.qa} kind="qa" testId="vl-qa" place={at("qa")}>{stage.qaText}</Pill>
       {preset ? (
-        <div className="vl-anchor" style={anchor(stage.strapCorner, inset, lift)} data-corner={stage.strapCorner}>
+        <div className="vl-anchor" data-part="strap" style={strapAt.style} data-corner={strapAt.corner}>
           <NameStrap key={preset.id} preset={preset} visible={strapOn} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText }} />
         </div>
       ) : null}
       {parts.socials ? (
-        <div className="vl-anchor" style={anchor(stage.socialsCorner, inset, lift)} data-corner={stage.socialsCorner}>
+        <div className="vl-anchor" data-part="socials" style={socialsAt.style} data-corner={socialsAt.corner}>
           <SocialCircles
-            className={stage.socialsCorner.endsWith("right") ? "items-end" : undefined}
-            handleAt={stage.socialsCorner.startsWith("top") ? "below" : "above"}
+            className={socialsAt.corner.endsWith("right") ? "items-end" : undefined}
+            handleAt={socialsAt.corner.startsWith("top") ? "below" : "above"}
             look={socialLook(stage)}
             links={[
               { label: "X", href: event.xUrl, icon: <XIcon /> },
