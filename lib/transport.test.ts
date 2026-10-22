@@ -7,7 +7,7 @@ import { beforeEach, test } from "node:test"
 
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { DEFAULT_STAGE } from "@/lib/stage"
-import { addMinutes, applyTransport, endSoonAt, formatEndWhen, deckScreen, deckState, effectiveNow, endInstant, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
+import { addMinutes, applyTransport, endCardAt, endsLabel, formatOffset, endSoonAt, formatEndWhen, deckScreen, deckState, effectiveNow, endInstant, eventTarget, isRisky, parseAction, type TransportState } from "@/lib/transport"
 import { readServerState, writeServerEvent } from "@/lib/event-server"
 import { runServerTransport } from "@/lib/transport-server"
 import { onSaved } from "@/lib/event-bus"
@@ -97,7 +97,7 @@ test("parseAction accepts only known shapes; risky actions flagged", () => {
   assert.deepEqual(parseAction({ type: "pause", extra: 1 }), { type: "pause" })
   assert.equal(isRisky({ type: "goLive" }) && isRisky({ type: "reset" }) && isRisky({ type: "restore" }) && isRisky({ type: "screen", screen: "end" }) && isRisky({ type: "screen", screen: "program" }), true)
   for (const screen of ["countdown", "break", "hold", "welcome"] as const) assert.equal(isRisky({ type: "screen", screen }), true, screen)
-  assert.equal(isRisky({ type: "pause" }) || isRisky({ type: "jump", seconds: 15 }) || isRisky({ type: "setEnd", endTime: "20:00", endAt: "19:00" }), false)
+  assert.equal(isRisky({ type: "pause" }) || isRisky({ type: "jump", seconds: 15 }) || isRisky({ type: "setEnd", endTime: "20:00", endOffsetMin: -2 }), false)
 })
 
 test("deck state is compact and deckScreen matches /stream precedence", () => {
@@ -134,25 +134,27 @@ test("extendEnd: +5/+10 on Event end time, or on the end card override when set;
   const ok = (r: ReturnType<typeof applyTransport>) => (assert.ok(r.ok), r.ok ? r.next : base())
   const e = ok(applyTransport(base({ event: { ...DEFAULT_EVENT, endTime: "16:15" } as EventConfig, stage: { ...DEFAULT_STAGE, deskLive: true } }), { type: "extendEnd", minutes: 10 }, NOW))
   assert.equal(e.event.endTime, "16:25")
-  assert.equal(e.stage.endAt, "")
-  const o = ok(applyTransport(base({ stage: { ...DEFAULT_STAGE, endAt: "17:00" } }), { type: "extendEnd", minutes: 5 }, NOW))
-  assert.equal(o.stage.endAt, "17:05")
-  assert.equal(o.event.endTime, DEFAULT_EVENT.endTime)
+  assert.equal(e.stage.endOffsetMin, 0)
+  // extendEnd moves the planned end; an adjustment rides on top unchanged.
+  const o = ok(applyTransport(base({ event: { ...DEFAULT_EVENT, endTime: "16:15" } as EventConfig, stage: { ...DEFAULT_STAGE, endOffsetMin: -2 } }), { type: "extendEnd", minutes: 5 }, NOW))
+  assert.equal(o.event.endTime, "16:20")
+  assert.equal(o.stage.endOffsetMin, -2)
   // forceEnd is the operator's choice and stays.
   const f = ok(applyTransport(base({ stage: { ...DEFAULT_STAGE, forceEnd: true } }), { type: "extendEnd", minutes: 5 }, NOW))
   assert.equal(f.stage.forceEnd, true)
-  const u = ok(applyTransport(o, { type: "setEnd", endTime: "16:15", endAt: "17:00" }, NOW))
-  assert.equal(u.stage.endAt, "17:00")
+  const u = ok(applyTransport(o, { type: "setEnd", endTime: "16:15", endOffsetMin: 0 }, NOW))
+  assert.equal(u.stage.endOffsetMin, 0)
+  assert.equal(u.event.endTime, "16:15")
   assert.deepEqual(parseAction({ type: "extendEnd", minutes: 5 }), { type: "extendEnd", minutes: 5 })
   assert.equal(parseAction({ type: "extendEnd", minutes: 7 }), null)
-  assert.equal(parseAction({ type: "setEnd", endTime: "25:00", endAt: "" }), null)
+  assert.equal(parseAction({ type: "setEnd", endTime: "25:00", endOffsetMin: 0 }), null)
   assert.equal(isRisky({ type: "extendEnd", minutes: 5 }), false)
 })
 
 test("End in N min / setEnd clear a Countdown hold; Show end forces end and clears hold", () => {
   const held = { ...DEFAULT_STAGE, holdCountdown: true }
   assert.equal(ok(applyTransport(base({ stage: held }), { type: "extendEnd", minutes: 5 }, NOW)).stage.holdCountdown, false)
-  assert.equal(ok(applyTransport(base({ stage: held }), { type: "setEnd", endTime: "16:15", endAt: "" }, NOW)).stage.holdCountdown, false)
+  assert.equal(ok(applyTransport(base({ stage: held }), { type: "setEnd", endTime: "16:15", endOffsetMin: 0 }, NOW)).stage.holdCountdown, false)
   const e = ok(applyTransport(base({ stage: held }), { type: "screen", screen: "end" }, NOW)).stage
   assert.equal(e.forceEnd, true); assert.equal(e.holdCountdown, false)
   const c = ok(applyTransport(base(), { type: "screen", screen: "countdown" }, NOW)).stage
@@ -191,14 +193,14 @@ test("extendEnd −5/−10: shortens, rolls back across midnight, refuses before
   assert.equal(parseAction({ type: "extendEnd", minutes: -7 }), null)
 })
 
-test("end card override: due endAt cuts over Program; Program/Countdown tap holds; plain end time never cuts Program", () => {
+test("adjusted end: due offset cuts over Program; Program/Countdown tap holds; plain planned end never cuts Program", () => {
   const base = { overlay: "none" as const, forceEnd: false, holdCountdown: false, program: true }
-  assert.equal(stageScreen({ ...base, endAt: "19:00" }, true), "end")
-  assert.equal(stageScreen({ ...base, endAt: "19:00" }, false), "program")
-  assert.equal(stageScreen({ ...base, endAt: "" }, true), "program")
-  assert.equal(stageScreen({ ...base, endAt: "19:00", holdCountdown: true }, true), "program")
-  assert.equal(stageScreen({ ...base, overlay: "hold", endAt: "19:00" }, true), "hold")
-  assert.equal(stageScreen({ ...base, program: false, endAt: "" }, true), "end")
+  assert.equal(stageScreen({ ...base, endOffsetMin: -2 }, true), "end")
+  assert.equal(stageScreen({ ...base, endOffsetMin: 10 }, false), "program")
+  assert.equal(stageScreen({ ...base, endOffsetMin: 0 }, true), "program")
+  assert.equal(stageScreen({ ...base, endOffsetMin: -2, holdCountdown: true }, true), "program")
+  assert.equal(stageScreen({ ...base, overlay: "hold", endOffsetMin: -2 }, true), "hold")
+  assert.equal(stageScreen({ ...base, program: false, endOffsetMin: 0 }, true), "end")
 })
 
 test("endSoonAt follows the test clock in the event zone", () => {
@@ -214,39 +216,50 @@ test("formatEndWhen: date + time in the event zone, next day when the end is bef
   assert.equal(formatEndWhen("2026-11-04", "23:30", "00:15", "Europe/London"), "5 Nov 00:15 · next day")
 })
 
-test("End in 2m on a test clock doesn't stick 2 min after doors once the test clock is reset/restored", () => {
-  const ev = { ...DEFAULT_EVENT, date: "2026-11-04", time: "09:30", endTime: "16:15", timeZone: "Europe/London" } as EventConfig
-  const doors = Date.parse("2026-11-04T09:30:00Z")
-  // Test clock: 60s to the doors.
-  const test = base({ event: ev, testUntil: NOW + 60_000 })
-  const at = endSoonAt(test, NOW, 2)
-  assert.equal(at, "09:31")
-  const set = applyTransport(test, { type: "setEnd", endTime: "16:15", endAt: at }, NOW)
-  assert.ok(set.ok)
-  if (!set.ok) return
-  assert.equal(set.next.stage.endAt, "09:31")
-  for (const type of ["reset", "restore"] as const) {
-    const r = applyTransport(set.next, { type }, NOW)
-    assert.ok(r.ok)
-    if (!r.ok) continue
-    assert.equal(r.next.stage.endAt, "", type)
-    // Real event day, 2 min after doors: not the end card.
-    const end = endInstant(ev.date, ev.time, r.next.stage.endAt || ev.endTime, ev.timeZone).getTime()
-    assert.equal(stageScreen({ ...r.next.stage, program: true }, end <= doors + 120_000), "program")
-  }
-  // No test clock: a real override survives a reset.
-  const real = base({ event: ev, stage: { ...DEFAULT_STAGE, endAt: "17:00" } })
-  const kept = applyTransport(real, { type: "reset" }, NOW)
-  assert.ok(kept.ok && kept.next.stage.endAt === "17:00")
+const EV = { ...DEFAULT_EVENT, date: "2026-11-04", time: "09:30", endTime: "16:15", timeZone: "Europe/London" } as EventConfig
+const PLANNED = Date.parse("2026-11-04T16:15:00Z")
+
+test("end offset: effective end = planned end on the event date + offset; label", () => {
+  assert.equal(endCardAt(EV.date, EV.time, EV.endTime, EV.timeZone, -2), PLANNED - 120_000)
+  assert.equal(endCardAt(EV.date, EV.time, EV.endTime, EV.timeZone, 10), PLANNED + 600_000)
+  assert.equal(endsLabel(EV.date, EV.time, EV.endTime, EV.timeZone, -2), "Ends 16:13 (−2m)")
+  assert.equal(endsLabel(EV.date, EV.time, EV.endTime, EV.timeZone, 0), "Ends 16:15")
+  assert.equal(formatOffset(10), "+10m")
+  const s = deckState(base({ event: EV, stage: { ...DEFAULT_STAGE, endOffsetMin: -2 } }), NOW)
+  assert.equal(deckScreen({ ...s, program: true }, PLANNED - 119_000), "end")
+  assert.equal(deckScreen({ ...s, program: true }, PLANNED - 121_000), "program")
 })
 
-test("End in Nm before the doors is refused (it would roll to the next day)", () => {
-  const ev = { ...DEFAULT_EVENT, date: "2026-11-04", time: "09:30", endTime: "16:15", timeZone: "Europe/London" } as EventConfig
-  const test = base({ event: ev, testUntil: NOW + 10 * 60_000 })
-  const at = endSoonAt(test, NOW, 2)
-  assert.equal(at, "09:22")
-  const r = applyTransport(test, { type: "setEnd", endTime: "16:15", endAt: at }, NOW)
-  assert.equal(r.ok, false)
-  // Clearing / undo is always allowed.
-  assert.ok(applyTransport(test, { type: "setEnd", endTime: "16:15", endAt: "" }, NOW).ok)
+test("endOffset steps, clear, refuse before the doors/past, two taps", () => {
+  const st = base({ event: EV })
+  const a = applyTransport(st, { type: "endOffset", minutes: -1 }, NOW)
+  assert.ok(a.ok)
+  if (!a.ok) return
+  assert.equal(a.next.stage.endOffsetMin, -1)
+  const b = applyTransport(a.next, { type: "endOffset", minutes: 5 }, NOW)
+  assert.ok(b.ok && b.next.stage.endOffsetMin === 4)
+  const c = applyTransport(b.ok ? b.next : st, { type: "endOffset", clear: true }, NOW)
+  assert.ok(c.ok && c.next.stage.endOffsetMin === 0)
+  // Before the doors: −7h would end at 09:15 < doors 09:30.
+  const far = base({ event: EV, stage: { ...DEFAULT_STAGE, endOffsetMin: -415 } })
+  assert.equal(applyTransport(far, { type: "endOffset", minutes: -5 }, NOW).ok, false)
+  // Already past (shown clock 16:12): −5 → 16:10 refused.
+  const late = base({ event: EV, pausedAt: PLANNED - 3 * 60_000 })
+  assert.equal(applyTransport(late, { type: "endOffset", minutes: -5 }, NOW).ok, false)
+  assert.ok(applyTransport(late, { type: "endOffset", minutes: -1 }, NOW).ok)
+  assert.equal(isRisky({ type: "endOffset", minutes: 1 }), true)
+  assert.deepEqual(parseAction({ type: "endOffset", minutes: -5 }), { type: "endOffset", minutes: -5 })
+  assert.deepEqual(parseAction({ type: "endOffset", clear: true }), { type: "endOffset", clear: true })
+  assert.equal(parseAction({ type: "endOffset", minutes: 3 }), null)
+  assert.equal(parseAction({ type: "setEnd", endTime: "16:15", endOffsetMin: 1.5 }), null)
+})
+
+test("reset/restore after a test clock clear the offset; a real offset survives reset", () => {
+  const t = base({ event: EV, testUntil: NOW + 60_000, stage: { ...DEFAULT_STAGE, endOffsetMin: -2 } })
+  for (const type of ["reset", "restore"] as const) {
+    const r = applyTransport(t, { type }, NOW)
+    assert.ok(r.ok && r.next.stage.endOffsetMin === 0, type)
+  }
+  const real = applyTransport(base({ event: EV, stage: { ...DEFAULT_STAGE, endOffsetMin: 10 } }), { type: "reset" }, NOW)
+  assert.ok(real.ok && real.next.stage.endOffsetMin === 10)
 })

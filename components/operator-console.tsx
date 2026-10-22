@@ -37,14 +37,14 @@ import {
 } from "@/lib/countdown"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import { useNow } from "@/lib/use-now"
-import { applyTransport, endInstant, EXTENDS, extendTarget, type Screen, type TransportAction } from "@/lib/transport"
+import { applyTransport, endCardAt, endGuard, endsLabel, END_STEPS, EXTENDS, extendTarget, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
-import { DEFAULT_STAGE, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { DEFAULT_STAGE, END_OFFSET_MAX, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
@@ -122,7 +122,7 @@ export function OperatorConsole() {
   const [endBody, setEndBody] = useState("The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.")
   const [endQrUrl, setEndQrUrl] = useState("https://linktr.ee/onlinehyphen")
   const [endButton, setEndButton] = useState("Watch replay — coming soon")
-  const [endAt, setEndAt] = useState("")
+  const [endOffsetMin, setEndOffsetMin] = useState(0)
   const [forceEnd, setForceEnd] = useState(false)
   const [holdCountdown, setHoldCountdown] = useState(false)
   const [breakTitle, setBreakTitle] = useState(DEFAULT_STAGE.breakTitle)
@@ -333,7 +333,7 @@ export function OperatorConsole() {
     if (typeof stage.endBody === "string") setEndBody(stage.endBody)
     if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
     if (typeof stage.endButton === "string") setEndButton(stage.endButton)
-    if (typeof stage.endAt === "string") setEndAt(stage.endAt)
+    if (typeof stage.endOffsetMin === "number") setEndOffsetMin(stage.endOffsetMin)
     if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
     if (typeof stage.holdCountdown === "boolean") setHoldCountdown(stage.holdCountdown)
     if (typeof stage.breakTitle === "string") setBreakTitle(stage.breakTitle)
@@ -358,7 +358,7 @@ export function OperatorConsole() {
     setVisuals((cur) => ({ ...cur, ...Object.fromEntries(VISUAL_KEYS.filter((k) => stage[k] !== undefined).map((k) => [k, stage[k]])) }))
     if (typeof stage.streamProgramAudio === "boolean" || typeof stage.streamBedAudio === "boolean") setStreamAudio((cur) => ({ program: stage.streamProgramAudio ?? cur.program, bed: stage.streamBedAudio ?? cur.bed }))
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
-  }, [setStandbyTitle, setStandbyMessage, setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
+  }, [setStandbyTitle, setStandbyMessage, setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndOffsetMin, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
   useEffect(() => {
     // The server is the source of truth. The browser keeps only section drafts, the RTMP URL and
@@ -405,7 +405,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, standbyTitle, standbyMessage, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endOffsetMin, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, standbyTitle, standbyMessage, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -738,9 +738,9 @@ export function OperatorConsole() {
 
   const previewNow = pausedAt ?? (now ? new Date(now.getTime() + skewMs) : null)
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
-  const endTarget = endInstant(date, time, endAt || endTime, timeZone)
+  const endTarget = new Date(endCardAt(date, time, endTime, timeZone, endOffsetMin))
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
-  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program, endAt }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
+  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program, endOffsetMin }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
   /**
    * Every Transport button goes through lib/transport (the same code the phone deck runs on the
@@ -769,12 +769,12 @@ export function OperatorConsole() {
     }
     if (action.type === "programSource") setProgramSource(next.stage.programSource)
     if (action.type === "mode") setLiveMode(next.stage.deskLive)
-    if (action.type === "extendEnd" || action.type === "setEnd") {
+    if (action.type === "extendEnd" || action.type === "setEnd" || action.type === "endOffset") {
       // A quick action: goes live straight away, like restore (the sections weren't dirty, see extendEnd).
       const end = { endTime: next.event.endTime }
       updateEvent(end)
-      setEndAt(next.stage.endAt)
-      setPublished((current) => (current ? { ...current, event: { ...current.event, ...end }, stage: { ...current.stage, endAt: next.stage.endAt } } : current))
+      setEndOffsetMin(next.stage.endOffsetMin)
+      setPublished((current) => (current ? { ...current, event: { ...current.event, ...end }, stage: { ...current.stage, endOffsetMin: next.stage.endOffsetMin } } : current))
     }
     if (action.type === "restore") {
       const restored = { date: next.event.date, time: next.event.time, timeZone: next.event.timeZone }
@@ -786,26 +786,36 @@ export function OperatorConsole() {
     return true
   }
   /**
-   * +5 / +10 min on the end time (the end card override if set, else Event › End time).
+   * ± min on the planned Event › End time.
    * If that section has an unsaved draft, the extension goes into the draft (Save publishes it,
    * like any other edit); otherwise it's saved straight away with an Undo toast.
    */
   function extendEnd(minutes: number) {
-    if (drafts.isDirty("endCard") || (!endAt && drafts.isDirty("event"))) {
-      const t = extendTarget(endTime, endAt, minutes)
+    if (drafts.isDirty("event")) {
+      const t = extendTarget(endTime, minutes)
       const check = applyTransport({ event, testUntil, pausedAt: pausedMs || null, stage: { ...draftStage, deskLive: false } }, { type: "extendEnd", minutes }, nowMs())
       if (!check.ok) return setToast(check.error)
-      if (t.field === "endAt") setEndAt(t.to)
-      else updateEvent({ endTime: t.to })
+      updateEvent({ endTime: t.to })
       showToast("extend", `Draft end ${t.to} · Save to apply`)
       return
     }
-    const prev = { endTime: published?.event.endTime ?? endTime, endAt: published?.stage.endAt ?? endAt }
-    const t = extendTarget(prev.endTime, prev.endAt, minutes)
+    const prev = { endTime: published?.event.endTime ?? endTime, endOffsetMin: published?.stage.endOffsetMin ?? endOffsetMin }
+    const t = extendTarget(prev.endTime, minutes)
     if (!runTransport({ type: "extendEnd", minutes })) return
     showToast("extend", `${minutes < 0 ? "Shortened" : "Extended"} to ${t.to}`, () => {
-      if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endAt || prev.endTime}`)
+      if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endTime}`)
     })
+  }
+  /** Desk End card stepper: changes the draft adjustment (Save publishes it), same refuse rules as the deck. */
+  function stepEndOffset(minutes: number | null) {
+    const next = minutes === null ? 0 : endOffsetMin + minutes
+    if (next !== 0) {
+      const guard = Math.abs(next) > END_OFFSET_MAX ? `The end can move at most ${END_OFFSET_MAX / 60} h either way.` : endGuard({ event: { ...event, endTime }, testUntil, pausedAt: pausedMs || null }, endTime, nowMs(), next)
+      if (guard) return setToast(guard)
+    }
+    setEndOffsetMin(next)
+    setHoldCountdown(false)
+    setForceEnd(false)
   }
   /** Main/Backup: through the server's transport (logged, synced to every device over the deck socket). */
   async function switchProgramSource(source: ProgramSource) {
@@ -995,7 +1005,7 @@ export function OperatorConsole() {
               <>
                 <div className="mb-4 flex items-center justify-between">
                   <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 uppercase">End card in</h2>
-                  <span className="font-mono text-[12px] text-white/75 uppercase">{endAt}</span>
+                  <span className="font-mono text-[12px] text-white/75 uppercase">{endsLabel(date, time, endTime, timeZone, endOffsetMin)}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   {[
@@ -1086,7 +1096,7 @@ export function OperatorConsole() {
               </Field>
               <Field label="End time" htmlFor="endTime">
                 <Input id="endTime" type="time" value={endTime} onChange={(event) => updateEvent({ endTime: event.target.value })} />
-                {endAt ? null : <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-event-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div>}
+                {<div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-event-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div>}
               </Field>
             </div>
             <Field label="Venue" htmlFor="venue">
@@ -1463,7 +1473,7 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time. When an override is due it cuts over Program too; tap Program or Countdown to stay on past it.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-endcard-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div> : null}</Field>
+            <Field label="End card adjustment" htmlFor="end-offset"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Minutes from the planned end (Event › End time {endTime} on {date}). −2 = finish 2 min early, +10 = 10 min later. Can't go before the doors. An adjusted end cuts over Program when due; tap Program or Countdown to stay on past it.</p><div className="flex flex-wrap items-center gap-1">{END_STEPS.map((m) => <button key={m} type="button" data-testid={`end-offset-${m < 0 ? `minus${-m}` : m}`} onClick={() => stepEndOffset(m)} className="h-8 min-w-11 rounded-full border border-black/20 bg-white px-2 font-mono text-[13px] font-bold tabular-nums hover:bg-black/5">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span>{endOffsetMin ? <Pill size="sm" tone="outline" onClick={() => stepEndOffset(null)}>Clear</Pill> : null}</div><p id="end-offset" data-testid="end-offset-result" className="mt-1.5 font-mono text-[14px] font-bold">Planned {endTime} · {endsLabel(date, time, endTime, timeZone, endOffsetMin)}</p></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
               <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>

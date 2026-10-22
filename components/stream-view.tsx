@@ -10,7 +10,7 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
-import { clampChecker, effectiveEndTime, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
+import { clampChecker, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { SceneCardView } from "@/components/visual-assets"
 import { isScene } from "@/lib/visuals-assets"
@@ -22,7 +22,7 @@ import { VisualsLayer } from "@/components/visuals-layer"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
 import { captureStartReady, handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
-import { endInstant } from "@/lib/transport"
+import { endCardAt } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 import { SyncTestOverlay } from "@/components/sync-test-overlay"
 import { TC_BADGE_W, TC_GAP, TimecodeBadge } from "@/components/timecode-badge"
@@ -192,7 +192,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   }, [transparent])
 
   const clock = testClock ?? now
-  const pastEnd = Boolean(clock && endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
+  const pastEnd = Boolean(clock && endCardAt(event.date, event.time, event.endTime, event.timeZone, stage.endOffsetMin) <= clock.getTime())
   const screen = stageScreen(stage, pastEnd)
   // Main/Backup hand-over: the input on air stays up until the incoming one has a frame (then crossfades
   // on top), or 4s at most (then the incoming one's own standby rules apply). Both are prewarmed.
@@ -335,7 +335,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
       <div className="pointer-events-none absolute top-1/2 left-1/2 z-30 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)] -translate-x-1/2 -translate-y-1/2">
         <VisualsLayer stage={stage} event={event} screen={shownScreen} now={now ? now.getTime() : null}
           // Festival mode counts to the same end the countdown/end card use (test clock shifts it like the countdown).
-          eventEndMs={now && clock ? endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() - (clock.getTime() - now.getTime()) : null} />
+          eventEndMs={now && clock ? endCardAt(event.date, event.time, event.endTime, event.timeZone, stage.endOffsetMin) - (clock.getTime() - now.getTime()) : null} />
       </div>
     </main>
   )

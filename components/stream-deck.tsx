@@ -16,7 +16,7 @@ import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { CARD_OVERLAYS } from "@/lib/stage"
-import { deckScreen, effectiveNow, endInstant, endSoonAt, formatEndWhen, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
+import { deckScreen, effectiveNow, endCardAt, END_STEPS, endsLabel, formatOffset, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
@@ -27,12 +27,12 @@ const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "
 type Preview = "off" | "stream" | "slate" | "capture" | "vertical"
 
 function endCardLabel(state: DeckState, now: number): { when: string; remaining: string; testClock: boolean } {
-  const hhmm = state.endAt || state.endTime
   const stale = state.testStale
   const testClock = Boolean(!stale && (state.testUntil !== null || state.pausedAt !== null))
   const at = effectiveNow({ event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: stale ? null : state.testUntil, pausedAt: stale ? null : state.pausedAt }, now)
-  const when = formatEndWhen(state.date, state.time, hhmm, state.timeZone)
-  const end = endInstant(state.date, state.time, hhmm, state.timeZone)
+  const endMs = endCardAt(state.date, state.time, state.endTime, state.timeZone, state.endOffsetMin)
+  const when = Number.isFinite(endMs) ? new Intl.DateTimeFormat("en-GB", { timeZone: state.timeZone || "UTC", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(endMs).replace(",", "") : state.endTime
+  const end = new Date(endMs)
   if (!Number.isFinite(end.getTime())) return { when, remaining: "—", testClock }
   const r = remainingUntil(end, new Date(at))
   if (r.done) return { when, remaining: state.forceEnd || !state.holdCountdown ? "due / showing" : "past (held)", testClock }
@@ -123,14 +123,18 @@ export function StreamDeck() {
     }
     setArmed(null)
     setBusy(key)
-    const before = { endTime: state.endTime, endAt: state.endAt }
+    const before = { endTime: state.endTime, endOffsetMin: state.endOffsetMin }
     const result = await run(action, state.rev)
     setBusy(null)
     if (result.ok && action.type === "extendEnd") {
-      setToast({ tone: "ok", text: `${action.minutes < 0 ? "Shortened" : "Extended"} to ${extendTarget(before.endTime, before.endAt, action.minutes).to}`, undo: { type: "setEnd", ...before } })
+      setToast({ tone: "ok", text: `${action.minutes < 0 ? "Shortened" : "Extended"} to ${extendTarget(before.endTime, action.minutes).to}`, undo: { type: "setEnd", ...before } })
       if (navigator.vibrate) navigator.vibrate(30)
     } else if (result.ok && action.type === "setEnd") {
-      setToast({ tone: "ok", text: `End back to ${action.endAt || action.endTime}` })
+      setToast({ tone: "ok", text: `End back to ${endsLabel(state.date, state.time, action.endTime, state.timeZone, action.endOffsetMin).replace("Ends ", "")}` })
+    } else if (result.ok && action.type === "endOffset") {
+      const offset = "clear" in action ? 0 : before.endOffsetMin + action.minutes
+      setToast({ tone: "ok", text: endsLabel(state.date, state.time, state.endTime, state.timeZone, offset), undo: { type: "setEnd", ...before } })
+      if (navigator.vibrate) navigator.vibrate(30)
     } else if (result.ok) {
       setToast({ tone: "ok", text: "Done" })
       if (navigator.vibrate) navigator.vibrate(30)
@@ -237,33 +241,27 @@ export function StreamDeck() {
         {JUMPS.map((jump) => button(`jump-${jump.label}`, { type: "jump", seconds: jump.seconds }, jump.label, "outline"))}
       </div>
 
-      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
+      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? `planned ${state.endTime}${state.endOffsetMin ? ` · adjusted ${formatOffset(state.endOffsetMin)}` : ""}` : "—"}</h2>
       {state ? (() => {
         const end = endCardLabel(state, serverNow)
         return (
           <div data-testid="deck-end-time" className="mb-2 rounded-2xl bg-white/5 px-4 py-3">
-            <p className="font-mono text-[13px] text-white/70">Shows <span data-testid="deck-end-when" className="font-bold text-white">{end.when}</span>{state.endAt ? " · override" : " · event end"}{end.testClock ? " · on test clock" : ""}</p>
+            <p className="font-mono text-[13px] text-white/70">Shows <span data-testid="deck-end-when" className="font-bold text-white">{end.when}</span>{state.endOffsetMin ? ` · ${formatOffset(state.endOffsetMin)}` : " · as planned"}{end.testClock ? " · on test clock" : ""}</p>
             <p data-testid="deck-end-remaining" className="mt-1 font-mono text-[18px] font-bold text-white tabular-nums">{end.remaining}</p>
           </div>
         )
       })() : null}
+      <p className="mb-1 font-mono text-[12px] text-white/60">Adjust the end card (from planned) · two taps</p>
       <div className="mb-2 flex items-center gap-1.5">
-        {state
-          ? ([2, 5] as const).map((m) => {
-              const hhmm = endSoonAt(
-                { event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: state.testStale ? null : state.testUntil, pausedAt: state.testStale ? null : state.pausedAt },
-                serverNow,
-                m,
-              )
-              return button(`end-soon-${m}`, { type: "setEnd", endTime: state.endTime, endAt: hhmm }, `End in ${m}m`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]!")
-            })
-          : null}
+        {END_STEPS.map((m) => button(`end-offset-${m < 0 ? `minus${-m}` : m}`, { type: "endOffset", minutes: m }, m < 0 ? `−${-m}m` : `+${m}m`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]! tabular-nums"))}
+        {state?.endOffsetMin ? button("end-offset-clear", { type: "endOffset", clear: true }, "Clear", "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]!") : null}
       </div>
+      <p className="mb-1 font-mono text-[12px] text-white/60">Planned end (Event › End time)</p>
       <div className="flex items-center gap-1.5">
         {EXTENDS.map((m) => button(`extend-${m < 0 ? `minus${-m}` : m}`, { type: "extendEnd", minutes: m }, m < 0 ? `−${-m}` : `+${m}`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[16px]! tabular-nums"))}
         <span className="shrink-0 font-mono text-[12px] text-white/60">min</span>
       </div>
-      <p className="mt-2 font-mono text-[12px] text-white/60">End in 2m/5m follows the test clock (not your phone time) and will cut over Program when due. After it shows, tap Program to stay on OBS past the end; tapping End in 2m again only delays another cut. ±min nudges the override or Event › End time. HH:MM before the start = next morning.</p>
+      <p className="mt-2 font-mono text-[12px] text-white/60">−5/−1/+1/+5 move the end card from the planned end on the event date (−2 = 2 min early); an adjusted end cuts over Program when due, tap Program to stay on OBS past it. Clear = back to planned. The lower ±min row moves the planned Event › End time itself.</p>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Screen</h2>
       <div className="grid grid-cols-2 gap-2">
