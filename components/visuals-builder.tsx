@@ -8,7 +8,7 @@
  */
 import Link from "next/link"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { CountdownStage } from "@/components/countdown-stage"
+import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
 import { VisualsLayer } from "@/components/visuals-layer"
 import { SceneCardView } from "@/components/visual-assets"
 import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
@@ -84,6 +84,8 @@ export function VisualsBuilder() {
   const [screen, setScreen] = useState<LayoutScreen>("countdown")
   const [guides, setGuides] = useState(true)
   const [showAll, setShowAll] = useState(true)
+  /** Preview only: countdown-page parts hidden while placing overlays (never saved, /stream unaffected). */
+  const [cdHide, setCdHide] = useState<Partial<Record<CountdownPart, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -195,7 +197,7 @@ export function VisualsBuilder() {
           {(["countdown", "program"] as const).map((s) => <button key={s} type="button" data-testid={`vb-screen-${s}`} aria-pressed={screen === s} onClick={() => setScreen(s)} className={chip(screen === s)}>{s === "countdown" ? "Countdown" : "Program"}</button>)}
         </div>
         <button type="button" data-testid="vb-guides" aria-pressed={guides} onClick={() => setGuides(!guides)} className={chip(guides)}>Safe-area guides</button>
-        <button type="button" data-testid="vb-showall" aria-pressed={showAll} onClick={() => setShowAll(!showAll)} className={chip(showAll)}>Show all (preview)</button>
+        <button type="button" data-testid="vb-showall" aria-pressed={showAll} onClick={() => setShowAll(!showAll)} className={chip(showAll)}>Show all overlays (preview)</button>
         <div className="ml-auto flex items-center gap-2">
           {note ? <span data-testid="vb-note" className={`font-mono text-[11px] ${note.tone === "ok" ? "text-[#D9FF43]" : "text-[#FF3B3B]"}`}>{note.text}</span> : null}
           {dirty ? <span className="font-mono text-[11px] text-[#FF6A00]">Unsaved changes</span> : null}
@@ -250,7 +252,7 @@ export function VisualsBuilder() {
               <CountdownStage event={event} checker={stage.checker} showMeta={stage.showMeta} showLink={stage.showLink} lineSpacing={stage.lineSpacing} blockGap={stage.blockGap}
                 clockScale={stage.clockScale} clockText={stage.clockText} logoUrl={stage.logoUrl} speakers={stage.speakers} gallerySeconds={stage.gallerySeconds} galleryPause={stage.galleryPause}
                 galleryOffset={stage.galleryOffset} galleryScale={stage.galleryScale} social={socialLook(stage)} countdownStrokePx={stage.countdownStrokePx} countdownStrokeColor={stage.countdownStrokeColor}
-                className="absolute inset-0 h-full w-full" />
+                hide={cdHide} className="absolute inset-0 h-full w-full" />
             ) : (
               <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,#3a3a44,#141414_70%)]">
                 <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-mono text-[11px] tracking-[0.3em] text-white/25 uppercase">Program feed</span>
@@ -266,6 +268,13 @@ export function VisualsBuilder() {
               </div>
             ) : null}
           </div>
+          {screen === "countdown" ? (
+            <div data-testid="vb-cd-hide" className="flex flex-wrap items-center gap-1">
+              <span className={`${mono} mr-1`}>Hide on countdown (preview only)</span>
+              {COUNTDOWN_PARTS.map((part) => <button key={part} type="button" data-testid={`vb-cd-hide-${part}`} aria-pressed={Boolean(cdHide[part])} onClick={() => setCdHide({ ...cdHide, [part]: !cdHide[part] })} className={chip(Boolean(cdHide[part]))}>{COUNTDOWN_PART_LABEL[part]}</button>)}
+              <button type="button" data-testid="vb-cd-hide-reset" onClick={() => setCdHide({})} className={btn}>Show page</button>
+            </div>
+          ) : null}
           <p className="font-mono text-[11px] text-white/45">1920×1080 scaled · {screen === "countdown" ? "Countdown screen" : "Program"} · {showAll ? "every part forced on in the preview only" : "showing what is on air now"} · <span className="text-[#C6FF00]">lime = safe 5%</span> · <span className="text-[#FF6A00]">orange = edge {EDGE_PX}px</span></p>
         </section>
 
@@ -326,7 +335,7 @@ export function VisualsBuilder() {
               <div className="grid gap-1"><Label live>Type</Label>
                 <div className="flex gap-1">{TICKER_TYPES.map((t) => <button key={t} type="button" data-testid={`vb-ticker-${t}`} className={chip(stage.tickerType === t)} onClick={() => void visual({ target: "ticker", tickerType: t as TickerType })}>{t}</button>)}</div>
               </div>
-              <LiveText label="Items (one per line)" testId="vb-ticker-items" multiline value={(live?.tickerItems ?? []).join("\n")} onApply={(v) => void visual({ target: "ticker", items: sanitizeTickerItems(v) })} />
+              <LiveText key={stage.tickerType} label={`${stage.tickerType === "social" ? "Social" : "Planner"} items (one per line)`} testId="vb-ticker-items" multiline value={(stage.tickerType === "social" ? live?.tickerSocialItems : live?.tickerPlannerItems) ?.join("\n") ?? ""} onApply={(v) => void visual({ target: "ticker", items: sanitizeTickerItems(v), list: stage.tickerType })} />
               <p className="font-mono text-[10px] text-white/45">The bar runs full width at the bottom; bottom parts lift above it while it shows. Show/Hide is on the deck.</p>
             </div>
           ) : (() => {
@@ -345,7 +354,7 @@ export function VisualsBuilder() {
                     {CORNERS.map((c) => {
                       const active = deckCorner ? liveCorner === c : p.corner === c
                       return <button key={c} type="button" data-testid={`vb-corner-${c}`} aria-pressed={active} className={chip(active)}
-                        onClick={() => (deckCorner ? void act(part === "strap" ? { type: "strap", corner: c } : { type: "socials", corner: c }) : set({ corner: c }))}>{CORNER_LABEL[c]}</button>
+                        onClick={() => (deckCorner ? void act(part === "strap" ? { type: "strap", corner: c } : { type: "socials", corner: c }) : set({ corner: c, ...(c !== p.corner ? { dx: 0, dy: 0 } : {}) }))}>{CORNER_LABEL[c]}</button>
                     })}
                   </div>
                 </div>
@@ -355,7 +364,7 @@ export function VisualsBuilder() {
                 <Slider label="X gap" testId="vb-dx" value={p.dx} range={GAP_X_RANGE} onChange={(n) => set({ dx: n })} />
                 <Slider label="Y gap" testId="vb-dy" value={p.dy} range={GAP_Y_RANGE} onChange={(n) => set({ dy: n })} />
                 <Slider label="Size" testId="vb-size" unit="%" value={p.size} range={SIZE_RANGE} onChange={(n) => set({ size: n })} />
-                <p className="font-mono text-[10px] text-white/45">Layout applies on Save, for the {screen} screen only.</p>
+                <p className="font-mono text-[10px] text-white/45">Gaps run from the chosen corner across the full 1920x1080 frame; picking a new corner resets them to 0. Layout applies on Save, for the {screen} screen only.</p>
                 <hr className="border-[#2a2a2a]" />
                 {part === "strap" ? (
                   <>

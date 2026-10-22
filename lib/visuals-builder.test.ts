@@ -10,7 +10,7 @@ const T0 = 1_800_000_000_000
 test("layout: junk falls back to defaults, values clamped, stage keeps it", () => {
   assert.deepEqual(parseVisualsLayout(null), DEFAULT_LAYOUT)
   const l = parseVisualsLayout({ program: { talk: { corner: "bottom-right", snap: "edge", dx: 5000, dy: -3, size: 10 } }, countdown: "x" })
-  assert.deepEqual(l.program.talk, { corner: "bottom-right", snap: "edge", dx: 900, dy: 0, size: 50 })
+  assert.deepEqual(l.program.talk, { corner: "bottom-right", snap: "edge", dx: 1800, dy: 0, size: 50 })
   assert.deepEqual(l.countdown, DEFAULT_LAYOUT.countdown)
   assert.deepEqual(parseStage({}).visualsLayout, DEFAULT_LAYOUT)
   const s = parseStage({ visualsLayout: { countdown: { qa: { corner: "top-left", dx: 12 } } } })

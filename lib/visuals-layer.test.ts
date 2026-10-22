@@ -90,7 +90,7 @@ test("deck action 'visual': parse rejects junk, patches apply", () => {
   assert.deepEqual(visualPatch(stage, { type: "visual", target: "talk", op: "stop" }, T0), { talkEndsAt: null, talkPausedMs: null })
   assert.deepEqual(visualPatch(stage, { type: "visual", target: "talk", show: true, mode: "festival" }, T0), { talkVisible: true, talkMode: "festival" })
   const tick = parseAction({ type: "visual", target: "ticker", show: true, tickerType: "social", items: "a\nb" })
-  assert.deepEqual(visualPatch(stage, tick as never, T0), { tickerVisible: true, tickerType: "social", tickerItems: ["a", "b"] })
+  assert.deepEqual(visualPatch(stage, tick as never, T0), { tickerVisible: true, tickerType: "social", tickerPlannerItems: [], tickerSocialItems: ["a", "b"], tickerItems: ["a", "b"] })
   assert.deepEqual(visualPatch(stage, { type: "visual", target: "qa", show: true, text: "Ask us" }, T0), { qaVisible: true, qaText: "Ask us" })
   assert.deepEqual(visualPatch(stage, { type: "visual", target: "sponsor", show: false }, T0), { sponsorVisible: false })
   assert.deepEqual(visualPatch(stage, { type: "visual", target: "stream", show: false }, T0), { streamVisuals: false })

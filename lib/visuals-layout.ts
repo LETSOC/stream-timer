@@ -17,8 +17,9 @@ export const SNAPS = ["safe", "edge"] as const
 export type Snap = (typeof SNAPS)[number]
 /** Edge snap: this far from the frame (same 32px margin as the countdown stage). */
 export const EDGE_PX = 32
-export const GAP_X_RANGE = { min: 0, max: 900 } as const
-export const GAP_Y_RANGE = { min: 0, max: 500 } as const
+/** Gaps span the whole 1920x1080 frame from any corner (a part can sit anywhere, not just near its corner). */
+export const GAP_X_RANGE = { min: 0, max: 1800 } as const
+export const GAP_Y_RANGE = { min: 0, max: 1000 } as const
 export const SIZE_RANGE = { min: 50, max: 200 } as const
 
 export type PartPlace = { corner: Corner; snap: Snap; dx: number; dy: number; size: number }
