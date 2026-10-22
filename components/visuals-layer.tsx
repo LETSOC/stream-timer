@@ -5,7 +5,7 @@
  * 16:9 frame. Rendered on /stream (so it is in the capture → YouTube, Restream, Vertical) and on the
  * transparent OBS source /overlay/visuals. Pure view of the stage; the deck writes the stage.
  *
- * Z-order (low → high): ticker bar, pills (talk-ends, Sponsored, Q&A), name strap, social circles.
+ * Z-order (low → high): ticker bar, social circles, logos, QR, pills (talk-ends, Sponsored, Q&A), name strap.
  * Full-screen cards (break / hold / welcome / end) hide the whole layer: they are their own visual.
  */
 import type { CSSProperties, ReactNode } from "react"
@@ -95,28 +95,7 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
           <div className="vl-marquee">{[0, 1].map((copy) => <span key={copy} className="vl-ticker-run">{stage.tickerItems.map((item, i) => <span key={i} className="vl-ticker-item">{tickerLine(stage.tickerType, item)}</span>)}</span>)}</div>
         </div>
       </div>
-      <Pill show={parts.talk} kind="talk" testId="vl-talk" place={at("talk")}>
-        <span className={`vl-rec ${stage.talkMode === "festival" ? "vl-rec-festival" : ""} ${talk.over ? "vl-rec-over" : ""}`} />
-        <span className="vl-talk-prefix">{stage.talkMode === "festival" ? stage.festivalPrefix : stage.talkPrefix}</span>
-        <span data-testid="vl-talk-clock" className={`vl-talk-clock ${talk.over ? "vl-over" : ""}`}>{formatClock(talk.ms)}{paused ? " ❚❚" : ""}</span>
-        <span className="vl-talk-accent" />
-      </Pill>
-      <Pill show={parts.sponsor} kind="sponsor" testId="vl-sponsor" place={at("sponsor")}>{stage.sponsorText}</Pill>
-      <Pill show={parts.qa} kind="qa" testId="vl-qa" place={at("qa")}>{stage.qaText}</Pill>
-      {LOGO_IDS.map((id) => {
-        const show = parts.logos.includes(id)
-        const place = at(id)
-        return <div key={id} className="vl-place" data-part={id} data-corner={place.corner} style={place.style}><LogoMark id={id} cfg={stage.logos[id]} show={show} /></div>
-      })}
-      {(["qr", "qrLogo"] as const).map((part) => {
-        const place = at(part)
-        return <div key={part} className="vl-place" data-part={part} data-corner={place.corner} style={place.style}><QrMark cfg={stage.qr} variant={part === "qr" ? "animated" : "logo"} show={parts[part]} now={now} testId={part === "qr" ? "vl-qr" : "vl-qr-logo"} /></div>
-      })}
-      {preset ? (
-        <div className="vl-anchor" data-part="strap" style={strapAt.style} data-corner={strapAt.corner}>
-          <NameStrap key={preset.id} preset={preset} visible={strapOn} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText, accentCircle: stage.strapAccentCircle, arrow: stage.strapArrow }} />
-        </div>
-      ) : null}
+      {/* Stacking (low → high): ticker, social circles, logos, QR, pills, name strap. */}
       {parts.socials ? (
         <div className="vl-anchor" data-part="socials" style={socialsAt.style} data-corner={socialsAt.corner}>
           <SocialCircles
@@ -131,6 +110,28 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
               { label: "YouTube", href: event.youtubeUrl, icon: <YouTubeIcon /> },
             ]}
           />
+        </div>
+      ) : null}
+      {LOGO_IDS.map((id) => {
+        const show = parts.logos.includes(id)
+        const place = at(id)
+        return <div key={id} className="vl-place" data-part={id} data-corner={place.corner} style={place.style}><LogoMark id={id} cfg={stage.logos[id]} show={show} /></div>
+      })}
+      {(["qr", "qrLogo"] as const).map((part) => {
+        const place = at(part)
+        return <div key={part} className="vl-place" data-part={part} data-corner={place.corner} style={place.style}><QrMark cfg={stage.qr} variant={part === "qr" ? "animated" : "logo"} show={parts[part]} now={now} testId={part === "qr" ? "vl-qr" : "vl-qr-logo"} /></div>
+      })}
+      <Pill show={parts.talk} kind="talk" testId="vl-talk" place={at("talk")}>
+        <span className={`vl-rec ${stage.talkMode === "festival" ? "vl-rec-festival" : ""} ${talk.over ? "vl-rec-over" : ""}`} />
+        <span className="vl-talk-prefix">{stage.talkMode === "festival" ? stage.festivalPrefix : stage.talkPrefix}</span>
+        <span data-testid="vl-talk-clock" className={`vl-talk-clock ${talk.over ? "vl-over" : ""}`}>{formatClock(talk.ms)}{paused ? " ❚❚" : ""}</span>
+        <span className="vl-talk-accent" />
+      </Pill>
+      <Pill show={parts.sponsor} kind="sponsor" testId="vl-sponsor" place={at("sponsor")}>{stage.sponsorText}</Pill>
+      <Pill show={parts.qa} kind="qa" testId="vl-qa" place={at("qa")}>{stage.qaText}</Pill>
+      {preset ? (
+        <div className="vl-anchor" data-part="strap" style={strapAt.style} data-corner={strapAt.corner}>
+          <NameStrap key={preset.id} preset={preset} visible={strapOn} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText, accentCircle: stage.strapAccentCircle, arrow: stage.strapArrow }} />
         </div>
       ) : null}
     </div>

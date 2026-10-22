@@ -63,7 +63,11 @@ export type StageOptions = {
   /** Bottom ticker bar (marquee). */
   tickerVisible: boolean
   tickerType: TickerType
+  /** The active type's items (what the bar shows) = tickerPlannerItems or tickerSocialItems. Kept in sync. */
   tickerItems: string[]
+  /** Separate saved lists per ticker type (switching type shows that type's own items). */
+  tickerPlannerItems: string[]
+  tickerSocialItems: string[]
   /** Q&A white pill (bottom-right) and Sponsored black pill (top-right). */
   qaVisible: boolean
   qaText: string
@@ -176,6 +180,8 @@ export const DEFAULT_STAGE: StageOptions = {
   tickerVisible: false,
   tickerType: "planner",
   tickerItems: [],
+  tickerPlannerItems: [],
+  tickerSocialItems: [],
   qaVisible: false,
   qaText: "Q&A · Ask a question →",
   sponsorVisible: false,
@@ -316,7 +322,20 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     festivalPrefix: pick("festivalPrefix", (v, f) => visualText(v, f) || f),
     tickerVisible: pick("tickerVisible", (v) => v === true),
     tickerType: pick("tickerType", (v) => parseTickerType(v)),
-    tickerItems: pick("tickerItems", (v) => sanitizeTickerItems(v)),
+    ...(() => {
+      // Per-type lists; an old single list (tickerItems only) migrates into the current type.
+      const type = has("tickerType") ? parseTickerType(r.tickerType) : base.tickerType
+      let planner = has("tickerPlannerItems") ? sanitizeTickerItems(r.tickerPlannerItems) : base.tickerPlannerItems
+      let social = has("tickerSocialItems") ? sanitizeTickerItems(r.tickerSocialItems) : base.tickerSocialItems
+      if (has("tickerItems") && !has("tickerPlannerItems") && !has("tickerSocialItems")) {
+        const legacy = sanitizeTickerItems(r.tickerItems)
+        if (type === "social") social = legacy
+        else planner = legacy
+      }
+      planner = planner ?? []
+      social = social ?? []
+      return { tickerPlannerItems: planner, tickerSocialItems: social, tickerItems: type === "social" ? social : planner }
+    })(),
     qaVisible: pick("qaVisible", (v) => v === true),
     qaText: pick("qaText", (v, f) => visualText(v, f) || f),
     sponsorVisible: pick("sponsorVisible", (v) => v === true),
@@ -432,4 +451,4 @@ export function socialLook(stage: StageOptions) {
 }
 
 /** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
-export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "logosOn", "qrOn", "qrLogoOn"] as const satisfies readonly (keyof StageOptions)[]
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "logosOn", "qrOn", "qrLogoOn"] as const satisfies readonly (keyof StageOptions)[]

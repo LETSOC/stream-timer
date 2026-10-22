@@ -507,3 +507,9 @@ html:has([data-desk-root]) body {
 @media (prefers-reduced-motion: reduce) {
   .strap-live-dot, .strap-house .strap-dot, .scene-dot, .scene-dots i, .scene-center, .vl-qr-animated.vl-on svg { animation: none !important; }
 }
+/* Layer stacking (explicit, so transforms/animations never reorder it): ticker < socials < logos/QR < pills < strap */
+.visuals-layer > .vl-ticker { z-index: 0; }
+.visuals-layer > [data-part="socials"] { z-index: 1; }
+.visuals-layer > [data-part^="logo"], .visuals-layer > [data-part^="qr"] { z-index: 2; }
+.visuals-layer > [data-part="talk"], .visuals-layer > [data-part="sponsor"], .visuals-layer > [data-part="qa"] { z-index: 3; }
+.visuals-layer > [data-part="strap"] { z-index: 4; }
