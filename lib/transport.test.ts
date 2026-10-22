@@ -213,3 +213,40 @@ test("formatEndWhen: date + time in the event zone, next day when the end is bef
   assert.equal(formatEndWhen("2026-11-04", "09:30", "09:32", "Europe/London"), "4 Nov 09:32")
   assert.equal(formatEndWhen("2026-11-04", "23:30", "00:15", "Europe/London"), "5 Nov 00:15 · next day")
 })
+
+test("End in 2m on a test clock doesn't stick 2 min after doors once the test clock is reset/restored", () => {
+  const ev = { ...DEFAULT_EVENT, date: "2026-11-04", time: "09:30", endTime: "16:15", timeZone: "Europe/London" } as EventConfig
+  const doors = Date.parse("2026-11-04T09:30:00Z")
+  // Test clock: 60s to the doors.
+  const test = base({ event: ev, testUntil: NOW + 60_000 })
+  const at = endSoonAt(test, NOW, 2)
+  assert.equal(at, "09:31")
+  const set = applyTransport(test, { type: "setEnd", endTime: "16:15", endAt: at }, NOW)
+  assert.ok(set.ok)
+  if (!set.ok) return
+  assert.equal(set.next.stage.endAt, "09:31")
+  for (const type of ["reset", "restore"] as const) {
+    const r = applyTransport(set.next, { type }, NOW)
+    assert.ok(r.ok)
+    if (!r.ok) continue
+    assert.equal(r.next.stage.endAt, "", type)
+    // Real event day, 2 min after doors: not the end card.
+    const end = endInstant(ev.date, ev.time, r.next.stage.endAt || ev.endTime, ev.timeZone).getTime()
+    assert.equal(stageScreen({ ...r.next.stage, program: true }, end <= doors + 120_000), "program")
+  }
+  // No test clock: a real override survives a reset.
+  const real = base({ event: ev, stage: { ...DEFAULT_STAGE, endAt: "17:00" } })
+  const kept = applyTransport(real, { type: "reset" }, NOW)
+  assert.ok(kept.ok && kept.next.stage.endAt === "17:00")
+})
+
+test("End in Nm before the doors is refused (it would roll to the next day)", () => {
+  const ev = { ...DEFAULT_EVENT, date: "2026-11-04", time: "09:30", endTime: "16:15", timeZone: "Europe/London" } as EventConfig
+  const test = base({ event: ev, testUntil: NOW + 10 * 60_000 })
+  const at = endSoonAt(test, NOW, 2)
+  assert.equal(at, "09:22")
+  const r = applyTransport(test, { type: "setEnd", endTime: "16:15", endAt: at }, NOW)
+  assert.equal(r.ok, false)
+  // Clearing / undo is always allowed.
+  assert.ok(applyTransport(test, { type: "setEnd", endTime: "16:15", endAt: "" }, NOW).ok)
+})

@@ -133,6 +133,8 @@ export function eventTarget(event: Pick<EventConfig, "date" | "time" | "timeZone
 }
 
 /** The time /stream counts against: the paused moment, else now shifted by the test clock. */
+const testClockOn = (s: Pick<TransportState, "testUntil" | "pausedAt">) => s.testUntil !== null || s.pausedAt !== null
+
 export function effectiveNow(state: Pick<TransportState, "event" | "testUntil" | "pausedAt">, now: number): number {
   if (state.pausedAt !== null) return state.pausedAt
   const target = eventTarget(state.event).getTime()
@@ -266,9 +268,10 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       return next({ testUntil: target - state.pausedAt + now, pausedAt: null })
     }
     case "reset":
-      return next({ testUntil: null, pausedAt: null })
+      // An end card override set while a test clock ran is a test-time HH:MM: it must not stick into the real run.
+      return next({ testUntil: null, pausedAt: null }, testClockOn(state) ? { endAt: "" } : {})
     case "restore":
-      return next({ event: { ...state.event, date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }, testUntil: null, pausedAt: null })
+      return next({ event: { ...state.event, date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }, testUntil: null, pausedAt: null }, testClockOn(state) ? { endAt: "" } : {})
     case "screen": {
       const overlay = isCard(action.screen) ? action.screen : "none"
       const overlayAt = overlay === "none" ? null : overlay === state.stage.overlay ? state.stage.overlayAt ?? now : now
@@ -297,8 +300,18 @@ export function applyTransport(state: TransportState, action: TransportAction, n
       return next({}, { programSource: action.source })
     case "streamAudio":
       return next({}, { ...(action.program === undefined ? {} : { streamProgramAudio: action.program }), ...(action.bed === undefined ? {} : { streamBedAudio: action.bed }) })
-    case "setEnd":
+    case "setEnd": {
+      // New override (End in 2m/5m): must land after the start and after now, else it rolls to the next day or
+      // sits before the doors. Undo back to an earlier value / clearing it is always allowed.
+      if (action.endAt && action.endAt !== state.stage.endAt) {
+        const start = eventTarget(state.event).getTime()
+        // Before the doors, an HH:MM earlier than the start means "tomorrow" (endInstant): that's never what End in Nm meant.
+        if (effectiveNow(state, now) < start && action.endAt < state.event.time) return { ok: false, error: `Can't end at ${action.endAt}: that's before the doors open (${state.event.time}).` }
+        const guard = endGuard(state, action.endAt, now)
+        if (guard) return { ok: false, error: guard }
+      }
       return next({ event: { ...state.event, endTime: action.endTime } }, { endAt: action.endAt, holdCountdown: false })
+    }
     case "strap": {
       const id = action.id ?? state.stage.strapId
       if (action.mode && action.mode !== "out" && !state.stage.straps.some((p) => p.id === id)) return { ok: false, error: "Pick a saved strap first." }
