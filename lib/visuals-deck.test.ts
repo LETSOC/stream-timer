@@ -36,5 +36,5 @@ test("Clear all: everything off the picture, timer and texts kept", () => {
   const a = parseAction({ type: "visual", target: "clear" })
   assert.ok(a && a.type === "visual")
   const p = visualPatch({ ...DEFAULT_STAGE, talkEndsAt: T0 }, a as never, T0)
-  assert.deepEqual(p, { strapMode: "out", talkVisible: false, tickerVisible: false, qaVisible: false, sponsorVisible: false, socialsOverlay: false })
+  assert.deepEqual(p, { strapMode: "out", talkVisible: false, tickerVisible: false, qaVisible: false, sponsorVisible: false, socialsOverlay: false, logosOn: [], qrOn: false, qrLogoOn: false })
 })
