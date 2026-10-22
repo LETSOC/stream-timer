@@ -7,14 +7,35 @@
  *    PUT /api/event overwrites live fields with the current live values, so they can't go via Save.
  */
 import { parseStage, type StageOptions } from "@/lib/stage"
+import { LOGO_IDS, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { newStrapId, STRAP_MAX, type StrapPreset } from "@/lib/visuals"
 import { parseVisualsLayout, type LayoutPart, type LayoutScreen, type PartPlace, type VisualsLayout } from "@/lib/visuals-layout"
 
-export type BuilderDraft = { straps: StrapPreset[]; strapAccent: string; strapText: string; visualsLayout: VisualsLayout }
-export const DRAFT_KEYS = ["straps", "strapAccent", "strapText", "visualsLayout"] as const satisfies readonly (keyof StageOptions)[]
+export type BuilderDraft = {
+  straps: StrapPreset[]
+  strapAccent: string
+  strapText: string
+  strapAccentCircle: boolean
+  strapArrow: boolean
+  visualsLayout: VisualsLayout
+  logos: Logos
+  qr: QrConfig
+  scenes: Record<SceneId, SceneCard>
+}
+export const DRAFT_KEYS = ["straps", "strapAccent", "strapText", "strapAccentCircle", "strapArrow", "visualsLayout", "logos", "qr", "scenes"] as const satisfies readonly (keyof StageOptions)[]
 
 export function draftFrom(stage: StageOptions): BuilderDraft {
-  return { straps: stage.straps, strapAccent: stage.strapAccent, strapText: stage.strapText, visualsLayout: parseVisualsLayout(stage.visualsLayout) }
+  return {
+    straps: stage.straps,
+    strapAccent: stage.strapAccent,
+    strapText: stage.strapText,
+    strapAccentCircle: stage.strapAccentCircle,
+    strapArrow: stage.strapArrow,
+    visualsLayout: parseVisualsLayout(stage.visualsLayout),
+    logos: parseLogos(stage.logos),
+    qr: parseQr(stage.qr),
+    scenes: parseScenes(stage.scenes),
+  }
 }
 
 export function draftDirty(stage: StageOptions, draft: BuilderDraft): boolean {
@@ -30,7 +51,7 @@ export type LoadedEvent = { event: unknown; stage: Record<string, unknown>; rev:
 export function saveBody(loaded: LoadedEvent, draft: BuilderDraft) {
   return {
     event: loaded.event,
-    stage: { ...loaded.stage, straps: draft.straps, strapAccent: draft.strapAccent, strapText: draft.strapText, visualsLayout: draft.visualsLayout },
+    stage: { ...loaded.stage, ...Object.fromEntries(DRAFT_KEYS.map((k) => [k, draft[k]])) },
     rev: loaded.rev,
     testUntil: loaded.testUntil,
     pausedAt: loaded.pausedAt,
@@ -61,7 +82,7 @@ export function deleteStrap(straps: StrapPreset[], id: string): StrapPreset[] {
  * The stage the preview draws: saved stage, then the live deck values, then the draft.
  * `showAll` forces every part on (preview only, never saved) so the layout can be judged.
  */
-export function previewStage(saved: Record<string, unknown>, live: Record<string, unknown> | undefined, draft: BuilderDraft, opts: { showAll: boolean; strapId?: string; now: number }): StageOptions {
+export function previewStage(saved: Record<string, unknown>, live: Record<string, unknown> | undefined, draft: BuilderDraft, opts: { showAll: boolean; strapId?: string; now: number; logo?: LogoId }): StageOptions {
   const base = parseStage({ ...saved, ...(live ?? {}), ...draft })
   if (!opts.showAll) return base
   const strapId = opts.strapId && base.straps.some((s) => s.id === opts.strapId) ? opts.strapId : base.straps[0]?.id ?? ""
@@ -79,5 +100,9 @@ export function previewStage(saved: Record<string, unknown>, live: Record<string
     qaVisible: true,
     sponsorVisible: true,
     socialsOverlay: true,
+    // One logo at a time (they share a slot): the picked one, else Logo 1.
+    logosOn: [opts.logo && LOGO_IDS.includes(opts.logo) ? opts.logo : "logo1"],
+    qrOn: true,
+    qrLogoOn: true,
   }
 }

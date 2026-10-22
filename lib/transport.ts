@@ -8,6 +8,7 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import type { FailoverEvent, FailoverSettings, ReturnStatus, SourceHealth } from "@/lib/program-source"
 import type { InputReadout } from "@/lib/input-state"
 import { stageScreen, testClockStale, type StageOptions } from "@/lib/stage"
+import { isScene, LOGO_IDS, SCENE_IDS, type LogoId, type SceneId } from "@/lib/visuals-assets"
 import { clampHold, CORNERS, parseTalkTimer, sanitizeTickerItems, talkAdjust, talkPause, talkResume, talkStart, TALK_MAX_SEC, TALK_MODES, TALK_STOPPED, TICKER_TYPES, visualText, type TalkMode, type TickerType, STRAP_MODES, STRAP_MOTIONS, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export const JUMPS = [
@@ -17,8 +18,10 @@ export const JUMPS = [
   { label: "1h", seconds: 3600 },
 ] as const
 
-export type Screen = "break" | "hold" | "welcome" | "program" | "end" | "countdown"
-export const SCREENS: readonly Screen[] = ["countdown", "break", "hold", "welcome", "program", "end"]
+export type Screen = "break" | "hold" | "welcome" | SceneId | "program" | "end" | "countdown"
+export const SCREENS: readonly Screen[] = ["countdown", "break", "hold", "welcome", ...SCENE_IDS, "program", "end"]
+/** Full-screen cards (they cover program): break / hold / welcome and the extra scene cards. */
+export const isCard = (s: unknown): s is "break" | "hold" | "welcome" | SceneId => s === "break" || s === "hold" || s === "welcome" || isScene(s)
 
 export type TransportAction =
   | { type: "jump"; seconds: number }
@@ -44,9 +47,9 @@ export type TransportAction =
   /** A/V diagnostics: STREAM timecode on /stream (diagnostic only). */
   | { type: "timecode"; show?: boolean; fps?: number }
   /** Visuals layer: talk-ends pill (timer start/add/pause/resume/stop, Session/Festival), ticker, Q&A, Sponsored, and the /stream master switch. Applied at once. */
-  | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string; talkPrefix?: string; festivalPrefix?: string }
+  | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string; talkPrefix?: string; festivalPrefix?: string; logo?: LogoId }
 
-export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream", "clear"] as const
+export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream", "clear", "logo", "qr", "qrLogo"] as const
 export type VisualTarget = (typeof VISUAL_TARGETS)[number]
 export const TALK_OPS = ["start", "add", "pause", "resume", "stop"] as const
 export type TalkOp = (typeof TALK_OPS)[number]
@@ -218,6 +221,10 @@ export function parseAction(value: unknown): TransportAction | null {
         if (Array.isArray(v.items) || typeof v.items === "string") out.items = sanitizeTickerItems(v.items)
       }
       if ((out.target === "qa" || out.target === "sponsor") && typeof v.text === "string") out.text = v.text
+      if (out.target === "logo") {
+        if (!LOGO_IDS.includes(v.logo as LogoId) || out.show === undefined) return null
+        out.logo = v.logo as LogoId
+      }
       return out.target === "clear" || Object.keys(out).length > 2 ? out : null
     }
     case "timecode": {
@@ -261,7 +268,7 @@ export function applyTransport(state: TransportState, action: TransportAction, n
     case "restore":
       return next({ event: { ...state.event, date: DEFAULT_EVENT.date, time: DEFAULT_EVENT.time, timeZone: DEFAULT_EVENT.timeZone }, testUntil: null, pausedAt: null })
     case "screen": {
-      const overlay = action.screen === "break" || action.screen === "hold" || action.screen === "welcome" ? action.screen : "none"
+      const overlay = isCard(action.screen) ? action.screen : "none"
       const overlayAt = overlay === "none" ? null : overlay === state.stage.overlay ? state.stage.overlayAt ?? now : now
       // Cards sit on top of the program feed (it stays "on" underneath); countdown/end switch it off.
       const program = action.screen === "program" ? true : overlay !== "none" ? state.stage.program : false
@@ -365,6 +372,9 @@ export type DeckState = {
     sponsorText?: string
     qaVisible?: boolean
     sponsorVisible?: boolean
+    logosOn?: LogoId[]
+    qrOn?: boolean
+    qrLogoOn?: boolean
   }
   serverNow: number
 }
@@ -423,6 +433,9 @@ export function deckState(
       sponsorText: state.stage.sponsorText ?? "",
       qaVisible: state.stage.qaVisible === true,
       sponsorVisible: state.stage.sponsorVisible === true,
+      logosOn: state.stage.logosOn ?? [],
+      qrOn: state.stage.qrOn === true,
+      qrLogoOn: state.stage.qrLogoOn === true,
     },
     serverNow: now,
   }
@@ -445,7 +458,7 @@ export function visualPatch(stage: StageOptions, action: Extract<TransportAction
       return show === undefined ? {} : { streamVisuals: show }
     case "clear":
       // Clear all overlays: everything off the picture (strap OUT, pills, ticker, socials). Timer keeps running; texts kept.
-      return { strapMode: "out", talkVisible: false, tickerVisible: false, qaVisible: false, sponsorVisible: false, socialsOverlay: false }
+      return { strapMode: "out", talkVisible: false, tickerVisible: false, qaVisible: false, sponsorVisible: false, socialsOverlay: false, logosOn: [], qrOn: false, qrLogoOn: false }
     case "talk": {
       const patch: Partial<StageOptions> = {}
       if (show !== undefined) patch.talkVisible = show
@@ -470,6 +483,16 @@ export function visualPatch(stage: StageOptions, action: Extract<TransportAction
       if (action.op === "start") Object.assign(patch, { talkVisible: show ?? true, talkMode: action.mode ?? "session" })
       return patch
     }
+    case "logo": {
+      if (!action.logo || show === undefined) return {}
+      const cur = stage.logosOn ?? []
+      const next = show ? [...cur.filter((id) => id !== action.logo), action.logo] : cur.filter((id) => id !== action.logo)
+      return { logosOn: LOGO_IDS.filter((id) => next.includes(id)) }
+    }
+    case "qr":
+      return show === undefined ? {} : { qrOn: show }
+    case "qrLogo":
+      return show === undefined ? {} : { qrLogoOn: show }
     case "ticker":
       return { ...(show === undefined ? {} : { tickerVisible: show }), ...(action.tickerType ? { tickerType: action.tickerType } : {}), ...(action.items ? { tickerItems: action.items } : {}) }
     case "qa":

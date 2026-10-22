@@ -9,7 +9,9 @@ export async function POST(request: Request) {
   if (denied) return denied
   if (Number(request.headers.get("content-length") ?? 0) > MAX_UPLOAD_BYTES) return Response.json({ error: "Image is over 5 MB." }, { status: 413 })
   const bytes = new Uint8Array(await request.arrayBuffer())
-  const result = saveUpload(bytes)
+  // ?kind=logo also takes SVG (sanitised); card images stay raster-only.
+  const kind = new URL(request.url).searchParams.get("kind")
+  const result = saveUpload(bytes, { svg: kind === "logo" })
   if (!result.ok) return Response.json({ error: result.error }, { status: result.status })
   return Response.json({ url: result.url })
 }
