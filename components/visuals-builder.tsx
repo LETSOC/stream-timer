@@ -198,8 +198,8 @@ export function VisualsBuilder() {
   }
 
   return (
-    <main data-testid="visuals-builder" className="flex h-dvh flex-col bg-[#0a0a0a] text-white" style={{ fontFamily: "var(--font-instrument-sans), 'Instrument Sans', Arial, sans-serif" }}>
-      <header className="flex items-center gap-3 border-b border-[#2a2a2a] px-5 py-3">
+    <main data-testid="visuals-builder" className="flex h-dvh flex-col bg-[#0a0a0a] text-white max-xl:h-auto max-xl:min-h-dvh max-xl:overflow-y-auto" style={{ fontFamily: "var(--font-instrument-sans), 'Instrument Sans', Arial, sans-serif", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <header className="flex flex-wrap items-center gap-3 border-b border-[#2a2a2a] px-5 py-3">
         <span className="size-2.5 rounded-full bg-[#D9FF43]" />
         <h1 className="text-[15px] font-semibold tracking-tight">Visuals builder</h1>
         <span className="font-mono text-[11px] text-white/45">{LINK_LABEL[link]}</span>
@@ -219,9 +219,9 @@ export function VisualsBuilder() {
         </div>
       </header>
 
-      <div className={`grid min-h-0 flex-1 gap-4 p-4 ${liveView ? "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]" : "grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_320px]"}`}>
+      <div className={`grid min-h-0 flex-1 gap-4 p-4 max-xl:flex-none ${liveView ? "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]" : "grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_320px]"}`}>
         {/* Library */}
-        <aside data-testid="vb-library" className={`${panel} flex min-h-0 flex-col overflow-auto p-3`}>
+        <aside data-testid="vb-library" className={`${panel} flex min-h-0 max-h-[40dvh] flex-col overflow-auto p-3 xl:max-h-none`}>
           <LibGroup title="Straps">{libItem("strap")}</LibGroup>
           <div className="mb-2 flex items-center">
             <p className={`${mono} mr-auto`}>Speakers ({straps.length}/{STRAP_MAX})</p>
@@ -259,7 +259,7 @@ export function VisualsBuilder() {
         {/* Preview */}
         <section className="flex min-h-0 flex-col gap-2">
           {liveView ? <LiveMonitor state={state} /> : (<>
-          <div className="flex min-h-0 flex-1 items-center justify-center" style={{ containerType: "size" }}>
+          <div className="flex min-h-0 flex-1 items-center justify-center max-xl:h-[52dvh] max-xl:flex-none" style={{ containerType: "size" }}>
           <div data-testid="vb-preview" data-screen={screen} className="relative aspect-video overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-[#1a1a1a] [&_.visuals-layer]:pointer-events-none" style={{ width: "min(100cqw, calc(100cqh * 16 / 9))", height: "min(100cqh, calc(100cqw * 9 / 16))" }}>
             {screen === "countdown" ? (
               <CountdownStage event={event} checker={stage.checker} showMeta={stage.showMeta} showLink={stage.showLink} lineSpacing={stage.lineSpacing} blockGap={stage.blockGap}
@@ -521,7 +521,7 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
   const rearm = state?.rearmHoldMs ?? 0
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div ref={box} data-testid="vb-live" className="relative min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black">
+      <div ref={box} data-testid="vb-live" className="relative min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black max-xl:min-h-[46dvh]">
         <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1&diag=1" className="pointer-events-none absolute top-1/2 left-1/2 origin-center border-0" style={{ width: 1920, height: 1080, transform: `translate(-50%, -50%) scale(${scale})` }} />
         <span data-testid="vb-live-onair" className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.15em] text-white uppercase"><span className="size-1.5 rounded-full bg-white" />On air</span>
       </div>

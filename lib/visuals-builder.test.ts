@@ -136,6 +136,8 @@ test("builder Live tab: real /stream muted, only mounted while selected, /stream
   assert.match(src, /src="\/stream\?mute=1&diag=1"/) // Live tab logs player lines ([desk] / [phone])
   assert.match(src, /Math\.min\(node\.clientWidth \/ 1920, node\.clientHeight \/ 1080\)/) // wide window: fit the box, don't paint over the multiview
   assert.match(src, /min\(100cqw, calc\(100cqh \* 16 \/ 9\)\)/) // countdown/program preview fits the pane
+  assert.match(src, /max-xl:overflow-y-auto/) // iPad: page scrolls, panels are not clipped
+  assert.match(src, /max-xl:h-\[52dvh\]/) // preview sized from the screen, like /deck
   assert.match(src, /\{liveView \? <LiveMonitor state=\{state\} \/> : \(/)
   assert.match(src, /data-testid="vb-screen-live"[\s\S]{0,200}>Live<\/button>/)
   assert.match(src, /data-testid="vb-multiview"/)
