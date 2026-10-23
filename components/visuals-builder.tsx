@@ -219,7 +219,7 @@ export function VisualsBuilder() {
         </div>
       </header>
 
-      <div className={`grid min-h-0 flex-1 gap-4 p-4 ${liveView ? "grid-cols-[260px_minmax(0,1fr)]" : "grid-cols-[260px_minmax(0,1fr)_340px]"}`}>
+      <div className={`grid min-h-0 flex-1 gap-4 p-4 ${liveView ? "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]" : "grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_320px]"}`}>
         {/* Library */}
         <aside data-testid="vb-library" className={`${panel} flex min-h-0 flex-col overflow-auto p-3`}>
           <LibGroup title="Straps">{libItem("strap")}</LibGroup>
@@ -259,7 +259,8 @@ export function VisualsBuilder() {
         {/* Preview */}
         <section className="flex min-h-0 flex-col gap-2">
           {liveView ? <LiveMonitor state={state} /> : (<>
-          <div data-testid="vb-preview" data-screen={screen} className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-[#1a1a1a] [&_.visuals-layer]:pointer-events-none">
+          <div className="flex min-h-0 flex-1 items-center justify-center" style={{ containerType: "size" }}>
+          <div data-testid="vb-preview" data-screen={screen} className="relative aspect-video overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-[#1a1a1a] [&_.visuals-layer]:pointer-events-none" style={{ width: "min(100cqw, calc(100cqh * 16 / 9))", height: "min(100cqh, calc(100cqw * 9 / 16))" }}>
             {screen === "countdown" ? (
               <CountdownStage event={event} checker={stage.checker} showMeta={stage.showMeta} showLink={stage.showLink} lineSpacing={stage.lineSpacing} blockGap={stage.blockGap}
                 clockScale={stage.clockScale} clockText={stage.clockText} logoUrl={stage.logoUrl} speakers={stage.speakers} gallerySeconds={stage.gallerySeconds} galleryPause={stage.galleryPause}
@@ -286,6 +287,7 @@ export function VisualsBuilder() {
                 <span className="absolute top-[5.4%] left-[5.4%] font-mono text-[10px] text-[#C6FF00]/80">SAFE 5%</span>
               </div>
             ) : null}
+          </div>
           </div>
           {screen === "countdown" ? (
             <div data-testid="vb-cd-hide" className="flex flex-wrap items-center gap-1">
