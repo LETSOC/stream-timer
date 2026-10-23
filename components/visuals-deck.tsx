@@ -2,6 +2,7 @@
 
 import { StatusToast, TOAST_MS } from "@/components/status-toast"
 import Link from "next/link"
+import { AppNav } from "@/components/app-nav"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import { deckScreen, type Screen, type TransportAction } from "@/lib/transport"
@@ -101,15 +102,16 @@ export function VisualsDeck() {
 
   return (
     <main className="min-h-dvh bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pt-[max(10px,env(safe-area-inset-top))] pb-[max(88px,calc(env(safe-area-inset-bottom)+72px))] text-white">
-      <header className="mb-3 flex items-center gap-2">
-        <h1 className="mr-auto text-lg font-black tracking-tight uppercase">Visuals</h1>
-        <span data-testid="visuals-link-state" className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px]">
+      <header className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="mr-auto">
+          <p className="font-mono text-[10px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
+          <h1 className="text-lg font-black tracking-tight uppercase">Visuals</h1>
+        </div>
+        <AppNav page="visuals" />
+        <span data-testid="visuals-link-state" className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px] text-white/70">
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]}`} />
           {LINK_LABEL[link]}
         </span>
-        <Link href="/visuals/builder" data-testid="visuals-builder-link" className="rounded-full border border-[#D9FF43]/60 px-3 py-1 font-mono text-[12px] text-[#D9FF43] no-underline">Builder</Link>
-        <Link href="/deck" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Deck</Link>
-        <Link href="/" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Desk</Link>
       </header>
 
       <Row title="/stream layer" on={lights?.layer ?? false} label={lights?.layer ? "ON" : "OFF · OBS only"} testId="vd-layer">

@@ -7,6 +7,7 @@
  * deck socket and are marked "applies live". The preview is the real VisualsLayer at 1920x1080, scaled.
  */
 import Link from "next/link"
+import { AppNav } from "@/components/app-nav"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
 import { VisualsLayer } from "@/components/visuals-layer"
@@ -200,8 +201,11 @@ export function VisualsBuilder() {
   return (
     <main data-testid="visuals-builder" className="flex h-dvh flex-col bg-[#0a0a0a] text-white max-xl:h-auto max-xl:min-h-dvh max-xl:overflow-y-auto" style={{ fontFamily: "var(--font-instrument-sans), 'Instrument Sans', Arial, sans-serif", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
       <header className="flex flex-wrap items-center gap-3 border-b border-[#2a2a2a] px-5 py-3">
-        <span className="size-2.5 rounded-full bg-[#D9FF43]" />
-        <h1 className="text-[15px] font-semibold tracking-tight">Visuals builder</h1>
+        <div>
+          <p className="font-mono text-[10px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
+          <h1 className="text-[15px] font-semibold tracking-tight">Visuals builder</h1>
+        </div>
+        <AppNav page="builder" />
         <span className="font-mono text-[11px] text-white/45">{LINK_LABEL[link]}</span>
         <div className="ml-6 flex gap-1" role="group" aria-label="Screen">
           {(["countdown", "program"] as const).map((s) => <button key={s} type="button" data-testid={`vb-screen-${s}`} aria-pressed={!liveView && screen === s} onClick={() => { setScreen(s); setLiveView(false) }} className={chip(!liveView && screen === s)}>{s === "countdown" ? "Countdown" : "Program"}</button>)}
@@ -214,8 +218,7 @@ export function VisualsBuilder() {
           {dirty ? <span className="font-mono text-[11px] text-[#FF6A00]">Unsaved changes</span> : null}
           <button type="button" data-testid="vb-revert" disabled={!dirty || saving} onClick={() => setDraft(draftFrom(savedStage))} className={btn}>Revert</button>
           <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className="rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold text-[#0a0a0a] disabled:opacity-35">{saving ? "Saving…" : "Save"}</button>
-          <Link href="/visuals" data-testid="vb-deck-link" className={`${btn} no-underline`}>Deck</Link>
-          <Link href="/" className={`${btn} no-underline`}>Desk</Link>
+
         </div>
       </header>
 

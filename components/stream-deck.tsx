@@ -7,6 +7,7 @@ import { FeedStatus } from "@/components/feed-status"
 import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
+import { AppNav } from "@/components/app-nav"
 import { useResumeGeneration } from "@/lib/use-resume"
 import { useAutoHide } from "@/components/auto-hide"
 import { StatusToast, TOAST_MS, TOAST_UNDO_MS } from "@/components/status-toast"
@@ -172,14 +173,16 @@ export function StreamDeck() {
     <main className="min-h-dvh bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pb-[max(88px,calc(env(safe-area-inset-bottom)+72px))] text-white">
       {/* Pinned: header + preview stay on screen while the buttons scroll underneath. */}
       <div data-testid="deck-sticky" className="sticky top-0 z-20 -mx-3 mb-3 border-b border-white/10 bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pt-[max(10px,env(safe-area-inset-top))] pb-2 shadow-[0_8px_16px_rgba(0,0,0,0.6)]">
-      <header className="mb-2 flex items-center gap-2">
-        <h1 className="mr-auto text-lg font-black tracking-tight uppercase">Stream Deck</h1>
-        <span data-testid="deck-link-state" data-state={link} className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px]">
+      <header className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="mr-auto">
+          <p className="font-mono text-[10px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
+          <h1 className="text-lg font-black tracking-tight uppercase">Stream Deck</h1>
+        </div>
+        <AppNav page="deck" />
+        <span data-testid="deck-link-state" data-state={link} className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px] text-white/70">
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]} ${link === "connecting" ? "animate-pulse" : ""}`} />
           {LINK_LABEL[link]}
         </span>
-        <Link href="/visuals" data-testid="deck-visuals-link" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Visuals</Link>
-        <Link href="/" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Desk</Link>
       </header>
         <PreviewBar preview={preview} setPreview={setPreview} collapsed={collapsed === "1"} toggle={() => setCollapsed(collapsed === "1" ? "0" : "1")} />
         {collapsed === "1" || preview === "off" ? null : (

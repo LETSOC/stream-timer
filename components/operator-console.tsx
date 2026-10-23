@@ -4,6 +4,7 @@ import { LocalAccessPill } from "@/components/local-access-pill"
 
 import { pullUrlError } from "@/lib/program-source"
 import Link from "next/link"
+import { AppNav } from "@/components/app-nav"
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -907,11 +908,7 @@ export function OperatorConsole() {
                 Save all ({drafts.dirty.length})
               </Pill>
             ) : null}
-            <Link href="/deck" data-testid="deck-link" title={wsLink === "live" ? "Instant sync on (WebSocket)" : "Instant sync off: syncing every 2s"} className={`${pillClass("outline", "sm")} inline-flex items-center gap-1.5 no-underline`}>
-              <span aria-hidden className={`size-2 rounded-full ${wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"}`} />
-              Deck
-            </Link>
-            <Link href="/visuals" data-testid="desk-visuals-nav" className={`${pillClass("outline", "sm")} no-underline`}>Visuals</Link>
+            <AppNav page="desk" tone="light" deckDot={wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"} />
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
