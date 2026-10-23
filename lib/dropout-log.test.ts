@@ -194,10 +194,12 @@ test("[av] line says unprimed when the queue has no level; speed line carries lo
   assert.match(captureTrouble({ enc: { fps: 28, speed: 0.8, kbps: 4000 } }, { one: 9, five: 7, cores: 8 })[0].text, /0\.8x.*Mac load 9\.00\/7\.00 \(cores 8\)/)
 })
 
-test("phone-prefixed player lines still parse", () => {
-  const line = dropoutLine(Date.now(), "!", "player", "[phone] Main (on air): hls.js bufferStalledError (buffer ran dry: picture holds)")
-  const ev = parseDropoutLog(line)
-  assert.equal(ev.length, 1)
-  assert.equal(ev[0].cat, "player")
-  assert.equal(ev[0].msg.startsWith("[phone] "), true)
+test("tagged player lines still parse", () => {
+  for (const tag of ["[phone] ", "[desk] ", "[obs] ", "[capture] "]) {
+    const line = dropoutLine(Date.now(), "!", "player", `${tag}Main (on air): hls.js bufferStalledError (buffer ran dry: picture holds)`)
+    const ev = parseDropoutLog(line)
+    assert.equal(ev.length, 1)
+    assert.equal(ev[0].cat, "player")
+    assert.equal(ev[0].msg.startsWith(tag), true)
+  }
 })

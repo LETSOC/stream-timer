@@ -5,7 +5,7 @@
  * Batched once a second to /api/diag/player (same gate as the program HLS: view key or capture key).
  */
 import { muteOnlyAudio } from "@/lib/preview-audio"
-import { phoneDiagPrefix } from "@/lib/program-display"
+import { diagPrefix } from "@/lib/program-display"
 
 type Level = "!" | "+" | "·"
 let queue: { at: number; level: Level; msg: string }[] = []
@@ -24,13 +24,15 @@ function on(): boolean {
   if (enabled === null) enabled = typeof window !== "undefined" && (isCapturePage() || new URLSearchParams(window.location.search).get("diag") === "1")
   return enabled
 }
-/** Once: "[phone] " on a touch page that is not Browser capture, so the dropout log can tell them apart. */
+/** Once: [phone] / [desk] / [obs] / [capture], so one dropout log shows who sent the line. */
 function tag(): string {
   if (phonePrefix === null) {
     if (typeof window === "undefined") return ""
-    phonePrefix = phoneDiagPrefix({
-      touch: muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
+    const ua = navigator.userAgent
+    phonePrefix = diagPrefix({
+      touch: muteOnlyAudio({ ua, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
       capturePage: isCapturePage(),
+      obs: /\bOBS\b|obsstudio|obs-browser/i.test(ua),
     })
   }
   return phonePrefix

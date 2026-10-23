@@ -118,9 +118,15 @@ export function previewGentle(i: { mute: boolean; touch: boolean; capturePage: b
   return i.mute && i.touch && !i.capturePage
 }
 
-/** Dropout-log tag so a phone preview's player lines are distinct from desktop / capture. */
-export function phoneDiagPrefix(i: { touch: boolean; capturePage: boolean }): string {
-  return i.touch && !i.capturePage ? "[phone] " : ""
+/**
+ * Dropout-log tag so one log shows who sent the player line.
+ * Capture wins over OBS over phone over desk. OBS = Browser Source UA; capture = the app's headless page.
+ */
+export function diagPrefix(i: { touch: boolean; capturePage: boolean; obs: boolean }): string {
+  if (i.capturePage) return "[capture] "
+  if (i.obs) return "[obs] "
+  if (i.touch) return "[phone] "
+  return "[desk] "
 }
 
 /** Phone muted preview mounts only the on-air input (and the hand-over target). Desktop/OBS/capture prewarm both. */

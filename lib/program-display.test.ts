@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { handoverDone, keepLoaded, phoneDiagPrefix, previewGentle, previewMountSource, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
+import { handoverDone, keepLoaded, diagPrefix, previewGentle, previewMountSource, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
 
 test("gentle HLS only for touch devices in a muted operator preview, never capture/OBS", () => {
   assert.equal(previewGentle({ mute: true, touch: true, capturePage: false }), true)
@@ -9,10 +9,12 @@ test("gentle HLS only for touch devices in a muted operator preview, never captu
   assert.equal(previewGentle({ mute: true, touch: true, capturePage: true }), false) // browser capture
 })
 
-test("phone diag prefix only on touch, never on capture", () => {
-  assert.equal(phoneDiagPrefix({ touch: true, capturePage: false }), "[phone] ")
-  assert.equal(phoneDiagPrefix({ touch: false, capturePage: false }), "")
-  assert.equal(phoneDiagPrefix({ touch: true, capturePage: true }), "") // capture stays untagged
+test("diag prefix: phone, desk, obs, capture", () => {
+  assert.equal(diagPrefix({ touch: true, capturePage: false, obs: false }), "[phone] ")
+  assert.equal(diagPrefix({ touch: false, capturePage: false, obs: false }), "[desk] ")
+  assert.equal(diagPrefix({ touch: false, capturePage: false, obs: true }), "[obs] ")
+  assert.equal(diagPrefix({ touch: true, capturePage: true, obs: false }), "[capture] ") // capture wins
+  assert.equal(diagPrefix({ touch: false, capturePage: true, obs: true }), "[capture] ")
 })
 
 test("phone preview mounts only the on-air input; desktop/capture prewarm both", () => {
