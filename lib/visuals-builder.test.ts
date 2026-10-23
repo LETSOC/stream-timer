@@ -141,6 +141,8 @@ test("builder Live tab: real /stream muted, only mounted while selected, /stream
   const assets = fs.readFileSync("components/visual-assets.tsx", "utf8")
   assert.match(assets, /onAir && card\.pauseBed/) // video audio only while the bed is paused
   assert.match(assets, /!sendAudio/) // capture tap off when the box is unchecked
+  assert.match(assets, /key=\{`\$\{id\}:\$\{video\}`\}/) // a new scene gets a fresh player, not the ended one
+  assert.match(assets, /loop=\{card\.loop && !card\.autoSwitch\}/) // loop, unless play-once-then-cut is on
   assert.match(src, /\{liveView \? <LiveMonitor state=\{state\} \/> : \(/)
   assert.match(src, /data-testid="vb-screen-live"[\s\S]{0,200}>Live<\/button>/)
   assert.match(src, /data-testid="vb-multiview"/)

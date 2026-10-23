@@ -300,7 +300,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
         />
       ) : isScene(shownScreen) ? (
-        <SceneCardView id={shownScreen} card={stage.scenes[shownScreen]} qr={stage.qr} now={now ? now.getTime() : null} onAir className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
+        <SceneCardView id={shownScreen} key={shownScreen} card={stage.scenes[shownScreen]} qr={stage.qr} now={now ? now.getTime() : null} onAir className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
       ) : ended ? (
         <EndStreamPage className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,

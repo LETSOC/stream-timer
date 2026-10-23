@@ -102,6 +102,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
     const el = videoRef.current
     if (!el || !video) return
     el.muted = !wantSound || new URLSearchParams(window.location.search).get("mute") === "1"
+    if (el.ended || el.currentTime > 0) { try { el.currentTime = 0 } catch { /* not seekable yet */ } }
     void el.play().catch(() => {
       // Autoplay with sound refused (normal browser tab): keep the picture, muted. A tap on the stream unmute turns it back on.
       el.muted = true
@@ -123,7 +124,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   return (
     <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
       {video && !card.videoFront ? (
-        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
+        <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none" }}>
         {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
@@ -139,7 +140,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
         ) : null}
       </div>
       {video && card.videoFront ? (
-        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
+        <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
       ) : null}
     </div>
   )

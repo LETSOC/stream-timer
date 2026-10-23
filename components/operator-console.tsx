@@ -1413,7 +1413,7 @@ export function OperatorConsole() {
               />
             ) : isScene(previewScreen) ? (
               // Scene cards (HOLD 05/06/07, Standby, Showreel): same renderer as /stream.
-              <SceneCardView id={previewScreen} card={visuals.scenes[previewScreen]} qr={visuals.qr} now={now ? now.getTime() : null} className="absolute inset-0 z-10 h-full w-full" />
+              <SceneCardView id={previewScreen} key={previewScreen} card={visuals.scenes[previewScreen]} qr={visuals.qr} now={now ? now.getTime() : null} className="absolute inset-0 z-10 h-full w-full" />
             ) : previewScreen === "end" ? (
               <EndStreamPage card={{
                 title: endTitle,
