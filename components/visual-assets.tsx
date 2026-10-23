@@ -15,16 +15,17 @@ import { pcmChunkB64 } from "@/lib/showreel-tap"
 
 type ShowreelSend = (b64: string) => void
 /** Browser capture only (window.__showreelPcm): hand the scene video's decoded audio to the capture mix. */
-function useShowreelTap(videoRef: { current: HTMLVideoElement | null }, video: string) {
+function useShowreelTap(videoRef: { current: HTMLVideoElement | null }, video: string, sendAudio: boolean) {
   useEffect(() => {
     const send = (window as unknown as { __showreelPcm?: ShowreelSend }).__showreelPcm
     const el = videoRef.current
-    if (!send || !el || !video || !isCapturePage()) return
+    // Only while "pause bed" is on: otherwise the capture mix ducks the bed and plays the video.
+    if (!send || !el || !video || !sendAudio || !isCapturePage()) return
     let ctx: AudioContext | null = null
     try {
       ctx = new AudioContext({ sampleRate: 48000 })
       const node = ctx.createMediaElementSource(el)
-      const proc = ctx.createScriptProcessor(512, 2, 2)
+      const proc = ctx.createScriptProcessor(4096, 2, 2)
       proc.onaudioprocess = (e) => {
         const l = e.inputBuffer.getChannelData(0)
         const r = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : l
@@ -35,7 +36,7 @@ function useShowreelTap(videoRef: { current: HTMLVideoElement | null }, video: s
       void ctx.resume()
     } catch { /* no WebAudio: no showreel sound in the capture */ }
     return () => { void ctx?.close() }
-  }, [videoRef, video])
+  }, [videoRef, video, sendAudio])
 }
 
 const px = (n: number) => `calc(${n} * var(--px))`
@@ -94,13 +95,12 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   const videoRef = useRef<HTMLVideoElement>(null)
   const [, setPin] = useState(0)
   useEffect(() => subscribeViewerMute(() => setPin((n) => n + 1)), [])
-  // Same rule as the program player: sound on unless the viewer muted. OBS Browser Source has no viewer choice, so it plays.
-  // Builder / desk previews (not onAir): always muted.
-  const wantSound = onAir && !(viewerHasChosen() && isViewerMuted())
+  // Video audio only when "pause bed" is on. Off = the bed plays and the video stays silent.
+  // Builder / desk previews (not onAir) and /stream?mute=1 stay muted either way.
+  const wantSound = onAir && card.pauseBed && !(viewerHasChosen() && isViewerMuted())
   useEffect(() => {
     const el = videoRef.current
     if (!el || !video) return
-    // /stream?mute=1 (builder Live tab, desk monitors) is a preview too.
     el.muted = !wantSound || new URLSearchParams(window.location.search).get("mute") === "1"
     void el.play().catch(() => {
       // Autoplay with sound refused (normal browser tab): keep the picture, muted. A tap on the stream unmute turns it back on.
@@ -108,7 +108,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
       void el.play().catch(() => undefined)
     })
   }, [video, wantSound])
-  useShowreelTap(videoRef, video)
+  useShowreelTap(videoRef, video, card.pauseBed)
   const onEnded = () => {
     // Browser capture only: viewers, the builder Live tab and desk previews start the video at other times and would cut early.
     if (!onAir || !card.autoSwitch || !video || !isCapturePage()) return
@@ -123,7 +123,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   return (
     <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
       {video && !card.videoFront ? (
-        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
+        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none" }}>
         {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
@@ -139,7 +139,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
         ) : null}
       </div>
       {video && card.videoFront ? (
-        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
+        <video ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
       ) : null}
     </div>
   )

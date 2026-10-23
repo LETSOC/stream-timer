@@ -138,6 +138,9 @@ test("builder Live tab: real /stream muted, only mounted while selected, /stream
   assert.match(src, /min\(100cqw, calc\(100cqh \* 16 \/ 9\)\)/) // countdown/program preview fits the pane
   assert.match(src, /max-xl:overflow-y-auto/) // iPad: page scrolls, panels are not clipped
   assert.match(src, /max-xl:h-\[52dvh\]/) // preview sized from the screen, like /deck
+  const assets = fs.readFileSync("components/visual-assets.tsx", "utf8")
+  assert.match(assets, /onAir && card\.pauseBed/) // video audio only while the bed is paused
+  assert.match(assets, /!sendAudio/) // capture tap off when the box is unchecked
   assert.match(src, /\{liveView \? <LiveMonitor state=\{state\} \/> : \(/)
   assert.match(src, /data-testid="vb-screen-live"[\s\S]{0,200}>Live<\/button>/)
   assert.match(src, /data-testid="vb-multiview"/)
