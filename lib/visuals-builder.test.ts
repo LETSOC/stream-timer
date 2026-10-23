@@ -133,7 +133,7 @@ test("builder program feed: on-air input when signal, placeholder when off or no
 test("builder Live tab: real /stream muted, only mounted while selected, /stream untouched", async () => {
   const fs = await import("node:fs")
   const src = fs.readFileSync("components/visuals-builder.tsx", "utf8")
-  assert.match(src, /src="\/stream\?mute=1"/)
+  assert.match(src, /src="\/stream\?mute=1&diag=1"/) // Live tab logs player lines ([desk] / [phone])
   assert.match(src, /\{liveView \? <LiveMonitor state=\{state\} \/> : \(/)
   assert.match(src, /data-testid="vb-screen-live"[\s\S]{0,200}>Live<\/button>/)
   assert.match(src, /data-testid="vb-multiview"/)

@@ -513,12 +513,12 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
   return (
     <>
       <div ref={box} data-testid="vb-live" className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black">
-        <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1920, height: 1080, transform: `scale(${scale})` }} />
+        <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1&diag=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1920, height: 1080, transform: `scale(${scale})` }} />
         <span data-testid="vb-live-onair" className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.15em] text-white uppercase"><span className="size-1.5 rounded-full bg-white" />On air</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="vb-live-reload" onClick={() => setGen((g) => g + 1)} className="rounded-full border border-white/20 px-3 py-1 font-mono text-[11px] text-white hover:bg-white/10">Reload</button>
-        <span className="font-mono text-[10px] text-white/45">/stream?mute=1 · muted · what goes on air (program, cards, overlays). A viewer like OBS, a little behind the real output.</span>
+        <span className="font-mono text-[10px] text-white/45">/stream?mute=1&diag=1 · muted · what goes on air. Player lines land in the dropout log as [desk] or [phone].</span>
       </div>
 
       {/* Main | Backup multiview — light (muted = WebRTC), only while Live is selected */}
