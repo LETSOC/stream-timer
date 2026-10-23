@@ -202,8 +202,8 @@ export function VisualsBuilder() {
     <main data-testid="visuals-builder" className="flex h-dvh flex-col bg-[#0a0a0a] text-white max-xl:h-auto max-xl:min-h-dvh max-xl:overflow-y-auto" style={{ fontFamily: "var(--font-instrument-sans), 'Instrument Sans', Arial, sans-serif", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
       <header className="flex flex-wrap items-center gap-3 border-b border-[#2a2a2a] px-5 py-3">
         <div>
-          <p className="font-mono text-[10px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
-          <h1 className="text-[15px] font-semibold tracking-tight">Visuals builder</h1>
+          <p className="font-mono text-[12px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
+          <h1 className="text-xl font-black tracking-tight uppercase">Visuals builder</h1>
         </div>
         <AppNav page="builder" />
         <span className="font-mono text-[11px] text-white/45">{LINK_LABEL[link]}</span>
