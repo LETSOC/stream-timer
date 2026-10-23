@@ -13,7 +13,7 @@ import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, previewGentle, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 import { muteOnlyAudio } from "@/lib/preview-audio"
-import { liveJumpTick, liveTarget, newSettle, phoneLiveCount, settleTick, type LiveJumpState } from "@/lib/live-catchup"
+import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -72,7 +72,6 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   // Wi-Fi: constant rebuffering, and the rate changes warp the sound. Standard HLS (whole 1s segments),
   // ~3 s buffer, never speed up. WebRTC stays the low-latency picture.
   const gentle = opts.gentle ?? false
-  const stallsAt = useRef<number[]>([])
   // hold (/stream's standby input, plain browser tabs only): keep loading so the buffer is warm, but
   // keep the element paused, so the page decodes one 1080p feed instead of two. Released → jump to
   // the live edge and play; the hand-over still waits for its first frames (seamless).
@@ -123,7 +122,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         // true here) and resets playbackRate to 1 otherwise, so it never caught up (14:07: stuck at 3.5s);
         // settleTick below owns playbackRate on air instead (1.05x back to the player's healthy latency).
         const tuning = gentle
-          ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 10, maxLiveSyncPlaybackRate: 1, manifestLoadingTimeOut: 8000, levelLoadingTimeOut: 8000, fragLoadingTimeOut: 8000 }
+          ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
           : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1, liveSyncOnStallIncrease: 0 }
         hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
@@ -134,13 +133,6 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
           if (data.fatal || data.details === "mediaSourceRequiresReset") troubleRef.current?.()
           if (data.fatal || data.details === "bufferStalledError") reportRef.current(data.fatal ? "!" : "!", `hls.js ${data.details}${data.fatal ? ` (fatal ${data.type}: ${data.type === HlsLib.ErrorTypes.MEDIA_ERROR ? "recoverMediaError" : "startLoad"})` : " (buffer ran dry: picture holds)"}`, data.details, 3000)
           else reportRef.current("·", `hls.js ${data.details}`, data.details, 10000)
-          // Phone preview: each non-fatal stall raises the target by ~1s; it decays after 3 min (Owncast-style amnesty).
-          if (gentle && !data.fatal && data.details === "bufferStalledError" && hls) {
-            stallsAt.current.push(Date.now())
-            const n = phoneLiveCount(stallsAt.current, Date.now())
-            hls.config.liveSyncDurationCount = n
-            hls.config.liveMaxLatencyDurationCount = n + 4
-          }
           if (!data.fatal || !hls) return
           if (data.type === HlsLib.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
           else hls.startLoad()
@@ -179,7 +171,9 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     let attempt = 0
     let nextKickAt = Date.now() + stallBackoffMs(0)
     // Native HLS (iOS) reports stalls as events; the currentTime check below catches the rest.
-    const onStall = () => { if (Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload("native stall event after 3s stuck") }
+    // Phone preview: MediaMTX holds a playlist ~2.2s, so a 3s teardown races it. On air stays at 3s.
+    const stuckMs = gentle ? 6000 : 3000
+    const onStall = () => { if (Date.now() - advancedAt > stuckMs && Date.now() >= nextKickAt) reload(`native stall event after ${stuckMs / 1000}s stuck`) }
     const onWaiting = (e: Event) => {
       const b = video.buffered
       const ahead = b.length ? b.end(b.length - 1) - video.currentTime : 0
@@ -189,7 +183,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     let firstFrameSeen = false
     const jump: LiveJumpState = { overSince: null, lastJumpAt: 0 }
     const settle = newSettle()
-    const reload = (why = "watchdog: picture stuck 3s while OBS publishes") => {
+    const reload = (why = `watchdog: picture stuck ${stuckMs / 1000}s while OBS publishes`) => {
       teardownWhy.current = why
       firstFrameSeen = false
       nextKickAt = Date.now() + stallBackoffMs(++attempt)
@@ -209,8 +203,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       const t = video.currentTime
       if (holdRef.current) { advancedAt = Date.now(); last = t; return }
       if (t !== last && t > 0 && !video.paused) { advancedAt = Date.now(); attempt = 0 }
-      // Watchdog: OBS is publishing (load) but the picture hasn't moved for 3s → rebuild, with backoff.
-      else if (document.visibilityState === "visible" && Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload()
+      // Watchdog: OBS is publishing (load) but the picture hasn't moved → rebuild, with backoff.
+      else if (document.visibilityState === "visible" && Date.now() - advancedAt > stuckMs && Date.now() >= nextKickAt) reload()
       // Paused by the browser (refused autoplay with sound, tab policy): resume, muted if it must be.
       if (!wantSoundRef.current() && !video.muted) video.muted = true
       if (video.paused && video.readyState >= 2 && !video.ended) {
