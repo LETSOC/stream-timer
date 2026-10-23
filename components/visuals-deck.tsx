@@ -137,7 +137,7 @@ export function VisualsDeck() {
             const active = scr === target
             const cls = `${active ? SEL : target === "program" ? GO : PLAIN} min-h-11 px-1 text-[13px]`
             // Every scene/card switch (LIVE too) takes two taps, on phone and desktop, program live or not.
-            return <ConfirmButton key={target} data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} confirmLabel="Tap again" className={cls} onConfirm={() => void act({ type: "screen", screen: target })}>{label}</ConfirmButton>
+            return <ConfirmButton key={target} data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} holdMs={target === "end" ? 3000 : undefined} confirmLabel="Tap again" className={cls} onConfirm={() => void act({ type: "screen", screen: target })}>{label}</ConfirmButton>
           })}
         </div>
         <p className="mt-2 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes.</p>

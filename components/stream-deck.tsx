@@ -7,6 +7,7 @@ import { FeedStatus } from "@/components/feed-status"
 import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
+import { ConfirmButton } from "@/components/confirm-button"
 import { AppNav } from "@/components/app-nav"
 import { useResumeGeneration } from "@/lib/use-resume"
 import { useAutoHide } from "@/components/auto-hide"
@@ -116,9 +117,9 @@ export function StreamDeck() {
   const screen = state ? deckScreen(state, serverNow) : null
   const testActive = Boolean(state && !state.testStale && (state.testUntil !== null || state.pausedAt !== null))
 
-  async function act(key: string, action: TransportAction) {
+  async function act(key: string, action: TransportAction, confirmed = false) {
     if (!state || busy) return
-    if (isRisky(action) && armed !== key) {
+    if (!confirmed && isRisky(action) && armed !== key) {
       setArmed(key)
       return
     }
@@ -278,7 +279,7 @@ export function StreamDeck() {
           </div>
         ) : null}
         {state?.programSources ? <LanIngestInfo /> : null}
-        {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
+        <ConfirmButton data-testid="deck-screen-end" holdMs={3000} disabled={!state || (live && lockedInLive({ type: "screen", screen: "end" }))} onConfirm={() => void act("screen-end", { type: "screen", screen: "end" }, true)} className={`col-span-2 min-h-16 touch-manipulation rounded-2xl px-3 py-3 text-[17px] font-bold ${screen === "end" ? "bg-[#D9FF43] text-black" : "border-2 border-[#f97066] bg-transparent text-[#fda29b]"}`}>Show end card now</ConfirmButton>
       </div>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Outputs</h2>
