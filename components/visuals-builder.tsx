@@ -21,6 +21,7 @@ import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type 
 import { addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 import { StreamPlayer } from "@/components/stream-player"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
+import { muteOnlyAudio } from "@/lib/preview-audio"
 
 type Sel = { kind: "part"; part: LayoutPart | "ticker" } | { kind: "strap"; id: string } | { kind: "scene"; id: SceneId }
 
@@ -499,6 +500,8 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
   const box = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.4)
   const [gen, setGen] = useState(0)
+  const [touch] = useState(() => typeof window !== "undefined" && muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }))
+  const [showMv, setShowMv] = useState(!touch)
   useEffect(() => {
     const node = box.current
     if (!node) return
@@ -521,7 +524,8 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
         <span className="font-mono text-[10px] text-white/45">/stream?mute=1&diag=1 · muted · what goes on air. Player lines land in the dropout log as [desk] or [phone].</span>
       </div>
 
-      {/* Main | Backup multiview — light (muted = WebRTC), only while Live is selected */}
+      {/* Main | Backup multiview — hidden on touch until tapped (two extra decodes). Desktop shows it. */}
+      {showMv ? (
       <div data-testid="vb-multiview" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {([
           { id: "main", label: "Main", path: "program", ready: mainReady },
@@ -536,7 +540,10 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
           </div>
         ))}
       </div>
-      <p className="font-mono text-[10px] text-white/40">Main and Backup, muted (WebRTC). Unmute one only if you need to hear it.</p>
+      ) : (
+        <button type="button" data-testid="vb-multiview-show" onClick={() => setShowMv(true)} className="self-start rounded-full border border-white/20 px-3 py-1 font-mono text-[11px] text-white hover:bg-white/10">Show Main | Backup</button>
+      )}
+      <p className="font-mono text-[10px] text-white/40">{showMv ? "Main and Backup, muted (WebRTC). Unmute one only if you need to hear it." : "Multiview hidden on this device. Tap to load Main and Backup."}</p>
     </>
   )
 }

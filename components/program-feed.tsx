@@ -13,7 +13,7 @@ import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, previewGentle, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 import { muteOnlyAudio } from "@/lib/preview-audio"
-import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
+import { liveJumpTick, liveTarget, newSettle, phoneLiveCount, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -72,6 +72,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   // Wi-Fi: constant rebuffering, and the rate changes warp the sound. Standard HLS (whole 1s segments),
   // ~3 s buffer, never speed up. WebRTC stays the low-latency picture.
   const gentle = opts.gentle ?? false
+  const stallsAt = useRef<number[]>([])
   // hold (/stream's standby input, plain browser tabs only): keep loading so the buffer is warm, but
   // keep the element paused, so the page decodes one 1080p feed instead of two. Released → jump to
   // the live edge and play; the hand-over still waits for its first frames (seamless).
@@ -122,7 +123,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         // true here) and resets playbackRate to 1 otherwise, so it never caught up (14:07: stuck at 3.5s);
         // settleTick below owns playbackRate on air instead (1.05x back to the player's healthy latency).
         const tuning = gentle
-          ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
+          ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 10, maxLiveSyncPlaybackRate: 1, manifestLoadingTimeOut: 4000, levelLoadingTimeOut: 4000, fragLoadingTimeOut: 8000 }
           : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1, liveSyncOnStallIncrease: 0 }
         hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
@@ -133,6 +134,13 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
           if (data.fatal || data.details === "mediaSourceRequiresReset") troubleRef.current?.()
           if (data.fatal || data.details === "bufferStalledError") reportRef.current(data.fatal ? "!" : "!", `hls.js ${data.details}${data.fatal ? ` (fatal ${data.type}: ${data.type === HlsLib.ErrorTypes.MEDIA_ERROR ? "recoverMediaError" : "startLoad"})` : " (buffer ran dry: picture holds)"}`, data.details, 3000)
           else reportRef.current("·", `hls.js ${data.details}`, data.details, 10000)
+          // Phone preview: each non-fatal stall raises the target by ~1s; it decays after 3 min (Owncast-style amnesty).
+          if (gentle && !data.fatal && data.details === "bufferStalledError" && hls) {
+            stallsAt.current.push(Date.now())
+            const n = phoneLiveCount(stallsAt.current, Date.now())
+            hls.config.liveSyncDurationCount = n
+            hls.config.liveMaxLatencyDurationCount = n + 4
+          }
           if (!data.fatal || !hls) return
           if (data.type === HlsLib.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
           else hls.startLoad()

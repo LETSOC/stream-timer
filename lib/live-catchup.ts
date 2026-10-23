@@ -82,3 +82,11 @@ export function settleTick(st: SettleState, latencyMs: number | null, aheadS: nu
   st.active = true; st.startedAt = now; st.fromMs = latencyMs
   return { rate: SETTLE_RATE, event: { kind: "start", fromMs: latencyMs, toMs: latencyMs, floorMs: floor, tookMs: 0 } }
 }
+
+/** Phone preview latency target: start at 5 segments, +1 per recent stall, cap 9. Stalls older than 3 min are forgiven. */
+export const PHONE_COUNT_MIN = 5
+export const PHONE_COUNT_MAX = 9
+export const PHONE_AMNESTY_MS = 180_000
+export function phoneLiveCount(stallsAt: number[], now: number): number {
+  return Math.min(PHONE_COUNT_MAX, PHONE_COUNT_MIN + stallsAt.filter((t) => now - t < PHONE_AMNESTY_MS).length)
+}
