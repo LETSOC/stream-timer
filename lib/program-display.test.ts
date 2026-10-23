@@ -1,12 +1,25 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { handoverDone, keepLoaded, previewGentle, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
+import { handoverDone, keepLoaded, phoneDiagPrefix, previewGentle, previewMountSource, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
 
 test("gentle HLS only for touch devices in a muted operator preview, never capture/OBS", () => {
   assert.equal(previewGentle({ mute: true, touch: true, capturePage: false }), true)
   assert.equal(previewGentle({ mute: true, touch: false, capturePage: false }), false) // desktop preview keeps LL
   assert.equal(previewGentle({ mute: false, touch: true, capturePage: false }), false) // real viewer / OBS URL
   assert.equal(previewGentle({ mute: true, touch: true, capturePage: true }), false) // browser capture
+})
+
+test("phone diag prefix only on touch, never on capture", () => {
+  assert.equal(phoneDiagPrefix({ touch: true, capturePage: false }), "[phone] ")
+  assert.equal(phoneDiagPrefix({ touch: false, capturePage: false }), "")
+  assert.equal(phoneDiagPrefix({ touch: true, capturePage: true }), "") // capture stays untagged
+})
+
+test("phone preview mounts only the on-air input; desktop/capture prewarm both", () => {
+  assert.equal(previewMountSource({ gentle: true, live: true }), true)   // on air / hand-over target
+  assert.equal(previewMountSource({ gentle: true, live: false }), false) // standby stays down
+  assert.equal(previewMountSource({ gentle: false, live: false }), true) // desktop / OBS / capture prewarm
+  assert.equal(previewMountSource({ gentle: false, live: true }), true)
 })
 
 const base = { now: 10_000, activeSince: 10_000, readyAt: 1000, ready: true, notReadySince: null, lastFrameAt: null }

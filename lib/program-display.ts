@@ -118,6 +118,16 @@ export function previewGentle(i: { mute: boolean; touch: boolean; capturePage: b
   return i.mute && i.touch && !i.capturePage
 }
 
+/** Dropout-log tag so a phone preview's player lines are distinct from desktop / capture. */
+export function phoneDiagPrefix(i: { touch: boolean; capturePage: boolean }): string {
+  return i.touch && !i.capturePage ? "[phone] " : ""
+}
+
+/** Phone muted preview mounts only the on-air input (and the hand-over target). Desktop/OBS/capture prewarm both. */
+export function previewMountSource(i: { gentle: boolean; live: boolean }): boolean {
+  return !i.gentle || i.live
+}
+
 /**
  * Browser capture start (<html data-stream-ready>, which scripts/capture-stream.mjs waits for before its
  * first screenshot / screencast frame): when the operator has Program up, wait for the program layer to
