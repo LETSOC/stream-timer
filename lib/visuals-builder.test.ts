@@ -134,6 +134,7 @@ test("builder Live tab: real /stream muted, only mounted while selected, /stream
   const fs = await import("node:fs")
   const src = fs.readFileSync("components/visuals-builder.tsx", "utf8")
   assert.match(src, /src="\/stream\?mute=1&diag=1"/) // Live tab logs player lines ([desk] / [phone])
+  assert.match(src, /Math\.min\(node\.clientWidth \/ 1920, node\.clientHeight \/ 1080\)/) // wide window: fit the box, don't paint over the multiview
   assert.match(src, /\{liveView \? <LiveMonitor state=\{state\} \/> : \(/)
   assert.match(src, /data-testid="vb-screen-live"[\s\S]{0,200}>Live<\/button>/)
   assert.match(src, /data-testid="vb-multiview"/)

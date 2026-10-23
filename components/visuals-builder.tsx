@@ -505,8 +505,12 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
   useEffect(() => {
     const node = box.current
     if (!node) return
-    const observer = new ResizeObserver(() => setScale(node.clientWidth / 1920))
+    // Fit the 1920x1080 frame to the box, not the width alone: a wide window
+    // shrinks this box above the multiview, and a width-only scale paints over it.
+    const fit = () => setScale(Math.min(node.clientWidth / 1920, node.clientHeight / 1080))
+    const observer = new ResizeObserver(fit)
     observer.observe(node)
+    fit()
     return () => observer.disconnect()
   }, [])
   const onAir = state?.programSource === "backup" ? "backup" : "main"
@@ -514,9 +518,9 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
   const backupReady = state?.programSources?.backup?.ready ?? false
   const rearm = state?.rearmHoldMs ?? 0
   return (
-    <>
-      <div ref={box} data-testid="vb-live" className="relative aspect-video w-full overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black">
-        <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1&diag=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1920, height: 1080, transform: `scale(${scale})` }} />
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div ref={box} data-testid="vb-live" className="relative min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black">
+        <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1&diag=1" className="pointer-events-none absolute top-1/2 left-1/2 origin-center border-0" style={{ width: 1920, height: 1080, transform: `translate(-50%, -50%) scale(${scale})` }} />
         <span data-testid="vb-live-onair" className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.15em] text-white uppercase"><span className="size-1.5 rounded-full bg-white" />On air</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -526,7 +530,7 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
 
       {/* Main | Backup multiview — hidden on touch until tapped (two extra decodes). Desktop shows it. */}
       {showMv ? (
-      <div data-testid="vb-multiview" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div data-testid="vb-multiview" className="grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-2">
         {([
           { id: "main", label: "Main", path: "program", ready: mainReady },
           { id: "backup", label: "Backup", path: "program-backup", ready: backupReady },
@@ -544,6 +548,6 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
         <button type="button" data-testid="vb-multiview-show" onClick={() => setShowMv(true)} className="self-start rounded-full border border-white/20 px-3 py-1 font-mono text-[11px] text-white hover:bg-white/10">Show Main | Backup</button>
       )}
       <p className="font-mono text-[10px] text-white/40">{showMv ? "Main and Backup, muted (WebRTC). Unmute one only if you need to hear it." : "Multiview hidden on this device. Tap to load Main and Backup."}</p>
-    </>
+    </div>
   )
 }
