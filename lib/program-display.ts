@@ -109,6 +109,16 @@ export function holdStandby(i: { onAir: boolean; incoming: boolean; captureTap: 
 }
 
 /**
+ * /stream on a phone/tablet inside an operator preview (?mute=1: the deck's and the builder's
+ * iframes): use the gentle HLS profile (standard HLS, ~3s buffer, no catch-up). The on-air
+ * low-latency profile starves a phone on Wi-Fi (constant rebuffering). OBS and browser capture
+ * never pass ?mute=1 on touch hardware, so on-air behaviour is unchanged.
+ */
+export function previewGentle(i: { mute: boolean; touch: boolean; capturePage: boolean }): boolean {
+  return i.mute && i.touch && !i.capturePage
+}
+
+/**
  * Browser capture start (<html data-stream-ready>, which scripts/capture-stream.mjs waits for before its
  * first screenshot / screencast frame): when the operator has Program up, wait for the program layer to
  * cover the screen (first frame, or its own standby rules) so a (re)started capture never opens on the

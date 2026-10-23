@@ -147,7 +147,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           const nextBed = (body.bed && typeof body.bed === "object" ? body.bed : null) as StreamBedPlan
           setBed((cur) => (JSON.stringify(cur) === JSON.stringify(nextBed) ? cur : nextBed))
           if (body.stage && typeof body.stage === "object") {
-            setStage(parseStage(body.stage))
+            // Same stage as last poll → keep the old object, so the countdown/visuals tree doesn't re-render every second.
+            const nextStage = parseStage(body.stage)
+            setStage((cur) => (JSON.stringify(cur) === JSON.stringify(nextStage) ? cur : nextStage))
           }
         })
         .then(() => { if (fails >= 3) playerDiag("+", `/stream state poll OK again after ${fails} failures`); fails = 0 })

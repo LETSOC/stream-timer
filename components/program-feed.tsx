@@ -11,7 +11,8 @@ import { useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
-import { holdStandby, keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { holdStandby, keepLoaded, previewDisplay, previewGentle, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { muteOnlyAudio } from "@/lib/preview-audio"
 import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
@@ -341,6 +342,12 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // Main↔Backup switch or failover in the output never waits for a paused input to catch up.
   const [captureTap] = useState(() => isCapturePage())
   const hold = holdStandby({ onAir, incoming, captureTap })
+  // Phone/tablet in a muted operator preview (deck / builder iframe): gentle HLS, not the on-air LL profile.
+  const [gentle] = useState(() => typeof window !== "undefined" && previewGentle({
+    mute: new URLSearchParams(window.location.search).get("mute") === "1",
+    touch: muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
+    capturePage: isCapturePage(),
+  }))
   const label = source === "backup" ? "Backup" : "Main"
   // Last-frame cover: a player rebuild / decode error clears the <video> (black). The last good frame
   // is drawn on a canvas on top until the element shows a new frame, so the output freezes, never blacks.
@@ -374,7 +381,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // standby input in a plain tab, never on the capture page) does not depend on it.
   const shownRef = useRef<ProgramDisplay>("under")
   const maySound = () => programWantsSound({ active: active && shownRef.current === "video", hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
-  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, diag: { label, onAir }, onTrouble: showCover })
+  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, gentle, diag: { label, onAir }, onTrouble: showCover })
   // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
   // a decode error (element already blank) still has a frame to hold.
   const [periodic] = useState(() => isCapturePage())

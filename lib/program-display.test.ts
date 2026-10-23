@@ -1,6 +1,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { handoverDone, keepLoaded, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
+import { handoverDone, keepLoaded, previewGentle, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
+
+test("gentle HLS only for touch devices in a muted operator preview, never capture/OBS", () => {
+  assert.equal(previewGentle({ mute: true, touch: true, capturePage: false }), true)
+  assert.equal(previewGentle({ mute: true, touch: false, capturePage: false }), false) // desktop preview keeps LL
+  assert.equal(previewGentle({ mute: false, touch: true, capturePage: false }), false) // real viewer / OBS URL
+  assert.equal(previewGentle({ mute: true, touch: true, capturePage: true }), false) // browser capture
+})
 
 const base = { now: 10_000, activeSince: 10_000, readyAt: 1000, ready: true, notReadySince: null, lastFrameAt: null }
 
