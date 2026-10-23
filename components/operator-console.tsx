@@ -1061,7 +1061,7 @@ export function OperatorConsole() {
             <div data-testid="transport-danger" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
-              <button type="button" data-testid="open-feed-lost" className={`${pillClass("outline")} col-span-2`} onClick={() => { setSectionOpen("hold-card", true); document.getElementById("standby-title")?.scrollIntoView({ behavior: "smooth", block: "center" }) }}>Open feed-lost card</button>
+              <button type="button" data-testid="open-feed-lost" className={`${pillClass("outline")} col-span-2`} onClick={() => { setSectionOpen("feed-lost", true); requestAnimationFrame(() => document.getElementById("section-feed-lost")?.scrollIntoView({ behavior: "smooth", block: "center" })) }}>Open feed-lost card</button>
             </div>
               <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
                 <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
@@ -1505,9 +1505,6 @@ export function OperatorConsole() {
             <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show hold card. Edits here are a draft until you Save.</p>
             <Field label="Title" htmlFor="hold-title"><GrowingText id="hold-title" value={holdTitle} onChange={setHoldTitle} /></Field>
             <Field label="Message (optional)" htmlFor="hold-message"><GrowingText id="hold-message" value={holdMessage} onChange={setHoldMessage} /></Field>
-            <p className="pt-2 font-mono text-[12px] leading-5 text-black/70">Feed-lost card: shown automatically on /stream (and Vertical) when neither Main nor Backup is sending. Public text: no technical words.</p>
-            <Field label="Feed-lost title" htmlFor="standby-title"><GrowingText id="standby-title" value={standbyTitle} onChange={setStandbyTitle} /></Field>
-            <Field label="Feed-lost message (optional)" htmlFor="standby-message"><GrowingText id="standby-message" value={standbyMessage} onChange={setStandbyMessage} /></Field>
             <Field label="Image (optional): URL or upload" htmlFor="hold-image">
               <GrowingText id="hold-image" value={holdImage} onChange={setHoldImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1522,6 +1519,12 @@ export function OperatorConsole() {
                 </select>
               </div>
             </Field>
+          </Panel>
+          <Panel id="feed-lost" title="Feed-lost card" defaultOpen={false} dirty={drafts.isDirty("feedLost")}>
+            {draftBar("feedLost")}
+            <p className="font-mono text-[12px] leading-5 text-black/70">Shown automatically on /stream and Vertical when neither Main nor Backup is sending. Not a scene and not switched from Transport. Public text: no technical words.</p>
+            <Field label="Title" htmlFor="standby-title"><GrowingText id="standby-title" value={standbyTitle} onChange={setStandbyTitle} /></Field>
+            <Field label="Message (optional)" htmlFor="standby-message"><GrowingText id="standby-message" value={standbyMessage} onChange={setStandbyMessage} /></Field>
           </Panel>
           <Panel id="welcome-card" title="Welcome back card" defaultOpen={false} dirty={drafts.isDirty("welcomeCard")} pill={overlay === "welcome" ? "On air" : undefined}>
             {draftBar("welcomeCard")}
@@ -1704,7 +1707,7 @@ function Panel({ id, title, pill, dirty = false, defaultOpen = true, children }:
     </>
   )
   return (
-    <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+    <section id={id} className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
       {id ? (
         <button
           type="button"
