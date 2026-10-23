@@ -198,18 +198,20 @@ export function qrRingCell(size: number, step: number): { x: number; y: number }
 // ---------- Scene cards (full screen) ----------
 
 /** Extra full-screen cards from the design. Break, Hold, Welcome and End are the existing cards. */
-export const SCENE_IDS = ["hold05", "hold06", "hold07", "standby", "showreel"] as const
+export const SCENE_IDS = ["hold05", "hold06", "hold07", "hold08", "hold09", "standby", "showreel"] as const
 export type SceneId = (typeof SCENE_IDS)[number]
-export const SCENE_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", standby: "STANDBY", showreel: "SHOWREEL" }
+export const SCENE_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "STANDBY", showreel: "SHOWREEL" }
 export const SCENE_BG_MODES = ["solid", "image", "hero"] as const
 export type SceneBgMode = (typeof SCENE_BG_MODES)[number]
-export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean }
+export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | "" }
 
-const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, ...extra })
+const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", ...extra })
 export const DEFAULT_SCENES: Record<SceneId, SceneCard> = {
   hold05: scene("Break", "Stretch • Refill • 15 min", "#c6ff00", "HOLD 05 • BREAK"),
   hold06: scene("Starting Soon", "Doors opening • Get comfy", "#ffd400", "HOLD 06 • STARTING SOON"),
   hold07: scene("Be Right Back", "We’ll be back shortly", "#ff6a00", "HOLD 07 • TECH PAUSE"),
+  hold08: scene("Hold 08", "", "#7aa2ff", "HOLD 08"),
+  hold09: scene("Hold 09", "", "#b388ff", "HOLD 09"),
   standby: scene("Stand By", "We’re getting ready • Stay tuned", "#ffd400", "STANDBY • HOLD"),
   showreel: scene("Showreel", "Hyphen Studio Work • 2026", "#ffffff", "SHOWREEL • PLAY", { gradient: true }),
 }
@@ -240,6 +242,7 @@ export function parseScene(v: unknown, f: SceneCard): SceneCard {
     videoFront: typeof r.videoFront === "boolean" ? r.videoFront : f.videoFront,
     pauseBed: typeof r.pauseBed === "boolean" ? r.pauseBed : f.pauseBed,
     loop: typeof r.loop === "boolean" ? r.loop : f.loop,
+    next: r.next === "program" || SCENE_IDS.includes(r.next as SceneId) ? (r.next as SceneId | "program") : f.next,
   }
 }
 export function parseScenes(v: unknown, base: Record<SceneId, SceneCard> = DEFAULT_SCENES): Record<SceneId, SceneCard> {

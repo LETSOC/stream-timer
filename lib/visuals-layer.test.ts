@@ -102,7 +102,7 @@ test("layer parts: full-screen cards hide it; master switch; OBS overlay ignores
   assert.deepEqual(layerParts(on, "program"), { strap: true, talk: true, ticker: true, qa: true, sponsor: true, socials: true, logos: [], qr: false, qrLogo: false })
   assert.equal(layerParts(on, "countdown").socials, false, "countdown has its own circles")
   const off = (v: unknown) => (Array.isArray(v) ? v.length === 0 : !v)
-  for (const sc of ["break", "hold", "welcome", "end", "hold05", "hold06", "hold07", "standby", "showreel"] as const) assert.ok(Object.values(layerParts({ ...on, logosOn: ["logo1"], qrOn: true }, sc)).every(off), sc)
+  for (const sc of ["break", "hold", "welcome", "end", "hold05", "hold06", "hold07", "hold08", "hold09", "standby", "showreel"] as const) assert.ok(Object.values(layerParts({ ...on, logosOn: ["logo1"], qrOn: true }, sc)).every(off), sc)
   assert.ok(Object.values(layerParts({ ...on, streamVisuals: false }, "program")).every(off))
   assert.equal(layerParts({ ...on, streamVisuals: false }, "overlay").talk, true)
   assert.equal(layerParts({ ...on, tickerItems: [] }, "program").ticker, false, "empty ticker stays hidden")

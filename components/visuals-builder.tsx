@@ -365,7 +365,15 @@ export function VisualsBuilder() {
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-videofront" checked={c.videoFront} onChange={(e) => setScene(id, { videoFront: e.target.checked })} className="accent-[#D9FF43]" /> Video in front (above card text and QR)</label>
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-pausebed" checked={c.pauseBed} onChange={(e) => setScene(id, { pauseBed: e.target.checked })} className="accent-[#D9FF43]" /> Pause audio bed while the video plays</label>
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-loop" checked={c.loop} onChange={(e) => setScene(id, { loop: e.target.checked })} className="accent-[#D9FF43]" /> Loop video</label>
-                  <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-autoswitch" checked={c.autoSwitch} onChange={(e) => setScene(id, { autoSwitch: e.target.checked })} className="accent-[#D9FF43]" /> Play once, then auto-switch to Program</label>
+                  <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-autoswitch" checked={c.autoSwitch} onChange={(e) => setScene(id, { autoSwitch: e.target.checked })} className="accent-[#D9FF43]" /> Play once, then switch</label>
+                  {c.autoSwitch ? (
+                    <label className="grid gap-1"><Label>Then go to</Label>
+                      <select data-testid="vb-scene-next" className={field} value={c.next} onChange={(e) => setScene(id, { next: e.target.value as SceneCard["next"] })}>
+                        <option value="">Program</option>
+                        {SCENE_IDS.filter((s) => s !== id).map((s) => <option key={s} value={s}>{SCENE_LABEL[s]}</option>)}
+                      </select>
+                    </label>
+                  ) : null}
                   <p className="font-mono text-[10px] text-white/45">Plays on the scene card with sound. In OBS, enable “Control audio via OBS” on the Browser Source. Auto-switch only fires on the real /stream output.</p>
                 </div>
                 <p className="font-mono text-[10px] text-white/45">Applies on Save. Put it on air from the deck › Scenes (two taps while program is live).</p>

@@ -18,8 +18,8 @@ const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "
  * every tap applies at once over the deck WebSocket. Strap presets and layout are edited in the
  * builder (/visuals/builder) or the desk › Visuals. Risky taps (layer OFF, Clear all) need two taps.
  */
-const SCENE_BUTTONS: [Screen, string][] = [["program", "LIVE"], ["hold07", "HOLD 07"], ["hold06", "HOLD 06"], ["hold05", "HOLD 05"], ["welcome", "WELCOME"], ["standby", "STANDBY"], ["break", "BREAK"], ["hold", "HOLD"], ["showreel", "SHOWREEL"], ["end", "END"]]
-const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", end: "END" }
+const SCENE_BUTTONS: [Screen, string][] = [["program", "LIVE"], ["hold09", "HOLD 09"], ["hold08", "HOLD 08"], ["hold07", "HOLD 07"], ["hold06", "HOLD 06"], ["hold05", "HOLD 05"], ["welcome", "WELCOME"], ["standby", "STANDBY"], ["break", "BREAK"], ["hold", "HOLD"], ["showreel", "SHOWREEL"], ["end", "END"]]
+const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", end: "END" }
 const LOGO_SHORT = ["1 □", "2 ○", "3 □", "4 ○", "5 W"]
 const BTN = "min-h-12 rounded-[14px] px-2 text-[15px] font-black touch-manipulation disabled:opacity-35"
 const GO = `${BTN} bg-[#12b76a] text-black`

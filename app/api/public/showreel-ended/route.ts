@@ -17,6 +17,8 @@ export async function POST(request: Request) {
   if (!isScene(overlay)) return Response.json({ ok: false, skipped: true })
   const card = state.stage.scenes[overlay]
   if (!card?.video || !card.autoSwitch) return Response.json({ ok: false, skipped: true })
-  const result = runServerTransport({ type: "screen", screen: "program" }, undefined, Date.now(), { by: "deck" })
+  // next scene if set and not itself; otherwise Program, as before.
+  const next = card.next && card.next !== overlay && (card.next === "program" || isScene(card.next)) ? card.next : "program"
+  const result = runServerTransport({ type: "screen", screen: next }, undefined, Date.now(), { by: "deck" })
   return Response.json({ ok: result.ok }, { status: result.ok ? 200 : result.status })
 }
