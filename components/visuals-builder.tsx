@@ -222,7 +222,7 @@ export function VisualsBuilder() {
         </div>
       </header>
 
-      <div className={`grid min-h-0 flex-1 gap-4 p-4 max-xl:flex-none ${liveView ? "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]" : "grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)_320px]"}`}>
+      <div className={`grid min-h-0 flex-1 gap-4 p-4 max-xl:flex-none ${liveView ? "grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)]" : "grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)_320px]"}`}>
         {/* Library */}
         <aside data-testid="vb-library" className={`${panel} flex min-h-0 max-h-[40dvh] flex-col overflow-auto p-3 xl:max-h-none`}>
           <LibGroup title="Straps">{libItem("strap")}</LibGroup>
@@ -234,8 +234,8 @@ export function VisualsBuilder() {
             {straps.map((s) => (
               <li key={s.id}>
                 <button type="button" data-testid={`vb-strap-${s.id}`} onClick={() => setSel({ kind: "strap", id: s.id })} className={`w-full rounded-[10px] px-2.5 py-2 text-left ${sel.kind === "strap" && sel.id === s.id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
-                  <span className="block truncate text-[13px] font-semibold">{s.name || "(no name)"}{live?.strapId === s.id ? <span className="ml-2 font-mono text-[9px] text-[#D9FF43]">CUED</span> : null}</span>
-                  <span className="block truncate font-mono text-[10px] text-white/50">{s.title || "—"} · {STRAP_STYLE_LABEL[s.style].split(" ")[0]}</span>
+                  <span className="block text-[13px] font-semibold break-words">{s.name || "(no name)"}{live?.strapId === s.id ? <span className="ml-2 font-mono text-[9px] text-[#D9FF43]">CUED</span> : null}</span>
+                  <span className="block font-mono text-[10px] text-white/50 break-words">{s.title || "—"} · {STRAP_STYLE_LABEL[s.style].split(" ")[0]}</span>
                 </button>
               </li>
             ))}
