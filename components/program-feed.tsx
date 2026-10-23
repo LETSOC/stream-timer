@@ -123,7 +123,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         // true here) and resets playbackRate to 1 otherwise, so it never caught up (14:07: stuck at 3.5s);
         // settleTick below owns playbackRate on air instead (1.05x back to the player's healthy latency).
         const tuning = gentle
-          ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 10, maxLiveSyncPlaybackRate: 1, manifestLoadingTimeOut: 4000, levelLoadingTimeOut: 4000, fragLoadingTimeOut: 8000 }
+          ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 10, maxLiveSyncPlaybackRate: 1, manifestLoadingTimeOut: 8000, levelLoadingTimeOut: 8000, fragLoadingTimeOut: 8000 }
           : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1, liveSyncOnStallIncrease: 0 }
         hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
