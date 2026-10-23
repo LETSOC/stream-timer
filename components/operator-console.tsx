@@ -887,15 +887,16 @@ export function OperatorConsole() {
     <div data-desk-root data-pin-spacer={pinPreview ? "true" : undefined} className={`min-h-dvh bg-[#F6F6F3] text-black ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
       <BackToTop />
       <CopyFallbackHost />
-      <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+      <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-3 backdrop-blur sm:px-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-[240px] shrink-0">
             <p className="font-mono text-[12px] tracking-[0.16em] text-black/70 uppercase">
               Hyphen Festival 2026
             </p>
             <h1 className="text-xl font-black tracking-tight uppercase">Countdown desk</h1>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <AppNav page="desk" tone="light" deckDot={wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"} />
+          <div className="ml-auto flex flex-wrap items-center gap-2">
             <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[13px] md:inline-flex">
               <span className="text-black/70">Target</span>
               <span>{valid ? formatClock(target, timeZone) : "—"}</span>
@@ -908,7 +909,6 @@ export function OperatorConsole() {
                 Save all ({drafts.dirty.length})
               </Pill>
             ) : null}
-            <AppNav page="desk" tone="light" deckDot={wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"} />
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>

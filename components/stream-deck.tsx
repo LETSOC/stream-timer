@@ -172,14 +172,14 @@ export function StreamDeck() {
   return (
     <main className="min-h-dvh bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pb-[max(88px,calc(env(safe-area-inset-bottom)+72px))] text-white">
       {/* Pinned: header + preview stay on screen while the buttons scroll underneath. */}
-      <div data-testid="deck-sticky" className="sticky top-0 z-20 -mx-3 mb-3 border-b border-white/10 bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pt-[max(10px,env(safe-area-inset-top))] pb-2 shadow-[0_8px_16px_rgba(0,0,0,0.6)]">
-      <header className="mb-2 flex flex-wrap items-center gap-2">
-        <div className="mr-auto">
+      <div data-testid="deck-sticky" className="sticky top-0 z-20 -mx-3 mb-3 border-b border-white/10 bg-[#0b0b0f] px-4 pt-[max(10px,env(safe-area-inset-top))] pb-2 shadow-[0_8px_16px_rgba(0,0,0,0.6)] sm:px-6">
+      <header className="mb-2 flex flex-wrap items-center gap-3">
+        <div className="w-[240px] shrink-0">
           <p className="font-mono text-[12px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
           <h1 className="text-xl font-black tracking-tight uppercase">Stream Deck</h1>
         </div>
         <AppNav page="deck" />
-        <span data-testid="deck-link-state" data-state={link} className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px] text-white/70">
+        <span data-testid="deck-link-state" data-state={link} className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px] text-white/70">
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]} ${link === "connecting" ? "animate-pulse" : ""}`} />
           {LINK_LABEL[link]}
         </span>

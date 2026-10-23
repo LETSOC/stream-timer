@@ -200,8 +200,8 @@ export function VisualsBuilder() {
 
   return (
     <main data-testid="visuals-builder" className="flex h-dvh flex-col bg-[#0a0a0a] text-white max-xl:h-auto max-xl:min-h-dvh max-xl:overflow-y-auto" style={{ fontFamily: "var(--font-instrument-sans), 'Instrument Sans', Arial, sans-serif", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
-      <header className="flex flex-wrap items-center gap-3 border-b border-[#2a2a2a] px-5 py-3">
-        <div>
+      <header className="flex flex-wrap items-center gap-3 border-b border-[#2a2a2a] px-4 py-3 sm:px-6">
+        <div className="w-[240px] shrink-0">
           <p className="font-mono text-[12px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
           <h1 className="text-xl font-black tracking-tight uppercase">Visuals builder</h1>
         </div>
