@@ -102,7 +102,6 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
     const el = videoRef.current
     if (!el || !video) return
     el.muted = !wantSound || new URLSearchParams(window.location.search).get("mute") === "1"
-    if (el.ended || el.currentTime > 0) { try { el.currentTime = 0 } catch { /* not seekable yet */ } }
     void el.play().catch(() => {
       // Autoplay with sound refused (normal browser tab): keep the picture, muted. A tap on the stream unmute turns it back on.
       el.muted = true
