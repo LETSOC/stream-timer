@@ -13,6 +13,7 @@ import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, previewGentle, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 import { muteOnlyAudio } from "@/lib/preview-audio"
+import { programAudioRouted, rampProgramAudio, resetProgramAudio, routeProgramAudio } from "@/lib/switch-crossfade"
 import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
@@ -330,7 +331,7 @@ function useCaptureAudioTap(videoRef: RefObject<HTMLVideoElement | null>, source
   }, [videoRef, source])
 }
 
-export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false, rearmHoldUntil = null, standbyTitle = "We'll be right back", standbyMessage = "" }: { /** branded feed-lost card text (desk › Hold card); public, no technical words */ standbyTitle?: string; standbyMessage?: string; /** a disarm/arm cycle (auto re-arm / desk buttons) holds the last frame until this local time (null = none) */ rearmHoldUntil?: number | null; /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
+export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false, rearmHoldUntil = null, standbyTitle = "We'll be right back", standbyMessage = "", crossfadeMs = 0, tail = false, fadeIn = false }: { /** this input just came on air with the old one tailing: its sound fades in */ fadeIn?: boolean; /** Main↔Backup audio crossfade (0 = Hard cut) */ crossfadeMs?: number; /** this input just left the air: its sound fades out over crossfadeMs (picture already cut) */ tail?: boolean; /** branded feed-lost card text (desk › Hold card); public, no technical words */ standbyTitle?: string; standbyMessage?: string; /** a disarm/arm cycle (auto re-arm / desk buttons) holds the last frame until this local time (null = none) */ rearmHoldUntil?: number | null; /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
@@ -343,7 +344,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // Browser capture (?capture=1 / headless, or the page-audio tap) keeps both inputs decoding, so a
   // Main↔Backup switch or failover in the output never waits for a paused input to catch up.
   const [captureTap] = useState(() => isCapturePage())
-  const hold = holdStandby({ onAir, incoming, captureTap })
+  const hold = holdStandby({ onAir, incoming: incoming || tail, captureTap })
   // Phone/tablet in a muted operator preview (deck / builder iframe): gentle HLS, not the on-air LL profile.
   const [gentle] = useState(() => typeof window !== "undefined" && previewGentle({
     mute: new URLSearchParams(window.location.search).get("mute") === "1",
@@ -382,7 +383,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // (?mute=1, standby input, picture not up) always silences. Sound only: `hold` above (pause the
   // standby input in a plain tab, never on the capture page) does not depend on it.
   const shownRef = useRef<ProgramDisplay>("under")
-  const maySound = () => programWantsSound({ active: active && shownRef.current === "video", hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
+  const maySound = () => programWantsSound({ active: tail || (active && shownRef.current === "video"), hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
   const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, gentle, diag: { label, onAir }, onTrouble: showCover })
   // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
   // a decode error (element already blank) still has a frame to hold.
@@ -408,6 +409,24 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
     if ((!onAir || (!load && !rearmHold)) && coverRef.current) { coverOn.current = false; coverRef.current.style.visibility = "hidden" }
   }, [onAir, load, rearmHold])
   useCaptureAudioTap(videoRef, source)
+  // Page crossfade (not on the capture page): route through a GainNode once WebAudio runs; ramp on the audio clock.
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el || crossfadeMs <= 0 || captureTap) return
+    if (routeProgramAudio(source, el)) return
+    const id = window.setInterval(() => { if (routeProgramAudio(source, el)) window.clearInterval(id) }, 1000)
+    return () => window.clearInterval(id)
+  }, [crossfadeMs, captureTap, source])
+  const wasTail = useRef(false)
+  useEffect(() => {
+    if (captureTap || !programAudioRouted(source)) { wasTail.current = tail; return }
+    if (tail) rampProgramAudio(source, "out", crossfadeMs)
+    // Fresh incoming (was muted) starts at 0; a mid-fade reversal (it was tailing) carries on from where it is.
+    else if (fadeIn) rampProgramAudio(source, "in", crossfadeMs, wasTail.current ? undefined : 0)
+    else resetProgramAudio(source)
+    wasTail.current = tail
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on a switch only
+  }, [tail, fadeIn])
   // A held last frame (cover canvas) lets a reconnecting OBS (relay READY, rebuilt player not playing yet)
   // freeze on the last picture instead of the "Waiting for OBS" card.
   const held = onAir && hasHeld
@@ -455,7 +474,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
-    const allow = programWantsSound({ active: shown === "video", hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
+    const allow = programWantsSound({ active: tail || shown === "video", hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
     if (!allow) video.muted = true
     else if (video.muted) {
       video.muted = false
@@ -465,7 +484,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
         void video.play().catch(() => undefined)
       })
     }
-  }, [shown, muted, programAudio])
+  }, [shown, muted, programAudio, tail])
 
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
   // Real frames only: a watchdog rebuild holds lastFrameAt but must not make a stuck input look alive.
@@ -474,7 +493,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   const visual: ProgramDisplay = incoming ? "under" : shown
   const hardMute = muted || shown !== "video"
   return (
-    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-resync={resyncGen} data-hard-mute={hardMute ? "1" : "0"} data-want-sound={maySound() ? "1" : "0"} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
+    <div data-testid={onAir ? "program-feed" : "program-feed-standby"} data-source={source} data-display={visual} data-loaded={load ? "1" : "0"} data-playing={playing ? "1" : "0"} data-latency-ms={latency ?? ""} data-resync={resyncGen} data-hard-mute={hardMute ? "1" : "0"} data-want-sound={maySound() ? "1" : "0"} data-crossfade-ms={crossfadeMs} aria-hidden={visual === "under"} className={`fixed inset-0 bg-black transition-opacity duration-300 ${visual === "under" ? "pointer-events-none opacity-0" : `${onAir ? "z-[5]" : "z-[6]"} opacity-100`}`}>
       <video ref={videoRef} className="h-full w-full object-contain" autoPlay playsInline muted disablePictureInPicture />
       <canvas ref={coverRef} data-testid="program-cover" aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ visibility: "hidden" }} />
       {visual === "standby" ? (

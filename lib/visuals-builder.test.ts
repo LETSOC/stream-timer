@@ -151,6 +151,6 @@ test("builder Live tab: real /stream muted, only mounted while selected, /stream
   assert.match(src, /programOperatorSrc/)
   // the existing mute param still mutes program and bed on /stream
   const view = fs.readFileSync("components/stream-view.tsx", "utf8")
-  assert.match(view, /muted=\{params\.get\("mute"\) === "1" \|\| !isAir\}/)
+  assert.match(view, /muted=\{params\.get\("mute"\) === "1" \|\| \(!isAir && fade\?\.out !== source\)\}/)
   assert.match(view, /urlMute=\{params\.get\("mute"\) === "1"\}/)
 })
