@@ -89,6 +89,7 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
   const [stall, setStall] = useState<string | null>(null)
   const [ret, setRet] = useState<string | null>(null)
   const [buf, setBuf] = useState<string | null>(null)
+  const [xf, setXf] = useState<string | null>(null)
   // Manual switch = two taps (like the other risky buttons): the first arms "Tap again…" for 3s.
   // Auto-failover and "Return now" don't go through this.
   const [armed, setArmed] = useState<ProgramSource | null>(null)
@@ -183,6 +184,17 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
           </label>
           <label className="flex items-center gap-1">switch buffer
             <input type="number" min={0} max={5} step={0.5} data-testid="failover-switch-buffer" disabled={disabled} value={buf ?? String(f.switchBufferMs / 1000)} onChange={(e) => setBuf(e.target.value)} onBlur={() => { if (buf !== null && Number(buf) >= 0) onFailover({ switchBufferMs: Math.round(Number(buf) * 1000) }); setBuf(null) }} className={`w-12 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s
+          </label>
+          <label className="flex items-center gap-1" title="Main↔Backup audio, manual and auto-failover. Crossfade blends the two inputs (equal-power) when both have audio; a dead input always cuts. The picture always cuts.">switch audio
+            <select data-testid="failover-switch-audio" disabled={disabled} value={f.crossfadeMs > 0 ? "fade" : "cut"} onChange={(e) => onFailover({ crossfadeMs: e.target.value === "fade" ? 250 : 0 })} className={`rounded border px-1 ${dark ? "border-white/20 bg-black" : "border-black/20"}`}>
+              <option value="cut">Hard cut</option>
+              <option value="fade">Crossfade</option>
+            </select>
+            {f.crossfadeMs > 0 ? (
+              <>
+                <input type="number" min={100} max={1000} step={50} data-testid="failover-crossfade-ms" disabled={disabled} value={xf ?? String(f.crossfadeMs)} onChange={(e) => setXf(e.target.value)} onBlur={() => { const v = Number(xf); if (xf !== null && Number.isFinite(v)) onFailover({ crossfadeMs: Math.min(1000, Math.max(100, Math.round(v))) }); setXf(null) }} className={`w-14 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />ms
+              </>
+            ) : null}
           </label>
         </div>
       ) : null}

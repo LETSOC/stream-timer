@@ -26,8 +26,10 @@ export type FailoverSettings = {
   flapStableSec: number
   /** When the on-air input drops and comes back READY, disarm + re-arm it once (resyncs A/V). Default on. */
   autoRearm: boolean
+  /** Main↔Backup switch audio: 0 = Hard cut; 100–1000 = equal-power crossfade (ms). Video always cuts. */
+  crossfadeMs: number
 }
-export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true }
+export const DEFAULT_FAILOVER: FailoverSettings = { auto: false, stallSec: 3, returnSec: 10, autoReturn: true, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true, crossfadeMs: 0 }
 
 export function parseFailover(raw: unknown): FailoverSettings {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
@@ -43,6 +45,7 @@ export function parseFailover(raw: unknown): FailoverSettings {
     flapWindowSec: num(r.flapWindowSec, 30, 3600, DEFAULT_FAILOVER.flapWindowSec),
     flapStableSec: num(r.flapStableSec, 5, 1800, DEFAULT_FAILOVER.flapStableSec),
     autoRearm: r.autoRearm !== false,
+    crossfadeMs: typeof r.crossfadeMs === "number" && Number.isFinite(r.crossfadeMs) && r.crossfadeMs > 0 ? Math.min(1000, Math.max(100, Math.round(r.crossfadeMs))) : 0,
   }
 }
 
