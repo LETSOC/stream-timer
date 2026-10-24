@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { BODY_MAX, clampChecker, DEFAULT_STAGE, effectiveEndTime, parseEndAt, parseStage, TEST_CLOCK_TTL_MS, testClockStale, TEXT_MAX } from "@/lib/stage"
+import { BODY_MAX, clampChecker, DEFAULT_STAGE, parseEndOffset, parseStage, TEST_CLOCK_TTL_MS, testClockStale, TEXT_MAX } from "@/lib/stage"
 
 test("partial stage keeps the base values (B)", () => {
   const base = { ...DEFAULT_STAGE, checker: 9, endTitle: "Custom", blockGap: 3 }
@@ -18,14 +18,17 @@ test("blockGap 0 survives; null/'' fall back (I)", () => {
   assert.equal(parseStage({ galleryOffset: 0 }).galleryOffset, 0)
 })
 
-test("endAt: empty by default, HH:MM only, empty means event end (C)", () => {
-  assert.equal(DEFAULT_STAGE.endAt, "")
-  assert.equal(parseStage({ endAt: "" }).endAt, "")
-  assert.equal(parseStage({ endAt: "17:05" }).endAt, "17:05")
-  assert.equal(parseStage({ endAt: "25:99" }, { ...DEFAULT_STAGE, endAt: "16:00" }).endAt, "16:00")
-  assert.equal(parseEndAt("nope"), "")
-  assert.equal(effectiveEndTime({ endAt: "" }, "18:00"), "18:00")
-  assert.equal(effectiveEndTime({ endAt: "17:00" }, "18:00"), "17:00")
+test("endOffsetMin: 0 by default, tolerant parse, old clock-time endAt dropped", () => {
+  assert.equal(DEFAULT_STAGE.endOffsetMin, 0)
+  assert.equal(parseStage({ endOffsetMin: -2 }).endOffsetMin, -2)
+  assert.equal(parseStage({ endOffsetMin: "10" }).endOffsetMin, 10)
+  assert.equal(parseStage({ endOffsetMin: 2.6 }).endOffsetMin, 3)
+  assert.equal(parseStage({ endOffsetMin: 99999 }).endOffsetMin, 720)
+  assert.equal(parseStage({ endOffsetMin: "nope" }, { ...DEFAULT_STAGE, endOffsetMin: 5 }).endOffsetMin, 5)
+  assert.equal(parseEndOffset(null), 0)
+  const old = parseStage({ endAt: "09:32" }) as unknown as Record<string, unknown>
+  assert.equal(old.endAt, undefined)
+  assert.equal(old.endOffsetMin, 0)
 })
 
 test("grid clamp (J)", () => {

@@ -10,16 +10,20 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
 import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
-import { clampChecker, effectiveEndTime, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
+import { clampChecker, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
+import { SceneCardView } from "@/components/visual-assets"
+import { isScene } from "@/lib/visuals-assets"
 import { brandUrl } from "@/lib/brand-asset"
 import { preloadImages, stageImageUrls } from "@/lib/image-preload"
 import { StageGuides } from "@/components/stage-guides"
 import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
+import { VisualsLayer } from "@/components/visuals-layer"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
-import { captureStartReady, handoverDone, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
-import { endInstant } from "@/lib/transport"
+import { captureStartReady, handoverDone, previewGentle, previewMountSource, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
+import { muteOnlyAudio } from "@/lib/preview-audio"
+import { endCardAt } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 import { SyncTestOverlay } from "@/components/sync-test-overlay"
 import { TC_BADGE_W, TC_GAP, TimecodeBadge } from "@/components/timecode-badge"
@@ -74,6 +78,12 @@ export function StreamClient({ initial }: { initial: StreamInitial | null }) {
 
 function StreamView({ initial }: { initial: StreamInitial | null }) {
   const params = useSearchParams()
+  // Phone/tablet muted preview: only the on-air input (and the hand-over target). Desktop/OBS/capture prewarm both.
+  const [gentlePreview] = useState(() => typeof window !== "undefined" && previewGentle({
+    mute: new URLSearchParams(window.location.search).get("mute") === "1",
+    touch: muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
+    capturePage: isCapturePage(),
+  }))
   const hasOverrides = OVERRIDE_KEYS.some((key) => params.get(key))
   const viewKey = params.get("k") ?? ""
   const [blocked, setBlocked] = useState(false)
@@ -144,7 +154,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           const nextBed = (body.bed && typeof body.bed === "object" ? body.bed : null) as StreamBedPlan
           setBed((cur) => (JSON.stringify(cur) === JSON.stringify(nextBed) ? cur : nextBed))
           if (body.stage && typeof body.stage === "object") {
-            setStage(parseStage(body.stage))
+            // Same stage as last poll → keep the old object, so the countdown/visuals tree doesn't re-render every second.
+            const nextStage = parseStage(body.stage)
+            setStage((cur) => (JSON.stringify(cur) === JSON.stringify(nextStage) ? cur : nextStage))
           }
         })
         .then(() => { if (fails >= 3) playerDiag("+", `/stream state poll OK again after ${fails} failures`); fails = 0 })
@@ -189,7 +201,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   }, [transparent])
 
   const clock = testClock ?? now
-  const pastEnd = Boolean(clock && endInstant(event.date, event.time, effectiveEndTime(stage, event.endTime), event.timeZone).getTime() <= clock.getTime())
+  const pastEnd = Boolean(clock && endCardAt(event.date, event.time, event.endTime, event.timeZone, stage.endOffsetMin) <= clock.getTime())
   const screen = stageScreen(stage, pastEnd)
   // Main/Backup hand-over: the input on air stays up until the incoming one has a frame (then crossfades
   // on top), or 4s at most (then the incoming one's own standby rules apply). Both are prewarmed.
@@ -269,11 +281,12 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
       {(["main", "backup"] as const).map((source) => {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
+        if (!previewMountSource({ gentle: gentlePreview, live })) return null
         if (!(sourceReady[source] || (stage.program && live))) return null
         return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} />
       })}
       <StreamAudioOverlay />
-      {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} viewKey={viewKey} /> : null}
+      {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} hold={isScene(shownScreen) && Boolean(stage.scenes[shownScreen]?.video) && stage.scenes[shownScreen]?.pauseBed === true} viewKey={viewKey} /> : null}
       {params.get("guides") === "1" ? <StageGuides className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null}
       {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard
@@ -286,6 +299,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           clock={now}
           className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
         />
+      ) : isScene(shownScreen) ? (
+        <SceneCardView id={shownScreen} key={shownScreen} card={stage.scenes[shownScreen]} qr={stage.qr} now={now ? now.getTime() : null} onAir className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
       ) : ended ? (
         <EndStreamPage className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
@@ -326,6 +341,12 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
       )}
+      {/* Visuals layer (deck): straps, talk-ends pill, ticker, Q&A, Sponsored. Over countdown and program, hidden by full-screen cards. */}
+      <div className="pointer-events-none absolute top-1/2 left-1/2 z-30 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)] -translate-x-1/2 -translate-y-1/2">
+        <VisualsLayer stage={stage} event={event} screen={shownScreen} now={now ? now.getTime() : null}
+          // Festival mode counts to the same end the countdown/end card use (test clock shifts it like the countdown).
+          eventEndMs={now && clock ? endCardAt(event.date, event.time, event.endTime, event.timeZone, stage.endOffsetMin) - (clock.getTime() - now.getTime()) : null} />
+      </div>
     </main>
   )
 }

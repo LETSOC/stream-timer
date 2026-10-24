@@ -257,12 +257,32 @@ export function writeLiveAudio(channel: AudioChannel): LiveAudio {
     const file = library.get(id)
     return file && fs.existsSync(streamFilePath(file)) ? file : null
   })
-  const plan = liveAudioPlan(config, resolved, audioDir())
+  const base = liveAudioPlan(config, resolved, audioDir())
+  // Showreel video on air with "pause bed": same source, gain to silence (feeder ramps, no restart).
+  const plan = bedHeld() && base.mode === "bed" ? { ...base, volumeDb: BED_HOLD_DB } : base
   fs.mkdirSync(dataDir(), { recursive: true })
   const file = liveAudioFile(channel)
   fs.writeFileSync(`${file}.tmp`, JSON.stringify(plan), { mode: 0o600 })
   fs.renameSync(`${file}.tmp`, file)
   return plan
+}
+
+/** Volume the feeder gets while the bed is held (≈ -120 dB: silent, same voice, so it resumes without a restart). */
+export const BED_HOLD_DB = -120
+const bedHoldFile = () => path.join(dataDir(), "rtmp-audio-bed-hold.flag")
+export function bedHeld(): boolean {
+  return fs.existsSync(bedHoldFile())
+}
+/** Hold or release the capture/slate audio bed (Showreel card with a video and pauseBed). Rewrites the live files only on change. */
+export function setBedHold(hold: boolean): boolean {
+  if (hold === bedHeld()) return false
+  fs.mkdirSync(dataDir(), { recursive: true })
+  if (hold) fs.writeFileSync(bedHoldFile(), "1", { mode: 0o600 })
+  else fs.rmSync(bedHoldFile(), { force: true })
+  for (const channel of ["slate", "capture"] as const) {
+    try { writeLiveAudio(channel) } catch { /* no audio settings yet */ }
+  }
+  return true
 }
 
 export function readAppliedAudio(channel: AudioChannel): AppliedAudio | null {

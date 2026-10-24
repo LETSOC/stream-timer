@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next"
-import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google"
+import { Geist, Geist_Mono, Instrument_Sans, Instrument_Serif, JetBrains_Mono } from "next/font/google"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -18,6 +18,10 @@ const instrumentSerif = Instrument_Serif({
   weight: "400",
 })
 
+// Visuals layer fonts (Hyphen design): self-hosted by next/font at build time, no runtime CDN.
+const instrumentSans = Instrument_Sans({ variable: "--font-instrument-sans", subsets: ["latin"], weight: ["400", "500", "600"] })
+const jetbrainsMono = JetBrains_Mono({ variable: "--font-jetbrains-mono", subsets: ["latin"], weight: ["400", "500", "700"] })
+
 export const metadata: Metadata = {
   title: "Hyphen Festival countdown",
   description:
@@ -31,7 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`dark ${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
+      className={`dark ${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} ${instrumentSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">{children}</body>
     </html>

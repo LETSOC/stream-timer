@@ -18,7 +18,7 @@ export async function GET(request: Request, context: RouteContext<"/uploads/[fil
   try {
     const data = new Uint8Array(fs.readFileSync(path.join(uploadsDir(), file)))
     const ext = file.split(".").pop() as keyof typeof CONTENT_TYPES
-    return new Response(data, { headers: { "Content-Type": CONTENT_TYPES[ext], ...cache, "X-Content-Type-Options": "nosniff" } })
+    return new Response(data, { headers: { "Content-Type": CONTENT_TYPES[ext], ...cache, "X-Content-Type-Options": "nosniff", ...(ext === "svg" ? { "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {}) } })
   } catch {
     return new Response("Not found", { status: 404 })
   }

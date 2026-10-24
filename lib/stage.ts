@@ -3,8 +3,10 @@
  * so both always agree on defaults and ranges. Pure: safe to import from client components.
  */
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-size"
-import { isValidTime, safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
-import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, STRAP_STYLES, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
+import { DEFAULT_LOGOS, DEFAULT_QR, DEFAULT_SCENES, SCENE_IDS, parseLogoIds, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
+import { DEFAULT_LAYOUT, parseVisualsLayout, type VisualsLayout } from "@/lib/visuals-layout"
+import { safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
+import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export type StageOptions = {
   /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
@@ -24,6 +26,20 @@ export type StageOptions = {
   straps: StrapPreset[]
   strapAccent: string
   strapText: string
+  /** House strap: pulsing white accent circle and the ↗ arrow badge (design toggles). Saved. */
+  strapAccentCircle: boolean
+  strapArrow: boolean
+  /** Logos 1–5 (builder › Save): source (built-in / uploaded / pasted SVG), colour, caption text. */
+  logos: Logos
+  /** Live (deck): which logos show. */
+  logosOn: LogoId[]
+  /** QR (builder › Save): link, colours, captions, Logo QR badge. */
+  qr: QrConfig
+  /** Live (deck): animated QR and Logo QR show/hide. */
+  qrOn: boolean
+  qrLogoOn: boolean
+  /** Extra full-screen scene cards (HOLD 05/06/07, STANDBY, SHOWREEL): texts, dot, pill, background. Saved. */
+  scenes: Record<SceneId, SceneCard>
   /** Live (deck /visuals, applied at once): which strap, IN/OUT/LOOP and when, look overrides, socials overlay. */
   strapId: string
   strapMode: StrapMode
@@ -35,8 +51,32 @@ export type StageOptions = {
   strapCorner: Corner
   socialsOverlay: boolean
   socialsCorner: Corner
+  /** Visuals layer on /stream (captured: reaches YouTube and Vertical). Off = OBS /overlay/* pages only. */
+  streamVisuals: boolean
+  /** Talk-ends pill (top-left): Session = manual timer from the deck, Festival = to the event end. */
+  talkVisible: boolean
+  talkMode: TalkMode
+  talkEndsAt: number | null
+  talkPausedMs: number | null
+  talkPrefix: string
+  festivalPrefix: string
+  /** Bottom ticker bar (marquee). */
+  tickerVisible: boolean
+  tickerType: TickerType
+  /** The active type's items (what the bar shows) = tickerPlannerItems or tickerSocialItems. Kept in sync. */
+  tickerItems: string[]
+  /** Separate saved lists per ticker type (switching type shows that type's own items). */
+  tickerPlannerItems: string[]
+  tickerSocialItems: string[]
+  /** Q&A white pill (bottom-right) and Sponsored black pill (top-right). */
+  qaVisible: boolean
+  qaText: string
+  sponsorVisible: boolean
+  sponsorText: string
   /** Extra px @1080p in from the safe-zone line for straps, socials and timecode badges (0 = edge on the line). */
   overlayInset: number
+  /** Builder › Save: per-part corner / snap / gap / size, separately for the countdown screen and program. */
+  visualsLayout: VisualsLayout
   /** A/V diagnostics: labelled STREAM wall-clock timecode on /stream (TC2), live switch, default off. */
   streamTimecode: boolean
   streamTimecodeFps: number
@@ -60,8 +100,8 @@ export type StageOptions = {
   endBody: string
   endQrUrl: string
   endButton: string
-  /** Optional HH:MM override for when the end card shows. Empty = use the event end time. */
-  endAt: string
+  /** End card adjustment: signed minutes from the planned Event › End time (−2 = 2 min early). 0 = as planned. */
+  endOffsetMin: number
   forceEnd: boolean
   holdCountdown: boolean
   /** Break / hold overlay cards. `overlay` is the live switch; it beats the end card and countdown. */
@@ -92,7 +132,14 @@ export type StageOptions = {
 }
 
 export type ImageFit = "cover" | "contain"
-export type Overlay = "none" | "break" | "hold" | "welcome"
+/** Card overlays (single source of truth): the classic cards plus every scene card. Used by the stage
+ * parser, the transport screens and the desk, so a new card can't be dropped back to "none" anywhere. */
+export const CARD_OVERLAYS = ["break", "hold", "welcome", ...SCENE_IDS] as const
+export type CardOverlay = (typeof CARD_OVERLAYS)[number]
+export type Overlay = "none" | CardOverlay
+export const OVERLAYS: readonly Overlay[] = ["none", ...CARD_OVERLAYS]
+export const isCardOverlay = (v: unknown): v is CardOverlay => (CARD_OVERLAYS as readonly unknown[]).includes(v)
+export const isOverlay = (v: unknown): v is Overlay => v === "none" || isCardOverlay(v)
 
 export const DEFAULT_STAGE: StageOptions = {
   checker: 6,
@@ -109,8 +156,16 @@ export const DEFAULT_STAGE: StageOptions = {
   countdownStrokePx: 2,
   countdownStrokeColor: "#ffffff",
   straps: DEFAULT_STRAPS,
-  strapAccent: "#d4ff32",
+  strapAccent: "#d9ff43",
   strapText: "#ffffff",
+  strapAccentCircle: true,
+  strapArrow: true,
+  logos: DEFAULT_LOGOS,
+  logosOn: [],
+  qr: DEFAULT_QR,
+  qrOn: false,
+  qrLogoOn: false,
+  scenes: DEFAULT_SCENES,
   strapId: "",
   strapMode: "out",
   strapAt: null,
@@ -121,6 +176,23 @@ export const DEFAULT_STAGE: StageOptions = {
   socialsOverlay: false,
   socialsCorner: "bottom-left",
   overlayInset: 0,
+  visualsLayout: DEFAULT_LAYOUT,
+  streamVisuals: true,
+  talkVisible: false,
+  talkMode: "session",
+  talkEndsAt: null,
+  talkPausedMs: null,
+  talkPrefix: "Talk ends in",
+  festivalPrefix: "Festival ends in",
+  tickerVisible: false,
+  tickerType: "planner",
+  tickerItems: [],
+  tickerPlannerItems: [],
+  tickerSocialItems: [],
+  qaVisible: false,
+  qaText: "Q&A · Ask a question →",
+  sponsorVisible: false,
+  sponsorText: "Sponsored · Studio Partner",
   streamTimecode: false,
   streamTimecodeFps: 30,
   lineSpacing: 1.14,
@@ -139,7 +211,7 @@ export const DEFAULT_STAGE: StageOptions = {
   endBody: "The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.",
   endQrUrl: "https://linktr.ee/onlinehyphen",
   endButton: "Watch replay — coming soon",
-  endAt: "",
+  endOffsetMin: 0,
   forceEnd: false,
   holdCountdown: false,
   breakTitle: "We'll be right back",
@@ -191,12 +263,13 @@ function text(value: unknown, fallback: string, max = TEXT_MAX) {
   return typeof value === "string" && value.trim() ? value.slice(0, max) : fallback
 }
 
-/** "" (use event end) or a valid HH:MM; anything else falls back. */
-export function parseEndAt(value: unknown, fallback = ""): string {
-  if (typeof value !== "string") return fallback
-  const v = value.trim()
-  if (v === "") return ""
-  return isValidTime(v) ? v : fallback
+/** Max end adjustment either way (minutes). */
+export const END_OFFSET_MAX = 720
+/** Whole minutes in ±END_OFFSET_MAX (numeric strings accepted); anything else falls back. */
+export function parseEndOffset(value: unknown, fallback = 0): number {
+  const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value
+  if (typeof n !== "number" || !Number.isFinite(n)) return fallback
+  return Math.max(-END_OFFSET_MAX, Math.min(END_OFFSET_MAX, Math.round(n)))
 }
 
 /**
@@ -225,6 +298,14 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     straps: pick("straps", (v) => sanitizeStraps(v)),
     strapAccent: pick("strapAccent", (v, f) => hexColor(v, f)),
     strapText: pick("strapText", (v, f) => hexColor(v, f)),
+    strapAccentCircle: pick("strapAccentCircle", (v) => v !== false),
+    strapArrow: pick("strapArrow", (v) => v !== false),
+    logos: pick("logos", (v, f) => parseLogos(v, f)),
+    logosOn: pick("logosOn", (v) => parseLogoIds(v)),
+    qr: pick("qr", (v, f) => parseQr(v, f)),
+    qrOn: pick("qrOn", (v) => v === true),
+    qrLogoOn: pick("qrLogoOn", (v) => v === true),
+    scenes: pick("scenes", (v, f) => parseScenes(v, f)),
     strapId: pick("strapId", (v) => (typeof v === "string" ? v.replace(/[^a-z0-9_-]/gi, "").slice(0, 32) : "")),
     strapMode: pick("strapMode", (v) => parseStrapMode(v)),
     strapAt: pick("strapAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
@@ -235,6 +316,38 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     socialsOverlay: pick("socialsOverlay", (v) => v === true),
     socialsCorner: pick("socialsCorner", (v) => parseCorner(v)),
     overlayInset: pick("overlayInset", (v, f) => clampInset(v, f)),
+    visualsLayout: pick("visualsLayout", (v) => parseVisualsLayout(v)),
+    streamVisuals: pick("streamVisuals", (v) => v !== false),
+    talkVisible: pick("talkVisible", (v) => v === true),
+    talkMode: pick("talkMode", (v) => parseTalkMode(v)),
+    ...(() => {
+      // endsAt / pausedMs are one timer: validate them together (paused wins).
+      if (!has("talkEndsAt") && !has("talkPausedMs")) return { talkEndsAt: base.talkEndsAt, talkPausedMs: base.talkPausedMs }
+      const t = parseTalkTimer(has("talkEndsAt") ? r.talkEndsAt : base.talkEndsAt, has("talkPausedMs") ? r.talkPausedMs : base.talkPausedMs)
+      return { talkEndsAt: t.endsAt, talkPausedMs: t.pausedMs }
+    })(),
+    talkPrefix: pick("talkPrefix", (v, f) => visualText(v, f) || f),
+    festivalPrefix: pick("festivalPrefix", (v, f) => visualText(v, f) || f),
+    tickerVisible: pick("tickerVisible", (v) => v === true),
+    tickerType: pick("tickerType", (v) => parseTickerType(v)),
+    ...(() => {
+      // Per-type lists; an old single list (tickerItems only) migrates into the current type.
+      const type = has("tickerType") ? parseTickerType(r.tickerType) : base.tickerType
+      let planner = has("tickerPlannerItems") ? sanitizeTickerItems(r.tickerPlannerItems) : base.tickerPlannerItems
+      let social = has("tickerSocialItems") ? sanitizeTickerItems(r.tickerSocialItems) : base.tickerSocialItems
+      if (has("tickerItems") && !has("tickerPlannerItems") && !has("tickerSocialItems")) {
+        const legacy = sanitizeTickerItems(r.tickerItems)
+        if (type === "social") social = legacy
+        else planner = legacy
+      }
+      planner = planner ?? []
+      social = social ?? []
+      return { tickerPlannerItems: planner, tickerSocialItems: social, tickerItems: type === "social" ? social : planner }
+    })(),
+    qaVisible: pick("qaVisible", (v) => v === true),
+    qaText: pick("qaText", (v, f) => visualText(v, f) || f),
+    sponsorVisible: pick("sponsorVisible", (v) => v === true),
+    sponsorText: pick("sponsorText", (v, f) => visualText(v, f) || f),
     streamTimecode: pick("streamTimecode", (v) => v === true),
     streamTimecodeFps: pick("streamTimecodeFps", (v) => ([25, 30, 50, 60].includes(Number(v)) ? Number(v) : 30)),
     lineSpacing: pick("lineSpacing", (v, f) => clamp(v, 0.8, 2.4, f)),
@@ -253,7 +366,8 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     endBody: pick("endBody", (v) => text(v, DEFAULT_STAGE.endBody, BODY_MAX)),
     endQrUrl: pick("endQrUrl", (v) => safeUrl(v, DEFAULT_STAGE.endQrUrl)),
     endButton: pick("endButton", (v) => text(v, DEFAULT_STAGE.endButton)),
-    endAt: pick("endAt", (v, f) => parseEndAt(v, f)),
+    // Old clock-time `endAt` (no date: could carry over to another day) is dropped, not converted.
+    endOffsetMin: pick("endOffsetMin", (v, f) => parseEndOffset(v, f)),
     forceEnd: pick("forceEnd", (v) => v === true),
     holdCountdown: pick("holdCountdown", (v) => v === true),
     breakTitle: pick("breakTitle", (v) => text(v, DEFAULT_STAGE.breakTitle)),
@@ -271,17 +385,13 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     welcomeImage: pick("welcomeImage", (v) => safeUrl(v, "", { relative: true, dataImage: true })),
     welcomeFit: pick("welcomeFit", (v) => (v === "contain" ? "contain" : "cover")),
     deskLive: pick("deskLive", (v) => v === true),
-    overlay: pick("overlay", (v) => (v === "break" || v === "hold" || v === "welcome" ? v : "none")),
+    overlay: pick("overlay", (v) => (isOverlay(v) ? v : "none")),
     program: pick("program", (v) => v === true),
     programSource: pick("programSource", (v) => (v === "backup" ? "backup" : "main")),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
   }
 }
 
-/** When the end card should show: the override if set, else the event's end time. */
-export function effectiveEndTime(stage: Pick<StageOptions, "endAt">, eventEndTime: string): string {
-  return stage.endAt || eventEndTime
-}
 
 // ---------- test clock ----------
 
@@ -301,14 +411,15 @@ export function sameSpeakers(a: readonly SpeakerCard[], b: readonly SpeakerCard[
  * What /stream shows, in order of precedence:
  * break/hold/welcome overlay  >  forced end / due end-card override  >  OBS program feed  >  end card (past Event › End time unless held)  >  countdown.
  *
- * End card override (ported from agent-forge): when an override time (`endAt`, e.g. deck "End in 2m") is due, or End is
+ * End card override (ported from agent-forge): when an adjusted end (`endOffsetMin` ≠ 0, e.g. deck −1/+5) is due, or End is
  * forced, the end card cuts over Program. The plain Event › End time does NOT pre-empt Program (a running show is never
  * cut by the schedule alone). After it fires, tap Program or Countdown to stay past the end: that sets holdCountdown.
  */
-export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endAt?: string }, pastEnd: boolean): "break" | "hold" | "welcome" | "program" | "end" | "countdown" {
+export function stageScreen(stage: Pick<StageOptions, "overlay" | "forceEnd" | "holdCountdown"> & { program?: boolean; endOffsetMin?: number }, pastEnd: boolean): "break" | "hold" | "welcome" | SceneId | "program" | "end" | "countdown" {
   if (stage.overlay !== "none") return stage.overlay
   if (stage.forceEnd) return "end"
-  if (stage.endAt && pastEnd && !stage.holdCountdown) return "end"
+  // An adjusted end (offset ≠ 0) is an operator decision: when due it cuts over Program, as the old override did.
+  if (stage.endOffsetMin && pastEnd && !stage.holdCountdown) return "end"
   if (stage.program) return "program"
   if (!stage.holdCountdown && pastEnd) return "end"
   return "countdown"
@@ -346,4 +457,4 @@ export function socialLook(stage: StageOptions) {
 }
 
 /** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
-export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps"] as const satisfies readonly (keyof StageOptions)[]
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "logosOn", "qrOn", "qrLogoOn"] as const satisfies readonly (keyof StageOptions)[]

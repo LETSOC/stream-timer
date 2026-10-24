@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { liveJumpTick, liveTarget, newSettle, settleTick, SETTLE_RATE, type LiveJumpState } from "./live-catchup"
+import { liveJumpTick, liveTarget, newSettle, phoneLiveCount, PHONE_AMNESTY_MS, PHONE_COUNT_MAX, settleTick, SETTLE_RATE, type LiveJumpState } from "./live-catchup"
 
 test("jump to live only after >3s behind for 1s, then not again for 5s", () => {
   const st: LiveJumpState = { overSince: null, lastJumpAt: 0 }
@@ -72,4 +72,12 @@ test("settle: a learned base lower than the target is kept", () => {
   assert.equal(st.floorMs, 1400)
   for (let t = 5000; t < 16000; t += 150) settleTick(st, 2000, 2, t)
   assert.equal(st.active, true)
+})
+
+test("phone live count: empty, one stall, cap, amnesty", () => {
+  const now = 1_000_000
+  assert.equal(phoneLiveCount([], now), 5)
+  assert.equal(phoneLiveCount([now - 1000], now), 6)
+  assert.equal(phoneLiveCount(Array.from({ length: 10 }, (_, i) => now - i * 1000), now), PHONE_COUNT_MAX)
+  assert.equal(phoneLiveCount([now - PHONE_AMNESTY_MS - 1, now - 500], now), 6) // old stall forgiven
 })

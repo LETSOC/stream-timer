@@ -7,6 +7,8 @@ import { FeedStatus } from "@/components/feed-status"
 import type { FailoverSettings } from "@/lib/program-source"
 import { LanIngestInfo } from "@/components/lan-ingest-info"
 import Link from "next/link"
+import { ConfirmButton } from "@/components/confirm-button"
+import { AppNav } from "@/components/app-nav"
 import { useResumeGeneration } from "@/lib/use-resume"
 import { useAutoHide } from "@/components/auto-hide"
 import { StatusToast, TOAST_MS, TOAST_UNDO_MS } from "@/components/status-toast"
@@ -15,23 +17,24 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
-import { deckScreen, effectiveNow, endInstant, endSoonAt, formatEndWhen, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
+import { CARD_OVERLAYS } from "@/lib/stage"
+import { deckScreen, effectiveNow, endCardAt, END_STEPS, endsLabel, formatOffset, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
-const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", program: "Program (OBS)", end: "End card" }
+const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", program: "Program (OBS)", end: "End card" }
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling (no WebSocket)", offline: "Offline" }
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
 type Preview = "off" | "stream" | "slate" | "capture" | "vertical"
 
 function endCardLabel(state: DeckState, now: number): { when: string; remaining: string; testClock: boolean } {
-  const hhmm = state.endAt || state.endTime
   const stale = state.testStale
   const testClock = Boolean(!stale && (state.testUntil !== null || state.pausedAt !== null))
   const at = effectiveNow({ event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: stale ? null : state.testUntil, pausedAt: stale ? null : state.pausedAt }, now)
-  const when = formatEndWhen(state.date, state.time, hhmm, state.timeZone)
-  const end = endInstant(state.date, state.time, hhmm, state.timeZone)
+  const endMs = endCardAt(state.date, state.time, state.endTime, state.timeZone, state.endOffsetMin)
+  const when = Number.isFinite(endMs) ? new Intl.DateTimeFormat("en-GB", { timeZone: state.timeZone || "UTC", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(endMs).replace(",", "") : state.endTime
+  const end = new Date(endMs)
   if (!Number.isFinite(end.getTime())) return { when, remaining: "—", testClock }
   const r = remainingUntil(end, new Date(at))
   if (r.done) return { when, remaining: state.forceEnd || !state.holdCountdown ? "due / showing" : "past (held)", testClock }
@@ -114,22 +117,26 @@ export function StreamDeck() {
   const screen = state ? deckScreen(state, serverNow) : null
   const testActive = Boolean(state && !state.testStale && (state.testUntil !== null || state.pausedAt !== null))
 
-  async function act(key: string, action: TransportAction) {
+  async function act(key: string, action: TransportAction, confirmed = false) {
     if (!state || busy) return
-    if (isRisky(action) && armed !== key) {
+    if (!confirmed && isRisky(action) && armed !== key) {
       setArmed(key)
       return
     }
     setArmed(null)
     setBusy(key)
-    const before = { endTime: state.endTime, endAt: state.endAt }
+    const before = { endTime: state.endTime, endOffsetMin: state.endOffsetMin }
     const result = await run(action, state.rev)
     setBusy(null)
     if (result.ok && action.type === "extendEnd") {
-      setToast({ tone: "ok", text: `${action.minutes < 0 ? "Shortened" : "Extended"} to ${extendTarget(before.endTime, before.endAt, action.minutes).to}`, undo: { type: "setEnd", ...before } })
+      setToast({ tone: "ok", text: `${action.minutes < 0 ? "Shortened" : "Extended"} to ${extendTarget(before.endTime, action.minutes).to}`, undo: { type: "setEnd", ...before } })
       if (navigator.vibrate) navigator.vibrate(30)
     } else if (result.ok && action.type === "setEnd") {
-      setToast({ tone: "ok", text: `End back to ${action.endAt || action.endTime}` })
+      setToast({ tone: "ok", text: `End back to ${endsLabel(state.date, state.time, action.endTime, state.timeZone, action.endOffsetMin).replace("Ends ", "")}` })
+    } else if (result.ok && action.type === "endOffset") {
+      const offset = "clear" in action ? 0 : before.endOffsetMin + action.minutes
+      setToast({ tone: "ok", text: endsLabel(state.date, state.time, state.endTime, state.timeZone, offset), undo: { type: "setEnd", ...before } })
+      if (navigator.vibrate) navigator.vibrate(30)
     } else if (result.ok) {
       setToast({ tone: "ok", text: "Done" })
       if (navigator.vibrate) navigator.vibrate(30)
@@ -166,15 +173,17 @@ export function StreamDeck() {
   return (
     <main className="min-h-dvh bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pb-[max(88px,calc(env(safe-area-inset-bottom)+72px))] text-white">
       {/* Pinned: header + preview stay on screen while the buttons scroll underneath. */}
-      <div data-testid="deck-sticky" className="sticky top-0 z-20 -mx-3 mb-3 border-b border-white/10 bg-[#0b0b0f] px-[max(12px,env(safe-area-inset-left))] pt-[max(10px,env(safe-area-inset-top))] pb-2 shadow-[0_8px_16px_rgba(0,0,0,0.6)]">
-      <header className="mb-2 flex items-center gap-2">
-        <h1 className="mr-auto text-lg font-black tracking-tight uppercase">Stream Deck</h1>
-        <span data-testid="deck-link-state" data-state={link} className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px]">
+      <div data-testid="deck-sticky" className="sticky top-0 z-20 -mx-3 mb-3 border-b border-white/10 bg-[#0b0b0f] px-4 pt-[max(10px,env(safe-area-inset-top))] pb-2 shadow-[0_8px_16px_rgba(0,0,0,0.6)] sm:px-6">
+      <header className="mb-2 flex flex-wrap items-center gap-3">
+        <div className="w-[240px] shrink-0">
+          <p className="font-mono text-[12px] tracking-[0.16em] text-white/40 uppercase">Hyphen Festival 2026</p>
+          <h1 className="text-xl font-black tracking-tight uppercase">Stream Deck</h1>
+        </div>
+        <AppNav page="deck" />
+        <span data-testid="deck-link-state" data-state={link} className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px] text-white/70">
           <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]} ${link === "connecting" ? "animate-pulse" : ""}`} />
           {LINK_LABEL[link]}
         </span>
-        <Link href="/visuals" data-testid="deck-visuals-link" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Visuals</Link>
-        <Link href="/" className="rounded-full border border-white/30 px-3 py-1 font-mono text-[12px] text-white no-underline">Desk</Link>
       </header>
         <PreviewBar preview={preview} setPreview={setPreview} collapsed={collapsed === "1"} toggle={() => setCollapsed(collapsed === "1" ? "0" : "1")} />
         {collapsed === "1" || preview === "off" ? null : (
@@ -236,37 +245,31 @@ export function StreamDeck() {
         {JUMPS.map((jump) => button(`jump-${jump.label}`, { type: "jump", seconds: jump.seconds }, jump.label, "outline"))}
       </div>
 
-      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? (state.endAt ? `${state.endAt} (end card override)` : state.endTime) : "—"}</h2>
+      <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">End time · {state ? `planned ${state.endTime}${state.endOffsetMin ? ` · adjusted ${formatOffset(state.endOffsetMin)}` : ""}` : "—"}</h2>
       {state ? (() => {
         const end = endCardLabel(state, serverNow)
         return (
           <div data-testid="deck-end-time" className="mb-2 rounded-2xl bg-white/5 px-4 py-3">
-            <p className="font-mono text-[13px] text-white/70">Shows <span data-testid="deck-end-when" className="font-bold text-white">{end.when}</span>{state.endAt ? " · override" : " · event end"}{end.testClock ? " · on test clock" : ""}</p>
+            <p className="font-mono text-[13px] text-white/70">Shows <span data-testid="deck-end-when" className="font-bold text-white">{end.when}</span>{state.endOffsetMin ? ` · ${formatOffset(state.endOffsetMin)}` : " · as planned"}{end.testClock ? " · on test clock" : ""}</p>
             <p data-testid="deck-end-remaining" className="mt-1 font-mono text-[18px] font-bold text-white tabular-nums">{end.remaining}</p>
           </div>
         )
       })() : null}
+      <p className="mb-1 font-mono text-[12px] text-white/60">Adjust the end card (from planned) · two taps</p>
       <div className="mb-2 flex items-center gap-1.5">
-        {state
-          ? ([2, 5] as const).map((m) => {
-              const hhmm = endSoonAt(
-                { event: { date: state.date, time: state.time, timeZone: state.timeZone } as EventConfig, testUntil: state.testStale ? null : state.testUntil, pausedAt: state.testStale ? null : state.pausedAt },
-                serverNow,
-                m,
-              )
-              return button(`end-soon-${m}`, { type: "setEnd", endTime: state.endTime, endAt: hhmm }, `End in ${m}m`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]!")
-            })
-          : null}
+        {END_STEPS.map((m) => button(`end-offset-${m < 0 ? `minus${-m}` : m}`, { type: "endOffset", minutes: m }, m < 0 ? `−${-m}m` : `+${m}m`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]! tabular-nums"))}
+        {state?.endOffsetMin ? button("end-offset-clear", { type: "endOffset", clear: true }, "Clear", "outline", "min-h-11! py-1! rounded-full! flex-1 text-[14px]!") : null}
       </div>
+      <p className="mb-1 font-mono text-[12px] text-white/60">Planned end (Event › End time)</p>
       <div className="flex items-center gap-1.5">
         {EXTENDS.map((m) => button(`extend-${m < 0 ? `minus${-m}` : m}`, { type: "extendEnd", minutes: m }, m < 0 ? `−${-m}` : `+${m}`, "outline", "min-h-11! py-1! rounded-full! flex-1 text-[16px]! tabular-nums"))}
         <span className="shrink-0 font-mono text-[12px] text-white/60">min</span>
       </div>
-      <p className="mt-2 font-mono text-[12px] text-white/60">End in 2m/5m follows the test clock (not your phone time) and will cut over Program when due. After it shows, tap Program to stay on OBS past the end; tapping End in 2m again only delays another cut. ±min nudges the override or Event › End time. HH:MM before the start = next morning.</p>
+      <p className="mt-2 font-mono text-[12px] text-white/60">−5/−1/+1/+5 move the end card from the planned end on the event date (−2 = 2 min early); an adjusted end cuts over Program when due, tap Program to stay on OBS past it. Clear = back to planned. The lower ±min row moves the planned Event › End time itself.</p>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Screen</h2>
       <div className="grid grid-cols-2 gap-2">
-        {(["countdown", "break", "hold", "welcome"] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
+        {(["countdown", ...CARD_OVERLAYS] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
         {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : screen === "end" ? "Program · end card over it (tap to stay on)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
         {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn&apos;t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
         {state?.programSources ? (
@@ -276,7 +279,7 @@ export function StreamDeck() {
           </div>
         ) : null}
         {state?.programSources ? <LanIngestInfo /> : null}
-        {button("screen-end", { type: "screen", screen: "end" }, screen === "end" ? "● End card" : "End card", screen === "end" ? "on" : "danger", "col-span-2")}
+        <ConfirmButton data-testid="deck-screen-end" holdMs={3000} disabled={!state || (live && lockedInLive({ type: "screen", screen: "end" }))} onConfirm={() => void act("screen-end", { type: "screen", screen: "end" }, true)} className={`col-span-2 min-h-16 touch-manipulation rounded-2xl px-3 py-3 text-[17px] font-bold ${screen === "end" ? "bg-[#D9FF43] text-black" : "border-2 border-[#f97066] bg-transparent text-[#fda29b]"}`}>Show end card now</ConfirmButton>
       </div>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Outputs</h2>

@@ -109,6 +109,32 @@ export function holdStandby(i: { onAir: boolean; incoming: boolean; captureTap: 
 }
 
 /**
+ * /stream on a phone/tablet inside an operator preview (?mute=1: the deck's and the builder's
+ * iframes): use the gentle HLS profile (standard HLS, ~3s buffer, no catch-up). The on-air
+ * low-latency profile starves a phone on Wi-Fi (constant rebuffering). OBS and browser capture
+ * never pass ?mute=1 on touch hardware, so on-air behaviour is unchanged.
+ */
+export function previewGentle(i: { mute: boolean; touch: boolean; capturePage: boolean }): boolean {
+  return i.mute && i.touch && !i.capturePage
+}
+
+/**
+ * Dropout-log tag so one log shows who sent the player line.
+ * Capture wins over OBS over phone over desk. OBS = Browser Source UA; capture = the app's headless page.
+ */
+export function diagPrefix(i: { touch: boolean; capturePage: boolean; obs: boolean }): string {
+  if (i.capturePage) return "[capture] "
+  if (i.obs) return "[obs] "
+  if (i.touch) return "[phone] "
+  return "[desk] "
+}
+
+/** Phone muted preview mounts only the on-air input (and the hand-over target). Desktop/OBS/capture prewarm both. */
+export function previewMountSource(i: { gentle: boolean; live: boolean }): boolean {
+  return !i.gentle || i.live
+}
+
+/**
  * Browser capture start (<html data-stream-ready>, which scripts/capture-stream.mjs waits for before its
  * first screenshot / screencast frame): when the operator has Program up, wait for the program layer to
  * cover the screen (first frame, or its own standby rules) so a (re)started capture never opens on the

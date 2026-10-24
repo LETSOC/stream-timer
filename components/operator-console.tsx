@@ -4,6 +4,7 @@ import { LocalAccessPill } from "@/components/local-access-pill"
 
 import { pullUrlError } from "@/lib/program-source"
 import Link from "next/link"
+import { AppNav } from "@/components/app-nav"
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,20 +38,22 @@ import {
 } from "@/lib/countdown"
 import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitClockScale } from "@/lib/countdown-size"
 import { useNow } from "@/lib/use-now"
-import { applyTransport, endInstant, EXTENDS, extendTarget, type Screen, type TransportAction } from "@/lib/transport"
+import { applyTransport, endCardAt, endGuard, endsLabel, END_STEPS, EXTENDS, extendTarget, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
-import { DEFAULT_STAGE, localClock, parseStage, serverClock, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { DEFAULT_STAGE, END_OFFSET_MAX, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
+import { isScene, SCENE_IDS, type SceneId } from "@/lib/visuals-assets"
+import { SceneCardView } from "@/components/visual-assets"
 import { VisualsDeskSection } from "@/components/visuals-desk"
 import { VerticalCard } from "@/components/vertical-output"
 import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
@@ -120,7 +123,7 @@ export function OperatorConsole() {
   const [endBody, setEndBody] = useState("The stream has ended. Thank you to all speakers, partners and attendees. Recordings will be available shortly.")
   const [endQrUrl, setEndQrUrl] = useState("https://linktr.ee/onlinehyphen")
   const [endButton, setEndButton] = useState("Watch replay — coming soon")
-  const [endAt, setEndAt] = useState("")
+  const [endOffsetMin, setEndOffsetMin] = useState(0)
   const [forceEnd, setForceEnd] = useState(false)
   const [holdCountdown, setHoldCountdown] = useState(false)
   const [breakTitle, setBreakTitle] = useState(DEFAULT_STAGE.breakTitle)
@@ -331,7 +334,7 @@ export function OperatorConsole() {
     if (typeof stage.endBody === "string") setEndBody(stage.endBody)
     if (typeof stage.endQrUrl === "string") setEndQrUrl(stage.endQrUrl)
     if (typeof stage.endButton === "string") setEndButton(stage.endButton)
-    if (typeof stage.endAt === "string") setEndAt(stage.endAt)
+    if (typeof stage.endOffsetMin === "number") setEndOffsetMin(stage.endOffsetMin)
     if (typeof stage.forceEnd === "boolean") setForceEnd(stage.forceEnd)
     if (typeof stage.holdCountdown === "boolean") setHoldCountdown(stage.holdCountdown)
     if (typeof stage.breakTitle === "string") setBreakTitle(stage.breakTitle)
@@ -348,14 +351,15 @@ export function OperatorConsole() {
     if (typeof stage.welcomeMessage === "string") setWelcomeMessage(stage.welcomeMessage)
     if (typeof stage.welcomeImage === "string") setWelcomeImage(stage.welcomeImage)
     if (stage.welcomeFit === "cover" || stage.welcomeFit === "contain") setWelcomeFit(stage.welcomeFit)
-    if (stage.overlay === "none" || stage.overlay === "break" || stage.overlay === "hold" || stage.overlay === "welcome") setOverlay(stage.overlay)
+    // Every card (scene cards too): an unknown value here used to keep "none" and the next desk save took the card down.
+    if (isOverlay(stage.overlay)) setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
     if (typeof stage.program === "boolean") setProgram(stage.program)
     if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
     setVisuals((cur) => ({ ...cur, ...Object.fromEntries(VISUAL_KEYS.filter((k) => stage[k] !== undefined).map((k) => [k, stage[k]])) }))
     if (typeof stage.streamProgramAudio === "boolean" || typeof stage.streamBedAudio === "boolean") setStreamAudio((cur) => ({ program: stage.streamProgramAudio ?? cur.program, bed: stage.streamBedAudio ?? cur.bed }))
     if (typeof stage.deskLive === "boolean") setLiveMode(stage.deskLive)
-  }, [setStandbyTitle, setStandbyMessage, setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndAt, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
+  }, [setStandbyTitle, setStandbyMessage, setBlockGap, setBreakFit, setBreakImage, setBreakMessage, setBreakTitle, setChecker, setClockScale, setClockText, setEndOffsetMin, setEndBody, setEndButton, setEndDate, setEndQrUrl, setEndSubtitle, setEndTitle, setForceEnd, setGalleryOffset, setGalleryPause, setGalleryScale, setGallerySeconds, setHoldCountdown, setHoldFit, setHoldImage, setHoldMessage, setHoldTitle, setLineSpacing, setLiveMode, setLogoUrl, setShowLink, setShowMeta, setSpeakers, setTransparent, setWelcomeFit, setWelcomeImage, setWelcomeMessage, setWelcomeTitle])
 
   useEffect(() => {
     // The server is the source of truth. The browser keeps only section drafts, the RTMP URL and
@@ -402,7 +406,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endAt, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, standbyTitle, standbyMessage, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endOffsetMin, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, standbyTitle, standbyMessage, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -735,9 +739,9 @@ export function OperatorConsole() {
 
   const previewNow = pausedAt ?? (now ? new Date(now.getTime() + skewMs) : null)
   const previewRemaining = valid && previewNow ? remainingUntil(target, previewNow) : remaining
-  const endTarget = endInstant(date, time, endAt || endTime, timeZone)
+  const endTarget = new Date(endCardAt(date, time, endTime, timeZone, endOffsetMin))
   const endRemaining = previewNow ? remainingUntil(endTarget, previewNow) : null
-  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program, endAt }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
+  const previewScreen = stageScreen({ overlay, forceEnd, holdCountdown, program, endOffsetMin }, Boolean(previewNow && endTarget.getTime() <= previewNow.getTime()))
 
   /**
    * Every Transport button goes through lib/transport (the same code the phone deck runs on the
@@ -766,12 +770,12 @@ export function OperatorConsole() {
     }
     if (action.type === "programSource") setProgramSource(next.stage.programSource)
     if (action.type === "mode") setLiveMode(next.stage.deskLive)
-    if (action.type === "extendEnd" || action.type === "setEnd") {
+    if (action.type === "extendEnd" || action.type === "setEnd" || action.type === "endOffset") {
       // A quick action: goes live straight away, like restore (the sections weren't dirty, see extendEnd).
       const end = { endTime: next.event.endTime }
       updateEvent(end)
-      setEndAt(next.stage.endAt)
-      setPublished((current) => (current ? { ...current, event: { ...current.event, ...end }, stage: { ...current.stage, endAt: next.stage.endAt } } : current))
+      setEndOffsetMin(next.stage.endOffsetMin)
+      setPublished((current) => (current ? { ...current, event: { ...current.event, ...end }, stage: { ...current.stage, endOffsetMin: next.stage.endOffsetMin } } : current))
     }
     if (action.type === "restore") {
       const restored = { date: next.event.date, time: next.event.time, timeZone: next.event.timeZone }
@@ -783,26 +787,36 @@ export function OperatorConsole() {
     return true
   }
   /**
-   * +5 / +10 min on the end time (the end card override if set, else Event › End time).
+   * ± min on the planned Event › End time.
    * If that section has an unsaved draft, the extension goes into the draft (Save publishes it,
    * like any other edit); otherwise it's saved straight away with an Undo toast.
    */
   function extendEnd(minutes: number) {
-    if (drafts.isDirty("endCard") || (!endAt && drafts.isDirty("event"))) {
-      const t = extendTarget(endTime, endAt, minutes)
+    if (drafts.isDirty("event")) {
+      const t = extendTarget(endTime, minutes)
       const check = applyTransport({ event, testUntil, pausedAt: pausedMs || null, stage: { ...draftStage, deskLive: false } }, { type: "extendEnd", minutes }, nowMs())
       if (!check.ok) return setToast(check.error)
-      if (t.field === "endAt") setEndAt(t.to)
-      else updateEvent({ endTime: t.to })
+      updateEvent({ endTime: t.to })
       showToast("extend", `Draft end ${t.to} · Save to apply`)
       return
     }
-    const prev = { endTime: published?.event.endTime ?? endTime, endAt: published?.stage.endAt ?? endAt }
-    const t = extendTarget(prev.endTime, prev.endAt, minutes)
+    const prev = { endTime: published?.event.endTime ?? endTime, endOffsetMin: published?.stage.endOffsetMin ?? endOffsetMin }
+    const t = extendTarget(prev.endTime, minutes)
     if (!runTransport({ type: "extendEnd", minutes })) return
     showToast("extend", `${minutes < 0 ? "Shortened" : "Extended"} to ${t.to}`, () => {
-      if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endAt || prev.endTime}`)
+      if (runTransport({ type: "setEnd", ...prev })) showToast("extend", `End back to ${prev.endTime}`)
     })
+  }
+  /** Desk End card stepper: changes the draft adjustment (Save publishes it), same refuse rules as the deck. */
+  function stepEndOffset(minutes: number | null) {
+    const next = minutes === null ? 0 : endOffsetMin + minutes
+    if (next !== 0) {
+      const guard = Math.abs(next) > END_OFFSET_MAX ? `The end can move at most ${END_OFFSET_MAX / 60} h either way.` : endGuard({ event: { ...event, endTime }, testUntil, pausedAt: pausedMs || null }, endTime, nowMs(), next)
+      if (guard) return setToast(guard)
+    }
+    setEndOffsetMin(next)
+    setHoldCountdown(false)
+    setForceEnd(false)
   }
   /** Main/Backup: through the server's transport (logged, synced to every device over the deck socket). */
   async function switchProgramSource(source: ProgramSource) {
@@ -873,15 +887,16 @@ export function OperatorConsole() {
     <div data-desk-root data-pin-spacer={pinPreview ? "true" : undefined} className={`min-h-dvh bg-[#F6F6F3] text-black ${pinPreview ? "pt-[calc(min(26svh,(100vw-2rem)*9/16)+1rem+env(safe-area-inset-top))] sm:pt-[calc(min(26svh,(100vw-3rem)*9/16)+1rem+env(safe-area-inset-top))] lg:pt-0" : ""} [&_input]:rounded-xl [&_input]:border-black/10 [&_input]:bg-[#F6F6F3] [&_select]:rounded-xl [&_select]:border-black/10 [&_select]:bg-[#F6F6F3]`}>
       <BackToTop />
       <CopyFallbackHost />
-      <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-4 backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-[1600px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+      <header ref={headerRef} className="z-20 lg:sticky lg:top-0 border-b border-black/10 bg-white/90 px-4 py-3 backdrop-blur sm:px-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-[240px] shrink-0">
             <p className="font-mono text-[12px] tracking-[0.16em] text-black/70 uppercase">
               Hyphen Festival 2026
             </p>
             <h1 className="text-xl font-black tracking-tight uppercase">Countdown desk</h1>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <AppNav page="desk" tone="light" deckDot={wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"} />
+          <div className="ml-auto flex flex-wrap items-center gap-2">
             <span className="hidden items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-[13px] md:inline-flex">
               <span className="text-black/70">Target</span>
               <span>{valid ? formatClock(target, timeZone) : "—"}</span>
@@ -894,11 +909,6 @@ export function OperatorConsole() {
                 Save all ({drafts.dirty.length})
               </Pill>
             ) : null}
-            <Link href="/deck" data-testid="deck-link" title={wsLink === "live" ? "Instant sync on (WebSocket)" : "Instant sync off: syncing every 2s"} className={`${pillClass("outline", "sm")} inline-flex items-center gap-1.5 no-underline`}>
-              <span aria-hidden className={`size-2 rounded-full ${wsLink === "live" ? "bg-[#12b76a]" : "bg-[#f79009]"}`} />
-              Deck
-            </Link>
-            <Link href="/visuals" data-testid="desk-visuals-nav" className={`${pillClass("outline", "sm")} no-underline`}>Visuals</Link>
             <SyncBadge state={syncState} hasToken={operator.operator || !operator.ready} error={syncError} />
             {operator.mode === "password" ? <Pill size="sm" tone="outline" onClick={() => void logout()}>Log out</Pill> : null}
             <Pill size="sm" tone="outline" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setShowHelp((value) => !value)}>?</Pill>
@@ -992,7 +1002,7 @@ export function OperatorConsole() {
               <>
                 <div className="mb-4 flex items-center justify-between">
                   <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 uppercase">End card in</h2>
-                  <span className="font-mono text-[12px] text-white/75 uppercase">{endAt}</span>
+                  <span className="font-mono text-[12px] text-white/75 uppercase">{endsLabel(date, time, endTime, timeZone, endOffsetMin)}</span>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   {[
@@ -1037,17 +1047,21 @@ export function OperatorConsole() {
             </div>
             </div>
             <div data-testid="transport-cards" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-              <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
-              <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
+              <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} col-span-2 whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
+              <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
               <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
               <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
-              <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
-              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
+              {SCENE_IDS.filter((id) => id.startsWith("hold")).map((id) => <ConfirmButton key={id} data-testid={`show-${id}`} className={`${pillClass(overlay === id ? "solid" : "outline")} whitespace-nowrap`} confirmLabel={`Show ${SCENE_DESK_LABEL[id]} · confirm`} onConfirm={() => showScreen(id)}>{overlay === id ? `● ${SCENE_DESK_LABEL[id]} on` : `Show ${SCENE_DESK_LABEL[id]}`}</ConfirmButton>)}
+              <ConfirmButton data-testid="show-showreel" className={`${pillClass(overlay === "showreel" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show Showreel · confirm" onConfirm={() => showScreen("showreel")}>{overlay === "showreel" ? "● Showreel on" : "Show Showreel"}</ConfirmButton>
+              <ConfirmButton data-testid="show-standby" className={`${pillClass(overlay === "standby" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show Standby · confirm" onConfirm={() => showScreen("standby")}>{overlay === "standby" ? "● Standby on" : "Show Standby"}</ConfirmButton>
+              <ConfirmButton data-testid="show-end" holdMs={3000} className={`${pillClass()} col-span-2 min-h-12 whitespace-nowrap`} onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
+              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 min-h-12 text-[16px] whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
             </div>
             <div data-testid="transport-danger" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
               <ConfirmButton disabled={liveMode} className={pillClass("danger")} onConfirm={restoreFestival}>Restore 4 Nov</ConfirmButton>
               <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
+              <button type="button" data-testid="open-feed-lost" className={`${pillClass("outline")} col-span-2`} onClick={() => { setSectionOpen("feed-lost", true); requestAnimationFrame(() => document.getElementById("section-feed-lost")?.scrollIntoView({ behavior: "smooth", block: "center" })) }}>Open feed-lost card</button>
             </div>
               <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
                 <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
@@ -1081,7 +1095,7 @@ export function OperatorConsole() {
               </Field>
               <Field label="End time" htmlFor="endTime">
                 <Input id="endTime" type="time" value={endTime} onChange={(event) => updateEvent({ endTime: event.target.value })} />
-                {endAt ? null : <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-event-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div>}
+                {<div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-event-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div>}
               </Field>
             </div>
             <Field label="Venue" htmlFor="venue">
@@ -1396,6 +1410,9 @@ export function OperatorConsole() {
                 since={overlayAt}
                 clock={now}
               />
+            ) : isScene(previewScreen) ? (
+              // Scene cards (HOLD 05/06/07, Standby, Showreel): same renderer as /stream.
+              <SceneCardView id={previewScreen} key={previewScreen} card={visuals.scenes[previewScreen]} qr={visuals.qr} now={now ? now.getTime() : null} className="absolute inset-0 z-10 h-full w-full" />
             ) : previewScreen === "end" ? (
               <EndStreamPage card={{
                 title: endTitle,
@@ -1455,10 +1472,10 @@ export function OperatorConsole() {
             <Field label="Date line" htmlFor="end-date"><GrowingText id="end-date" value={endDate} onChange={setEndDate} /></Field>
             <Field label="Message" htmlFor="end-body"><GrowingText id="end-body" value={endBody} onChange={setEndBody} /></Field>
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
-            <Field label="End card override (optional)" htmlFor="end-at"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Blank = use Event › End time ({endTime}). Set only to show the end card at a different time. When an override is due it cuts over Program too; tap Program or Countdown to stay on past it.</p><div className="flex gap-2"><Input id="end-at" type="time" value={endAt} onChange={(event) => { setEndAt(event.target.value); setHoldCountdown(false); setForceEnd(false) }} />{endAt ? <Pill size="sm" tone="outline" onClick={() => setEndAt("")}>Clear</Pill> : null}</div>{endAt ? <div className="mt-1.5 flex flex-wrap items-center gap-1">{EXTENDS.map((m) => <button key={m} type="button" data-testid={`extend-endcard-${m < 0 ? `minus${-m}` : m}`} disabled={!token} onClick={() => extendEnd(m)} className="h-7 min-w-10 rounded-full border border-black/20 bg-white px-2 font-mono text-[12px] font-bold tabular-nums hover:bg-black/5 disabled:opacity-40">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span></div> : null}</Field>
+            <Field label="End card adjustment" htmlFor="end-offset"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Minutes from the planned end (Event › End time {endTime} on {date}). −2 = finish 2 min early, +10 = 10 min later. Can't go before the doors. An adjusted end cuts over Program when due; tap Program or Countdown to stay on past it.</p><div className="flex flex-wrap items-center gap-1">{END_STEPS.map((m) => <button key={m} type="button" data-testid={`end-offset-${m < 0 ? `minus${-m}` : m}`} onClick={() => stepEndOffset(m)} className="h-8 min-w-11 rounded-full border border-black/20 bg-white px-2 font-mono text-[13px] font-bold tabular-nums hover:bg-black/5">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span>{endOffsetMin ? <Pill size="sm" tone="outline" onClick={() => stepEndOffset(null)}>Clear</Pill> : null}</div><p id="end-offset" data-testid="end-offset-result" className="mt-1.5 font-mono text-[14px] font-bold">Planned {endTime} · {endsLabel(date, time, endTime, timeZone, endOffsetMin)}</p></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <ConfirmButton data-testid="show-end" className={`${pillClass()} whitespace-nowrap`} confirmLabel="Show end card · confirm" onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
+              <ConfirmButton data-testid="show-end" holdMs={3000} className={`${pillClass()} min-h-12 whitespace-nowrap`} onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
               <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
@@ -1488,9 +1505,6 @@ export function OperatorConsole() {
             <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show hold card. Edits here are a draft until you Save.</p>
             <Field label="Title" htmlFor="hold-title"><GrowingText id="hold-title" value={holdTitle} onChange={setHoldTitle} /></Field>
             <Field label="Message (optional)" htmlFor="hold-message"><GrowingText id="hold-message" value={holdMessage} onChange={setHoldMessage} /></Field>
-            <p className="pt-2 font-mono text-[12px] leading-5 text-black/70">Feed-lost card: shown automatically on /stream (and Vertical) when neither Main nor Backup is sending. Public text: no technical words.</p>
-            <Field label="Feed-lost title" htmlFor="standby-title"><GrowingText id="standby-title" value={standbyTitle} onChange={setStandbyTitle} /></Field>
-            <Field label="Feed-lost message (optional)" htmlFor="standby-message"><GrowingText id="standby-message" value={standbyMessage} onChange={setStandbyMessage} /></Field>
             <Field label="Image (optional): URL or upload" htmlFor="hold-image">
               <GrowingText id="hold-image" value={holdImage} onChange={setHoldImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1505,6 +1519,12 @@ export function OperatorConsole() {
                 </select>
               </div>
             </Field>
+          </Panel>
+          <Panel id="feed-lost" title="Feed-lost card" defaultOpen={false} dirty={drafts.isDirty("feedLost")}>
+            {draftBar("feedLost")}
+            <p className="font-mono text-[12px] leading-5 text-black/70">Shown automatically on /stream and Vertical when neither Main nor Backup is sending. Not a scene and not switched from Transport. Public text: no technical words.</p>
+            <Field label="Title" htmlFor="standby-title"><GrowingText id="standby-title" value={standbyTitle} onChange={setStandbyTitle} /></Field>
+            <Field label="Message (optional)" htmlFor="standby-message"><GrowingText id="standby-message" value={standbyMessage} onChange={setStandbyMessage} /></Field>
           </Panel>
           <Panel id="welcome-card" title="Welcome back card" defaultOpen={false} dirty={drafts.isDirty("welcomeCard")} pill={overlay === "welcome" ? "On air" : undefined}>
             {draftBar("welcomeCard")}
@@ -1687,7 +1707,7 @@ function Panel({ id, title, pill, dirty = false, defaultOpen = true, children }:
     </>
   )
   return (
-    <section className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
+    <section id={id} className="overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
       {id ? (
         <button
           type="button"
@@ -2571,7 +2591,8 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   )
 }
 
-const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "streamTimecode", "streamTimecodeFps"] as const
+const SCENE_DESK_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby", showreel: "Showreel" }
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
   return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals

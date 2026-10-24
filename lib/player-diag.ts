@@ -4,10 +4,14 @@
  * Only in Browser capture (?capture=1 / headless) or with ?diag=1, so viewers' tabs send nothing.
  * Batched once a second to /api/diag/player (same gate as the program HLS: view key or capture key).
  */
+import { muteOnlyAudio } from "@/lib/preview-audio"
+import { diagPrefix } from "@/lib/program-display"
+
 type Level = "!" | "+" | "·"
 let queue: { at: number; level: Level; msg: string }[] = []
 let timer: number | null = null
 let enabled: boolean | null = null
+let phonePrefix: string | null = null
 const recent = new Map<string, number>()
 
 /** Browser capture's page (or a tab opened with ?diag=1). */
@@ -19,6 +23,19 @@ export function isCapturePage(): boolean {
 function on(): boolean {
   if (enabled === null) enabled = typeof window !== "undefined" && (isCapturePage() || new URLSearchParams(window.location.search).get("diag") === "1")
   return enabled
+}
+/** Once: [phone] / [desk] / [obs] / [capture], so one dropout log shows who sent the line. */
+function tag(): string {
+  if (phonePrefix === null) {
+    if (typeof window === "undefined") return ""
+    const ua = navigator.userAgent
+    phonePrefix = diagPrefix({
+      touch: muteOnlyAudio({ ua, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
+      capturePage: isCapturePage(),
+      obs: /\bOBS\b|obsstudio|obs-browser/i.test(ua),
+    })
+  }
+  return phonePrefix
 }
 function flush() {
   timer = null
@@ -38,7 +55,7 @@ export function playerDiag(level: Level, msg: string, opts: { key?: string; dedu
     if (last !== undefined && now - last < opts.dedupeMs) return
     recent.set(opts.key, now)
   }
-  queue.push({ at: now, level, msg: msg.slice(0, 300) })
+  queue.push({ at: now, level, msg: `${tag()}${msg}`.slice(0, 300) })
   if (queue.length > 200) queue = queue.slice(-200)
   if (timer === null) timer = window.setTimeout(flush, 1000)
 }

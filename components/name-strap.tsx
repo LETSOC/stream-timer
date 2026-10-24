@@ -5,7 +5,7 @@ import { PlatformIcon } from "@/components/platform-icon"
 import type { StrapMotion, StrapPreset, StrapStyle } from "@/lib/visuals"
 import { cn } from "@/lib/utils"
 
-export type StrapLook = { style: StrapStyle; motion: StrapMotion; accent: string; text: string }
+export type StrapLook = { style: StrapStyle; motion: StrapMotion; accent: string; text: string; /** house: white pulsing accent circle */ accentCircle?: boolean; /** house: ↗ arrow badge */ arrow?: boolean }
 
 /**
  * One name strap (lower third), designed at 1920x1080 in px × --px. `visible` drives the motion:
@@ -22,7 +22,17 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
   ) : null
   return (
     <div data-testid="name-strap" data-style={look.style} data-motion={look.motion} data-visible={visible ? "1" : "0"} className={cn("strap", `strap-${look.style}`, `strap-m-${look.motion}`, visible ? "strap-on" : "strap-off")} style={vars}>
-      {look.style === "line" ? (
+      {look.style === "house" ? (
+        <div className="strap-body">
+          {look.accentCircle !== false ? <span data-testid="strap-accent-circle" className="strap-dot" /> : null}
+          <div className="strap-lines">
+            <span className="strap-name">{preset.name}</span>
+            {preset.title ? <span className="strap-title">{preset.title}</span> : null}
+            {social}
+          </div>
+          {look.arrow !== false ? <span data-testid="strap-arrow" className="strap-arrow" aria-hidden>↗</span> : null}
+        </div>
+      ) : look.style === "line" ? (
         <div className="strap-body">
           <span className="strap-bar" />
           <div className="strap-lines">
@@ -30,6 +40,7 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
             {preset.title ? <span className="strap-title">{preset.title}</span> : null}
             {social}
           </div>
+          <span className="strap-live-dot" aria-hidden />
         </div>
       ) : look.style === "block" ? (
         <div className="strap-body">
@@ -43,6 +54,7 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
         </div>
       ) : look.style === "pill" ? (
         <div className="strap-body">
+          <span className="strap-live-dot" aria-hidden />
           {preset.platform !== "none" ? <PlatformIcon platform={preset.platform} className="strap-pill-icon" /> : null}
           <div className="strap-lines">
             <span className="strap-name">{preset.name}</span>

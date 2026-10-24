@@ -11,7 +11,8 @@ import { useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
-import { holdStandby, keepLoaded, previewDisplay, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { holdStandby, keepLoaded, previewDisplay, previewGentle, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { muteOnlyAudio } from "@/lib/preview-audio"
 import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
@@ -170,7 +171,9 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     let attempt = 0
     let nextKickAt = Date.now() + stallBackoffMs(0)
     // Native HLS (iOS) reports stalls as events; the currentTime check below catches the rest.
-    const onStall = () => { if (Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload("native stall event after 3s stuck") }
+    // Phone preview: MediaMTX holds a playlist ~2.2s, so a 3s teardown races it. On air stays at 3s.
+    const stuckMs = gentle ? 6000 : 3000
+    const onStall = () => { if (Date.now() - advancedAt > stuckMs && Date.now() >= nextKickAt) reload(`native stall event after ${stuckMs / 1000}s stuck`) }
     const onWaiting = (e: Event) => {
       const b = video.buffered
       const ahead = b.length ? b.end(b.length - 1) - video.currentTime : 0
@@ -180,7 +183,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     let firstFrameSeen = false
     const jump: LiveJumpState = { overSince: null, lastJumpAt: 0 }
     const settle = newSettle()
-    const reload = (why = "watchdog: picture stuck 3s while OBS publishes") => {
+    const reload = (why = `watchdog: picture stuck ${stuckMs / 1000}s while OBS publishes`) => {
       teardownWhy.current = why
       firstFrameSeen = false
       nextKickAt = Date.now() + stallBackoffMs(++attempt)
@@ -200,8 +203,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       const t = video.currentTime
       if (holdRef.current) { advancedAt = Date.now(); last = t; return }
       if (t !== last && t > 0 && !video.paused) { advancedAt = Date.now(); attempt = 0 }
-      // Watchdog: OBS is publishing (load) but the picture hasn't moved for 3s → rebuild, with backoff.
-      else if (document.visibilityState === "visible" && Date.now() - advancedAt > 3000 && Date.now() >= nextKickAt) reload()
+      // Watchdog: OBS is publishing (load) but the picture hasn't moved → rebuild, with backoff.
+      else if (document.visibilityState === "visible" && Date.now() - advancedAt > stuckMs && Date.now() >= nextKickAt) reload()
       // Paused by the browser (refused autoplay with sound, tab policy): resume, muted if it must be.
       if (!wantSoundRef.current() && !video.muted) video.muted = true
       if (video.paused && video.readyState >= 2 && !video.ended) {
@@ -341,6 +344,12 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // Main↔Backup switch or failover in the output never waits for a paused input to catch up.
   const [captureTap] = useState(() => isCapturePage())
   const hold = holdStandby({ onAir, incoming, captureTap })
+  // Phone/tablet in a muted operator preview (deck / builder iframe): gentle HLS, not the on-air LL profile.
+  const [gentle] = useState(() => typeof window !== "undefined" && previewGentle({
+    mute: new URLSearchParams(window.location.search).get("mute") === "1",
+    touch: muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
+    capturePage: isCapturePage(),
+  }))
   const label = source === "backup" ? "Backup" : "Main"
   // Last-frame cover: a player rebuild / decode error clears the <video> (black). The last good frame
   // is drawn on a canvas on top until the element shows a new frame, so the output freezes, never blacks.
@@ -374,7 +383,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // standby input in a plain tab, never on the capture page) does not depend on it.
   const shownRef = useRef<ProgramDisplay>("under")
   const maySound = () => programWantsSound({ active: active && shownRef.current === "video", hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
-  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, diag: { label, onAir }, onTrouble: showCover })
+  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, gentle, diag: { label, onAir }, onTrouble: showCover })
   // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
   // a decode error (element already blank) still has a frame to hold.
   const [periodic] = useState(() => isCapturePage())
