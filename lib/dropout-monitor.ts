@@ -296,7 +296,7 @@ function pollCapture(s: State, now: number) {
     if (chrome) dlog(chrome.level, "capture", chrome.text)
     else if (/\[audio\] program audio resync/.test(line)) dlog("·", "capture", line.trim().replace(/^\[capture [^\]]+\] /, "").slice(0, 200))
     else if (/heartbeat stalled|reload|crash|could not|failed|restarting capture|exited|timed out|Broken pipe|Connection (reset|refused)|Error/i.test(line)) dlog("!", "capture", line.trim().slice(0, 220))
-    else if (/\[audio\] program source|shows the program|left the program/.test(line)) dlog("·", "capture", line.trim().replace(/^\[capture [^\]]+\] /, "").slice(0, 200))
+    else if (/\[audio\] program source|\[switch\]|shows the program|left the program/.test(line)) dlog("·", "capture", line.trim().replace(/^\[capture [^\]]+\] /, "").slice(0, 200))
   }
   if (!files.stats) return
   let st: CaptureStats | null = null

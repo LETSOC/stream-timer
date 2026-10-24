@@ -24,6 +24,7 @@ import { plannedRefreshDue, relaunchBackoffMs } from "./chrome-life.mjs"
 import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 import { captureCodeVersion } from "./code-version.mjs"
 import { clearShowreel, createShowreelQueue, pushShowreel, showreelBedGain, takeShowreel } from "./showreel-audio.mjs"
+import { crossfadeMsOf, mixCrossfade, newFade, reverseFade, shouldCrossfade, switchLine } from "./switch-crossfade.mjs"
 import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames, targetJumped } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
@@ -90,7 +91,7 @@ const programFile = process.env.PROGRAM_READ_FILE || ""
 const progFallbackMs = Math.min(5000, Math.max(0, Number(process.env.CAPTURE_PROGRAM_AUDIO_DELAY_MS ?? 1170) || 0))
 /** ffmpeg RTMP read + AAC decode latency of the program reader (measured on the box). */
 const readerLagMs = Number(process.env.CAPTURE_PROGRAM_READER_LAG_MS ?? 25) || 0
-const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, resyncs: 0, resyncUntil: 0, resyncCounted: false, display: "", resyncGen: null, holding: false, ramp: 1 }
+const prog = { source: "main", wanted: false, wantedSince: 0, flowed: false, reader: null, chunks: [], bytes: 0, primed: false, underruns: 0, gain: 1, lastWantedAt: 0, restartAt: 0, peak: 0, mixedAt: 0, latencyMs: null, targetMs: progFallbackMs, levelMs: null, corrections: 0, jumps: 0, resyncs: 0, resyncUntil: 0, resyncCounted: false, display: "", resyncGen: null, holding: false, ramp: 1, xfadeMs: 0 }
 const sync = { lagMs: null, trimMs: 0, test: false }
 /** Screencast lag used for compensation (smoothed; 0 until measured). */
 const screencastLag = () => Math.max(0, Math.min(400, sync.lagMs ?? 0))
@@ -169,6 +170,7 @@ function spawnReader(source, sink) {
       prog.restartAt = Date.now() + 2000
     }
     if (spare.reader === reader) Object.assign(spare, { reader: null, chunks: [], bytes: 0, restartAt: Date.now() + 5000 })
+    if (xfade.reader === reader) Object.assign(xfade, { reader: null, source: null, chunks: [], bytes: 0, f: null })
   })
   return reader
 }
@@ -195,6 +197,7 @@ function stopProgramReader() {
  */
 const spare = { source: null, reader: null, chunks: [], bytes: 0, restartAt: 0 }
 function startSpare() {
+  if (xfade.reader) return // the outgoing input is still fading out; it becomes the spare afterwards
   const other = prog.source === "backup" ? "main" : "backup"
   if (spare.reader && spare.source === other) return
   stopSpare()
@@ -206,8 +209,78 @@ function stopSpare() {
   if (spare.reader) { const r = spare.reader; spare.reader = null; r.sink = null; r.kill("SIGTERM") }
   Object.assign(spare, { chunks: [], bytes: 0 })
 }
-/** Switch the on-air program audio to `source`: promote the warm reader if it has audio queued. */
+/**
+ * Main↔Backup audio crossfade (desk › switch audio). The outgoing input keeps its reader and queue here
+ * while pcmBlock fades it out (equal-power); afterwards it becomes the warm spare. Only when both inputs
+ * have audio queued; otherwise the Hard cut below, unchanged.
+ */
+const xfade = { reader: null, source: null, chunks: [], bytes: 0, f: null, ms: 0 }
+function endCrossfade() {
+  const r = xfade.reader
+  if (r && !spare.reader && xfade.source !== prog.source) {
+    r.sink = spare
+    Object.assign(spare, { source: xfade.source, reader: r, chunks: xfade.chunks, bytes: xfade.bytes, restartAt: 0 })
+  } else if (r) { r.sink = null; r.kill("SIGTERM") }
+  Object.assign(xfade, { reader: null, source: null, chunks: [], bytes: 0, f: null })
+}
+function takeFrom(q, n) {
+  const want = n * 4
+  if (q.bytes < want) return null
+  const buf = Buffer.allocUnsafe(want)
+  let at = 0
+  while (at < want) { const head = q.chunks[0]; const take = Math.min(head.length, want - at); head.copy(buf, at, 0, take); at += take; if (take === head.length) q.chunks.shift(); else q.chunks[0] = head.subarray(take) }
+  q.bytes -= want
+  return buf
+}
+function noteSwitch(source, fromTarget, faded, ms) {
+  // Delay gap between the inputs at the switch: the incoming one's target (same formula as programTargetMs) − the outgoing one's.
+  const input = inputs[source]
+  const toTarget = input.latencyMs === null ? null : Math.max(100, Math.min(10000, input.latencyMs + screencastLag() - readerLagMs - input.arrival.excessMs + sync.trimMs + input.offsetMs + videoDelayMs()))
+  const line = switchLine({ ms, faded, deltaMs: toTarget === null ? null : toTarget - fromTarget, to: source === "backup" ? "Backup" : "Main" })
+  log(line)
+}
 function switchProgramSource(source) {
+  const fromTarget = prog.targetMs
+  const ms = crossfadeMsOf(prog.xfadeMs)
+  // Mid-fade re-switch: back to the input that is fading out. Swap the two and reverse from the current level.
+  if (xfade.f && xfade.source === source && prog.wanted && shouldCrossfade({ ms, outBytes: prog.bytes, inBytes: xfade.bytes })) {
+    const out = { reader: prog.reader, chunks: prog.chunks, bytes: prog.bytes, source: prog.source }
+    inputs[prog.source].latencyMs = prog.latencyMs
+    prog.source = source
+    prog.latencyMs = inputs[source].latencyMs
+    inputs[source].jitter.reset()
+    if (xfade.reader) xfade.reader.sink = prog
+    prog.reader = xfade.reader
+    prog.chunks = xfade.chunks; prog.bytes = xfade.bytes; prog.primed = false; prog.levelMs = null; prog.holding = false; prog.ramp = 1
+    if (out.reader) out.reader.sink = xfade
+    Object.assign(xfade, { reader: out.reader, source: out.source, chunks: out.chunks, bytes: out.bytes, f: reverseFade(xfade.f) })
+    armResync(`program source → ${source === "backup" ? "Backup" : "Main"}`)
+    noteSwitch(source, fromTarget, true, ms)
+    return
+  }
+  if (xfade.reader || xfade.f) endCrossfade()
+  // Crossfade: both inputs have audio queued (the incoming one in the warm spare). Same promotion as the
+  // warm branch below, but the old reader fades out instead of being killed.
+  if (prog.wanted && prog.reader && spare.reader && spare.source === source && shouldCrossfade({ ms, outBytes: prog.bytes, inBytes: spare.bytes })) {
+    Object.assign(xfade, { reader: prog.reader, source: prog.source, chunks: prog.chunks, bytes: prog.bytes, f: newFade(ms, RATE), ms })
+    xfade.reader.sink = xfade
+    inputs[prog.source].latencyMs = prog.latencyMs
+    prog.source = source
+    prog.latencyMs = inputs[source].latencyMs
+    inputs[source].jitter.reset()
+    prog.ramp = 1 // the crossfade is the ramp
+    armResync(`program source → ${source === "backup" ? "Backup" : "Main"}`)
+    const r = spare.reader
+    spare.reader = null
+    r.sink = prog
+    prog.reader = r
+    prog.chunks = spare.chunks; prog.bytes = spare.bytes; prog.primed = false; prog.levelMs = null; prog.holding = false
+    Object.assign(spare, { chunks: [], bytes: 0, restartAt: 0 })
+    log(`[audio] program source → ${source === "backup" ? "Backup" : "Main"} (warm reader, crossfade ${ms}ms)`)
+    noteSwitch(source, fromTarget, true, ms)
+    return
+  }
+  noteSwitch(source, fromTarget, false, ms)
   const old = prog.reader
   inputs[prog.source].latencyMs = prog.latencyMs
   prog.source = source
@@ -350,7 +423,18 @@ let bedLine = null // delay line (screencast lag + positive trim), created with 
 /** `wallMs` = timeline time of the first frame (beeps of the sync test line up with the flashes). */
 function pcmBlock(n, wallMs) {
   // Off Program: still drain the warm reader so its queue stays locked at the delay (output unused).
-  const programPcm = prog.wanted ? takeProgram(n) : (prog.reader && takeProgram(n), null)
+  let programPcm = prog.wanted ? takeProgram(n) : (prog.reader && takeProgram(n), null)
+  // Crossfade in progress: incoming·sin + outgoing·cos. Outgoing ran dry → incoming at full at once.
+  if (xfade.f) {
+    if (!prog.wanted) endCrossfade()
+    else {
+      const outPcm = takeFrom(xfade, n)
+      if (!outPcm) xfade.f.pos = xfade.f.total
+      const m = mixCrossfade(programPcm, outPcm, xfade.f, n)
+      if (programPcm || outPcm) programPcm = m.buf
+      if (m.done) endCrossfade()
+    }
+  }
   const wantBed = Math.max(0, screencastLag() + Math.max(0, sync.trimMs))
   const curBed = bedLine.delayMs()
   bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
@@ -636,7 +720,7 @@ setInterval(async () => {
   const info = await page.evaluate(() => {
     const feed = document.querySelector("[data-testid=program-feed]")
     const lat = Number(feed?.getAttribute("data-latency-ms") || NaN)
-    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null, resync: Number(feed?.getAttribute("data-resync") || 0), display: feed?.getAttribute("data-display") ?? "" }
+    return { source: feed?.getAttribute("data-source") === "backup" ? "backup" : "main", screen: document.documentElement.dataset.screen ?? "", loaded: feed?.getAttribute("data-loaded") === "1", lat: Number.isFinite(lat) && feed?.getAttribute("data-playing") === "1" ? lat : null, resync: Number(feed?.getAttribute("data-resync") || 0), display: feed?.getAttribute("data-display") ?? "", crossfadeMs: Number(feed?.getAttribute("data-crossfade-ms") || 0) }
   }).catch(() => ({ source: prog.source, screen: "", loaded: null, lat: null }))
   // Page hung (or reloaded): the poll answers late / not at all, the picture froze and resumes behind.
   if (info.screen !== "") {
@@ -655,6 +739,7 @@ setInterval(async () => {
   if (screen !== "" && screen !== lastScreen) { if (lastScreen !== "") lastSwitchAt = Date.now(); lastScreen = screen }
   // Main ↔ Backup (manual or failover): /stream has switched its on-air player; follow with the audio.
   // The adaptive delay re-locks on the new player's latency (same sync logic, fresh measurement).
+  if (typeof info.crossfadeMs === "number") prog.xfadeMs = info.crossfadeMs
   if (info.source !== prog.source) { switchProgramSource(info.source); lastSwitchAt = Date.now() }
   // Program player latency (relay live edge → picture), smoothed (~0.7s).
   // Right after a resync signal the latency is taken raw, so the target follows the jump at once.
