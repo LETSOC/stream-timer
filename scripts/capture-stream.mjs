@@ -529,7 +529,10 @@ let context = null
 let page = null
 let browserGen = 0
 let browserLaunchedAt = Date.now()
-const LAUNCH_ARGS = ["--autoplay-policy=no-user-gesture-required", "--hide-scrollbars", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"]
+// Opt-in Chrome flags for A/B tests, e.g. CAPTURE_CHROME_ARGS="--ignore-gpu-blocklist --enable-gpu-rasterization" (default none).
+const EXTRA_CHROME_ARGS = (process.env.CAPTURE_CHROME_ARGS || "").split(/\s+/).filter((a) => a.startsWith("--"))
+const LAUNCH_ARGS = ["--autoplay-policy=no-user-gesture-required", "--hide-scrollbars", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", ...EXTRA_CHROME_ARGS]
+if (EXTRA_CHROME_ARGS.length) log(`[chrome] extra flags: ${EXTRA_CHROME_ARGS.join(" ")}`)
 /** Launch Chrome, open /stream, wait for its ready marker, start the screencast. Throws on failure (relaunch), exits on first start (as before). */
 async function openBrowser(initial) {
   const gen = ++browserGen
