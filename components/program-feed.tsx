@@ -14,6 +14,7 @@ import { isCapturePage, playerDiag } from "@/lib/player-diag"
 import { holdStandby, keepLoaded, previewDisplay, previewGentle, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 import { muteOnlyAudio } from "@/lib/preview-audio"
 import { programAudioRouted, rampProgramAudio, resetProgramAudio, routeProgramAudio } from "@/lib/switch-crossfade"
+import { frameStateDue, hlsCreated, hlsDestroyed, latencyStateDue, ON_AIR_STUCK_MS, pageHung, playerRebuilt } from "@/lib/page-health"
 import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
@@ -127,6 +128,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
           : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1, liveSyncOnStallIncrease: 0 }
         hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
+        hlsCreated()
         hls.loadSource(src)
         hls.attachMedia(video)
         hls.on(HlsLib.Events.MANIFEST_PARSED, play)
@@ -150,6 +152,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       reportRef.current("!", `player torn down: ${teardownWhy.current} → element cleared; last frame held on top until the first new frame`)
       teardownWhy.current = "unloaded (OBS gone > 3s, or source changed)"
       hlsRef.current = null
+      if (hls) hlsDestroyed()
       hls?.destroy()
       video.removeAttribute("src")
       video.load()
@@ -173,7 +176,10 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     let nextKickAt = Date.now() + stallBackoffMs(0)
     // Native HLS (iOS) reports stalls as events; the currentTime check below catches the rest.
     // Phone preview: MediaMTX holds a playlist ~2.2s, so a 3s teardown races it. On air stays at 3s.
-    const stuckMs = gentle ? 6000 : 3000
+    const stuckMs = gentle ? 6000 : ON_AIR_STUCK_MS
+    let prevTickAt: number | null = null
+    let frameSetAt: number | null = null
+    let latSet: { value: number | null; at: number } | null = null
     const onStall = () => { if (Date.now() - advancedAt > stuckMs && Date.now() >= nextKickAt) reload(`native stall event after ${stuckMs / 1000}s stuck`) }
     const onWaiting = (e: Event) => {
       const b = video.buffered
@@ -187,6 +193,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     const reload = (why = `watchdog: picture stuck ${stuckMs / 1000}s while OBS publishes`) => {
       teardownWhy.current = why
       firstFrameSeen = false
+      playerRebuilt()
       nextKickAt = Date.now() + stallBackoffMs(++attempt)
       advancedAt = Date.now()
       setLastFrameAt((at) => (at === null ? null : Date.now())) // hold the picture while it reloads
@@ -202,6 +209,14 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     video.addEventListener("error", onVideoError)
     const id = window.setInterval(() => {
       const t = video.currentTime
+      const tickAt = Date.now()
+      // The page itself hung (main thread blocked, this tick came late): the player didn't cause the
+      // stall, so restart the stuck clock instead of rebuilding (a rebuild made the next hang worse).
+      if (pageHung(prevTickAt, tickAt)) {
+        if (!gentle && !holdRef.current && tickAt - advancedAt > stuckMs) reportRef.current("·", `rebuild skipped: the page itself hung ${((tickAt - (prevTickAt ?? tickAt)) / 1000).toFixed(1)}s (not the player)`, "hung-skip", 2000)
+        advancedAt = tickAt
+      }
+      prevTickAt = tickAt
       if (holdRef.current) { advancedAt = Date.now(); last = t; return }
       if (t !== last && t > 0 && !video.paused) { advancedAt = Date.now(); attempt = 0 }
       // Watchdog: OBS is publishing (load) but the picture hasn't moved → rebuild, with backoff.
@@ -217,11 +232,11 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
       if (!video.paused && video.readyState >= 2 && t !== last && t > 0) {
         if (!firstFrameSeen) { firstFrameSeen = true; setResyncGen((g) => g + 1); if (builtAt.current !== null) reportRef.current("+", `first frame ${Date.now() - builtAt.current}ms after the player (re)built`); builtAt.current = null }
         const nowMs = Date.now()
-        setLastFrameAt(nowMs)
-        setRealFrameAt(nowMs)
+        // Throttled: every 150ms re-rendered both feeds ~7x/s each for no visible change.
+        if (frameStateDue(frameSetAt, nowMs)) { frameSetAt = nowMs; setLastFrameAt(nowMs); setRealFrameAt(nowMs) }
         const at = hlsRef.current?.playingDate?.getTime()
         const lat = at ? nowMs - at : null
-        setLatency(lat)
+        if (latencyStateDue(latSet, lat, nowMs)) { latSet = { value: lat, at: nowMs }; setLatency(lat) }
         // On air (/stream, LL tuning): more than 3s behind live → jump back to the live edge.
         if (diagRef.current?.onAir && !gentle && hlsRef.current && liveJumpTick(jump, lat, nowMs)) {
           const b = video.buffered
@@ -459,7 +474,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
     if (!onAir || !active || shown !== "video" || hold || lastFrameAt === null) { frozenSince.current = null; return }
     const gap = now - lastFrameAt
     if (gap > 700 && frozenSince.current === null) { frozenSince.current = lastFrameAt; playerDiag("!", `${label} (on air): picture frozen (no new frame for ${(gap / 1000).toFixed(1)}s; the output repeats the last frame)`) }
-    else if (gap <= 400 && frozenSince.current !== null) { playerDiag("+", `${label} (on air): picture moving again after ${((lastFrameAt - frozenSince.current) / 1000).toFixed(1)}s frozen`); frozenSince.current = null }
+    else if (gap <= 500 && frozenSince.current !== null) { playerDiag("+", `${label} (on air): picture moving again after ${((lastFrameAt - frozenSince.current) / 1000).toFixed(1)}s frozen`); frozenSince.current = null }
   }, [now, lastFrameAt, onAir, active, shown, hold, label])
 
   const routed = useRef(programAudio)
@@ -488,7 +503,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
 
   const playing = lastFrameAt !== null && now - lastFrameAt < 1000
   // Real frames only: a watchdog rebuild holds lastFrameAt but must not make a stuck input look alive.
-  const alive = realFrameAt !== null && now - realFrameAt < 700 && ready
+  const alive = realFrameAt !== null && now - realFrameAt < 800 && ready
   useEffect(() => { onAlive?.(alive) }, [alive, onAlive])
   const visual: ProgramDisplay = incoming ? "under" : shown
   const hardMute = muted || shown !== "video"

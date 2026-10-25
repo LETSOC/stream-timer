@@ -29,6 +29,10 @@ import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 import { SyncTestOverlay } from "@/components/sync-test-overlay"
 import { TC_BADGE_W, TC_GAP, TimecodeBadge } from "@/components/timecode-badge"
 import { parseFps } from "@/lib/av-diagnostics"
+import { countAudioContexts, startMemLog } from "@/lib/page-health"
+
+// Capture page: count AudioContexts from the start (for the [mem] dropout line).
+if (typeof window !== "undefined" && isCapturePage()) countAudioContexts()
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
@@ -64,6 +68,8 @@ function useCaptureHeartbeat() {
     const w = window as unknown as { __hb?: number }
     w.__hb = 0
     const id = window.setInterval(() => { w.__hb = (w.__hb ?? 0) + 1 }, 1000)
+    // Once a minute: page memory + live players/elements/contexts, to spot a slow build-up over a long run.
+    startMemLog((line) => playerDiag("·", line))
     return () => window.clearInterval(id)
   }, [])
 }
