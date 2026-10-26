@@ -25,6 +25,7 @@ import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 import { captureCodeVersion } from "./code-version.mjs"
 import { clearShowreel, createShowreelQueue, pushShowreel, showreelBedGain, takeShowreel } from "./showreel-audio.mjs"
 import { crossfadeMsOf, mixCrossfade, newFade, reverseFade, shouldCrossfade, switchLine } from "./switch-crossfade.mjs"
+import { jpegQuality, mjpegHwaccelUsable, mjpegInputArgs } from "./capture-tuning.mjs"
 import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames, targetJumped } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
@@ -39,6 +40,8 @@ const fps = Math.min(60, Math.max(10, Number(process.env.CAPTURE_FPS) || 30))
 const bitrate = Math.min(12000, Math.max(500, Math.round(Number(process.env.CAPTURE_BITRATE)) || (width >= 1920 ? 4500 : 2500)))
 const ffmpegBin = process.env.FFMPEG_BIN || "ffmpeg"
 const statsFile = process.env.CAPTURE_STATS_FILE || ""
+// Screencast JPEG quality (CAPTURE_JPEG_QUALITY, default 65): smaller frames = less Chrome encode, pipe and decode work.
+const JPEG_Q = jpegQuality(process.env.CAPTURE_JPEG_QUALITY)
 
 // Hardware H.264 on macOS (VideoToolbox) takes most of the encode off the CPU. "auto" uses it only
 // if a 1-frame test encode succeeds, so a Mac without it (or Linux) falls back to libx264.
@@ -611,16 +614,20 @@ async function openBrowser(initial) {
     freshFrame = true
     session.send("Page.screencastFrameAck", { sessionId }).catch(() => undefined)
   })
-  await session.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: width, maxHeight: height, everyNthFrame: 1 })
+  await session.send("Page.startScreencast", { format: "jpeg", quality: JPEG_Q, maxWidth: width, maxHeight: height, everyNthFrame: 1 })
   // The first frame can take a moment; take one screenshot so we never start on nothing (first start only:
   // on a relaunch the held last good frame stays up until the new page's frames flow).
-  if (initial) latest = await page.screenshot({ type: "jpeg", quality: 85 })
+  if (initial) latest = await page.screenshot({ type: "jpeg", quality: JPEG_Q })
 }
 await openBrowser(true)
 
-ffmpeg = spawn(ffmpegBin, [
+// MJPEG input decode: VideoToolbox on a Mac when a probe decode works (CAPTURE_MJPEG_HWACCEL=0 = off),
+// else software. If ffmpeg dies at startup with it, it is started once more in software (below).
+let mjpegHw = mjpegHwaccelUsable(ffmpegBin)
+let ffmpegStartedAt = 0
+const ffmpegArgs = (hw) => [
   "-hide_banner", "-loglevel", "info", "-stats_period", "2",
-  "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "pipe:0",
+  ...mjpegInputArgs(fps, hw),
   "-thread_queue_size", "4096", "-f", "s16le", "-ar", String(RATE), "-ac", "2", "-i", "pipe:3",
   "-map", "0:v", "-map", "1:a",
   "-af", "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
@@ -628,17 +635,35 @@ ffmpeg = spawn(ffmpegBin, [
   ...videoArgs, "-r", String(fps),
   "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
   "-f", "flv", "-flvflags", "no_duration_filesize", rtmpUrl,
-], { stdio: ["pipe", "inherit", "pipe", "pipe"], env: childEnv })
-const pcmOut = ffmpeg.stdio[3]
-pcmOut.on("error", () => undefined)
-ffmpeg.stdin.on("error", () => undefined)
+]
+log(`[encoder] screencast JPEG quality ${JPEG_Q}, ${width}x${height}; MJPEG decode: ${mjpegHw ? "VideoToolbox (hardware)" : "software"}`)
+let pcmOut = null
+function startFfmpeg() {
+  ffmpegStartedAt = Date.now()
+  ffmpeg = spawn(ffmpegBin, ffmpegArgs(mjpegHw), { stdio: ["pipe", "inherit", "pipe", "pipe"], env: childEnv })
+  pcmOut = ffmpeg.stdio[3]
+  pcmOut.on("error", () => undefined)
+  ffmpeg.stdin.on("error", () => undefined)
+  ffmpeg.stderr.on("data", onFfmpegStderr)
+  ffmpeg.on("exit", (code) => {
+    if (stopping) return
+    // Hardware decode refused at startup (no stats yet, < 15s): once more in software, same timeline.
+    if (mjpegHw && !lastStatsLine && Date.now() - ffmpegStartedAt < 15000) {
+      mjpegHw = false
+      log(`[encoder] ffmpeg exited (code ${code}) with VideoToolbox MJPEG decode; restarting with software decode`)
+      startFfmpeg()
+      return
+    }
+    log(`ffmpeg exited (code ${code})`); void shutdown(code || 1)
+  })
+}
 // ffmpeg prints the output URL ("Output #0, flv, to 'rtmp://…/KEY'"): redact before it reaches the log.
 const hideKey = (text) => text.split(rtmpUrl).join("rtmp://[destination]").replace(/(rtmps?:\/\/[^\s/'"]+)\/[^\s'"]*/gi, "$1/••••").replace(/(password=)[^\s&'"]+/gi, "$1••••")
 // Keep the last stats line ("frame= … fps= … bitrate= … speed=…") for the health file; it is
 // written to the log only every 10s so the log stays small.
 let lastStatsLine = ""
 let lastLoggedStats = 0
-ffmpeg.stderr.on("data", (chunk) => {
+function onFfmpegStderr(chunk) {
   const text = hideKey(chunk.toString("utf8"))
   const parts = text.split(/(\r|\n)/)
   let rest = ""
@@ -649,8 +674,8 @@ ffmpeg.stderr.on("data", (chunk) => {
     } else rest += part
   }
   if (rest.trim()) process.stderr.write(rest.replace(/\r/g, "\n"))
-})
-ffmpeg.on("exit", (code) => { if (!stopping) { log(`ffmpeg exited (code ${code})`); void shutdown(code || 1) } })
+}
+startFfmpeg()
 
 // Constant-rate writer: repeat the latest frame; skip a tick if ffmpeg is backed up.
 // Drift-corrected: writes exactly as many frames as wall time says are due, so the stream runs at
@@ -666,7 +691,7 @@ const videoDelayMs = () => Math.max(0, -(screencastLag() + sync.trimMs))
 // Audio pipe on the same timeline as the frames, so audio and video stay locked.
 let pcmWritten = 0
 audioTicker = setInterval(() => {
-  if (!pcmOut.writable) return
+  if (!pcmOut?.writable) return
   let due = Math.floor((timelineMs() * RATE) / 1000) - pcmWritten
   while (due > 0) {
     const n = Math.min(due, RATE)

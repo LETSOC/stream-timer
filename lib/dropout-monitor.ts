@@ -73,6 +73,8 @@ export function pushTrouble(p: { speed: number | null; kbps: number | null }, no
 export function captureEncoderNote(line: string): { level: DropLevel; text: string } | null {
   const m = /starting (\d+x\d+) @ (\d+)fps, (\d+)k, ([\w-]+)( \((?:constant|average) bitrate\))?/.exec(line)
   if (m) return { level: "·", text: `encoder (HD capture): ${m[4]}${m[5] ?? ""}, ${m[1]}@${m[2]}, ${m[3]}k` }
+  const tagged = /\[encoder\] (.*)$/.exec(line.trim())
+  if (tagged) return { level: /restarting with software|failed|unavailable/.test(tagged[1]) ? "!" : "·", text: `encoder (HD capture): ${tagged[1].slice(0, 200)}` }
   if (/VideoToolbox here can't do constant bitrate/.test(line)) return { level: "!", text: "encoder (HD capture): VideoToolbox can't do constant bitrate here (average bitrate: a static page may send well under the set rate; libx264 pads to constant)" }
   return null
 }
