@@ -12,6 +12,7 @@ import { handleDeckUpgrade } from "./lib/deck-socket"
 import { startProgramMonitor } from "./lib/program-monitor"
 import { startDropoutMonitor } from "./lib/dropout-monitor"
 import { startDestinationTimers } from "./lib/relay"
+import { startKeepAwake } from "./lib/keep-awake"
 
 const dev = process.argv.includes("--dev")
 const hostname = process.env.BIND_HOST?.trim() || "127.0.0.1"
@@ -40,6 +41,7 @@ async function main() {
   })
   startProgramMonitor()
   startDropoutMonitor()
+  startKeepAwake()
   startDestinationTimers()
   server.listen(port, hostname, () => {
     console.log(`▲ stream-timer ${dev ? "dev" : "production"} on http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port} (deck WebSocket on the same port)`)
