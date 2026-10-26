@@ -25,7 +25,7 @@ import { createAudioFeeder, createDelayLine } from "./audio-feeder.mjs"
 import { captureCodeVersion } from "./code-version.mjs"
 import { clearShowreel, createShowreelQueue, pushShowreel, showreelBedGain, takeShowreel } from "./showreel-audio.mjs"
 import { crossfadeMsOf, mixCrossfade, newFade, reverseFade, shouldCrossfade, switchLine } from "./switch-crossfade.mjs"
-import { jpegQuality, mjpegHwaccelUsable, mjpegInputArgs } from "./capture-tuning.mjs"
+import { encoderBehind, jpegQuality, mjpegHwaccelUsable, mjpegInputArgs } from "./capture-tuning.mjs"
 import { createJitterMeter, deadBandMs, resyncAction, RESYNC_WINDOW_MS, splice, spliceFrames, targetJumped } from "./program-jitter.mjs"
 
 const log = (msg) => process.stderr.write(`[capture ${new Date().toTimeString().slice(0, 8)}] ${msg}\n`)
@@ -639,8 +639,10 @@ const ffmpegArgs = (hw) => [
 ]
 log(`[encoder] screencast JPEG quality ${JPEG_Q}, ${width}x${height}; MJPEG decode: ${mjpegHw ? "VideoToolbox (hardware)" : "software"}`)
 let pcmOut = null
+let pipeFrames = 0 // frames written to ffmpeg's stdin whose write hasn't completed yet
 function startFfmpeg() {
   ffmpegStartedAt = Date.now()
+  pipeFrames = 0
   ffmpeg = spawn(ffmpegBin, ffmpegArgs(mjpegHw), { stdio: ["pipe", "inherit", "pipe", "pipe"], env: childEnv })
   pcmOut = ffmpeg.stdio[3]
   pcmOut.on("error", () => undefined)
@@ -793,9 +795,9 @@ ticker = setInterval(() => {
   let due = Math.floor((timelineMs() * fps) / 1000) - written
   if (due <= 0) return
   if (due > 1) win.maxLag = Math.max(win.maxLag, ((due - 1) * 1000) / fps)
-  // Encoder behind (more than ~6 frames queued in the pipe). Frames are stamped by count, so waiting
+  // Encoder behind (more than 6 frames or 8MB not yet taken by ffmpeg). Frames are stamped by count, so waiting
   // keeps sync; only past 0.5s drop frames, and move the shared timeline so audio drops the same span.
-  if (ffmpeg.stdin.writableLength > latest.length * 6) {
+  if (encoderBehind({ framesInFlight: pipeFrames, bytesInFlight: ffmpeg.stdin.writableLength })) {
     // (Not while ffmpeg is still opening its inputs: it needs the audio pipe to keep flowing.)
     if (due > fps / 2 && lastStatsLine) { skippedMs += ((due - 1) * 1000) / fps; win.skipped += due - 1 }
     return
@@ -807,7 +809,8 @@ ticker = setInterval(() => {
     const cutoff = Date.now() - hold
     for (let i = frameRing.length - 1; i >= 0; i--) if (frameRing[i].at <= cutoff) { frame = frameRing[i].buf; break }
   }
-  for (let i = 0; i < due; i++) ffmpeg.stdin.write(frame)
+  const stdin = ffmpeg.stdin
+  for (let i = 0; i < due; i++) { pipeFrames += 1; stdin.write(frame, () => { if (ffmpeg?.stdin === stdin) pipeFrames = Math.max(0, pipeFrames - 1) }) }
   win.written += due
   win.repeats += freshFrame ? due - 1 : due
   freshFrame = false

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { jpegQuality, mjpegHwaccelUsable, mjpegInputArgs } from "../scripts/capture-tuning.mjs"
+import { encoderBehind, jpegQuality, mjpegHwaccelUsable, mjpegInputArgs } from "../scripts/capture-tuning.mjs"
 import { captureEncoderNote } from "./dropout-monitor"
 
 test("screencast JPEG quality: default 65, env override clamped to 30-95", () => {
@@ -34,4 +34,13 @@ test("capture ffmpeg: video pipe has a 1024 thread queue, output waits for both 
   const src = (await import("node:fs")).readFileSync(new URL("../scripts/capture-stream.mjs", import.meta.url), "utf8")
   assert.match(src, /"-max_interleave_delta", "0", "-f", "flv"/)
   assert.ok(mjpegInputArgs(30, false).join(" ").includes("-thread_queue_size 1024 -i pipe:0"))
+})
+
+test("encoder-behind: counts frames in flight, not multiples of the latest JPEG size", () => {
+  // A dark frame (8KB) after bright ones: 3 frames / 300KB queued is fine (old rule: 300KB > 8KB*6 = skip).
+  assert.equal(encoderBehind({ framesInFlight: 3, bytesInFlight: 300_000 }), false)
+  assert.equal(encoderBehind({ framesInFlight: 6, bytesInFlight: 1_000_000 }), false)
+  assert.equal(encoderBehind({ framesInFlight: 7, bytesInFlight: 100_000 }), true)
+  assert.equal(encoderBehind({ framesInFlight: 2, bytesInFlight: 9 * 1024 * 1024 }), true)
+  assert.equal(encoderBehind({ framesInFlight: 0, bytesInFlight: 0 }), false)
 })

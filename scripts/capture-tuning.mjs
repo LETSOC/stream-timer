@@ -23,3 +23,14 @@ export function mjpegHwaccelUsable(ffmpegBin, { platform = process.platform, env
   const dec = spawnSync(ffmpegBin, ["-hide_banner", "-loglevel", "error", ...mjpegInputArgs(30, true), "-f", "null", "-"], { input: jpg.stdout, timeout: 8000 })
   return dec.status === 0 && !String(dec.stderr ?? "").trim()
 }
+
+/** Encoder-behind budget: frames written to ffmpeg's pipe but not yet flushed, and their bytes. */
+export const PIPE_MAX_FRAMES = 6
+export const PIPE_MAX_BYTES = 8 * 1024 * 1024
+/**
+ * Is ffmpeg backed up? Counts frames in flight (and caps their bytes), independent of the size of the
+ * latest JPEG: the old `writableLength > latest.length * 6` tripped early on dark/static (small) frames.
+ */
+export function encoderBehind({ framesInFlight, bytesInFlight }, maxFrames = PIPE_MAX_FRAMES, maxBytes = PIPE_MAX_BYTES) {
+  return framesInFlight > maxFrames || bytesInFlight > maxBytes
+}
