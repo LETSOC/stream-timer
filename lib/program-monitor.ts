@@ -6,7 +6,7 @@ import { rttView, startRttMonitor } from "@/lib/rtt-monitor"
  */
 import { eventBus } from "@/lib/event-bus"
 import { readServerState } from "@/lib/event-server"
-import { failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type FailoverMemory } from "@/lib/program-source"
+import { failoverMemoryAfterSleep, failoverStep, FRESH_MEMORY, SOURCE_LABEL, type FailoverEvent, type FailoverMemory } from "@/lib/program-source"
 import fs from "node:fs"
 import path from "node:path"
 import { syncMdns } from "@/lib/mdns"
@@ -27,6 +27,7 @@ const onChange = changeLogger()
 const stateSeen = new Set<string>()
 let verboseAt = 0
 import type { ProgramSource, ReturnStatus, SourceHealth } from "@/lib/program-source"
+import { formatSleep, sleepGapMs } from "@/lib/keep-awake"
 
 const KEY = Symbol.for("stream-timer.program-monitor")
 type Monitor = { timer: NodeJS.Timeout | null; memory: FailoverMemory; last: FailoverEvent | null; log: FailoverEvent[]; sig: string; baseline: Record<ProgramSource, number | null>; status: ReturnStatus | null; rearm?: Record<ProgramSource, RearmMemory>; downAt?: Record<ProgramSource, number | null>; rearming?: boolean }
@@ -103,8 +104,16 @@ export function onProgramSources(listener: () => void): () => void {
   return () => bus.off("program-sources", listener)
 }
 
+let lastTickAt: number | null = null
 export async function programMonitorTick(now = Date.now()) {
   const m = monitor()
+  // Mac asleep/frozen: don't count the gap as an input stall (no switch this tick).
+  const slept = lastTickAt === null ? 0 : sleepGapMs(lastTickAt, now, 0)
+  lastTickAt = now
+  if (slept) {
+    m.memory = failoverMemoryAfterSleep(m.memory, now)
+    dlog("·", "switch", `auto-failover timers reset after a ${formatSleep(slept)} gap (Mac asleep or frozen), not counted as a stall`)
+  }
   await refreshProgramSources()
   await verifyMediamtxConfig(now)
   // Bonjour follows LAN ingest + arm + the current LAN IP (re-announced when the IP changes).

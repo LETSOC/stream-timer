@@ -124,6 +124,16 @@ export function failoverStep(input: { active: ProgramSource; main: SourceHealth;
   return { memory, switchTo: null, reason: null, note, status }
 }
 
+/**
+ * After the Mac slept or froze (a tick gap of 20s+), the bad/good timers measure the sleep, not the
+ * inputs: "Backup stalled 4927s" on wake. Restart them from now so this tick can't switch; real
+ * stalls are then timed afresh. Flap history and failedOver are kept.
+ */
+export function failoverMemoryAfterSleep(memory: FailoverMemory, now: number): FailoverMemory {
+  const at = (t: number | null | undefined) => (t == null ? null : now)
+  return { ...memory, mainBadSince: at(memory.mainBadSince), mainGoodSince: at(memory.mainGoodSince), backupBadSince: at(memory.backupBadSince) }
+}
+
 export type FailoverEvent = { at: number; from: ProgramSource; to: ProgramSource; reason: string; auto: boolean }
 
 const WEB_PAGE_HOSTS = /(^|\.)(youtube\.com|youtu\.be|twitch\.tv|facebook\.com|fb\.watch|vimeo\.com|ustream\.tv|video\.ibm\.com|kick\.com|instagram\.com|tiktok\.com|x\.com|twitter\.com|dailymotion\.com)$/i
