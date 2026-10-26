@@ -627,14 +627,15 @@ let mjpegHw = mjpegHwaccelUsable(ffmpegBin)
 let ffmpegStartedAt = 0
 const ffmpegArgs = (hw) => [
   "-hide_banner", "-loglevel", "info", "-stats_period", "2",
-  ...mjpegInputArgs(fps, hw),
+  ...mjpegInputArgs(fps, hw), // -thread_queue_size 1024: a busy encoder never blocks the frame pipe
   "-thread_queue_size", "4096", "-f", "s16le", "-ar", String(RATE), "-ac", "2", "-i", "pipe:3",
   "-map", "0:v", "-map", "1:a",
   "-af", "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
   "-vf", `scale=${width}:${height}:flags=bicubic,format=yuv420p`,
   ...videoArgs, "-r", String(fps),
   "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
-  "-f", "flv", "-flvflags", "no_duration_filesize", rtmpUrl,
+  // -max_interleave_delta 0: the muxer waits for both streams instead of flushing one ahead
+  "-max_interleave_delta", "0", "-f", "flv", "-flvflags", "no_duration_filesize", rtmpUrl,
 ]
 log(`[encoder] screencast JPEG quality ${JPEG_Q}, ${width}x${height}; MJPEG decode: ${mjpegHw ? "VideoToolbox (hardware)" : "software"}`)
 let pcmOut = null

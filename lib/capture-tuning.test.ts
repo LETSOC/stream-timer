@@ -13,7 +13,7 @@ test("screencast JPEG quality: default 65, env override clamped to 30-95", () =>
 })
 
 test("MJPEG input: hwaccel flag only when hardware decode is on, before -i", () => {
-  assert.deepEqual(mjpegInputArgs(25, false), ["-f", "image2pipe", "-framerate", "25", "-c:v", "mjpeg", "-i", "pipe:0"])
+  assert.deepEqual(mjpegInputArgs(25, false), ["-f", "image2pipe", "-framerate", "25", "-c:v", "mjpeg", "-thread_queue_size", "1024", "-i", "pipe:0"])
   const hw = mjpegInputArgs(30, true)
   assert.deepEqual(hw.slice(0, 2), ["-hwaccel", "videotoolbox"])
   assert.ok(hw.indexOf("-hwaccel") < hw.indexOf("-i"))
@@ -28,4 +28,10 @@ test("VideoToolbox MJPEG decode is never tried off macOS or when disabled", () =
 test("[encoder] capture lines reach the dropout log", () => {
   assert.equal(captureEncoderNote("[capture 10:00:00] [encoder] screencast JPEG quality 65, 1920x1080; MJPEG decode: software")?.level, "·")
   assert.equal(captureEncoderNote("[capture 10:00:00] [encoder] ffmpeg exited (code 1) with VideoToolbox MJPEG decode; restarting with software decode")?.level, "!")
+})
+
+test("capture ffmpeg: video pipe has a 1024 thread queue, output waits for both streams", async () => {
+  const src = (await import("node:fs")).readFileSync(new URL("../scripts/capture-stream.mjs", import.meta.url), "utf8")
+  assert.match(src, /"-max_interleave_delta", "0", "-f", "flv"/)
+  assert.ok(mjpegInputArgs(30, false).join(" ").includes("-thread_queue_size 1024 -i pipe:0"))
 })

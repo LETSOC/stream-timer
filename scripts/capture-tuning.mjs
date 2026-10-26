@@ -9,7 +9,7 @@ export function jpegQuality(raw) {
 
 /** Input args for the screencast JPEG pipe; `hw` = decode the MJPEG with VideoToolbox. */
 export function mjpegInputArgs(fps, hw) {
-  return [...(hw ? ["-hwaccel", "videotoolbox"] : []), "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "pipe:0"]
+  return [...(hw ? ["-hwaccel", "videotoolbox"] : []), "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-thread_queue_size", "1024", "-i", "pipe:0"]
 }
 
 /**
