@@ -10,6 +10,7 @@ import { dlog, type DropLevel } from "@/lib/dropout-log"
 import { relayDir, relayPathsSnapshot } from "@/lib/relay"
 import { rtmpFiles } from "@/lib/encoder"
 import { rttView } from "@/lib/rtt-monitor"
+import { noteLoadSample } from "@/lib/load-alert"
 import { startOutputProbe } from "@/lib/output-probe"
 import { verticalSnapshot, VERTICAL_KBPS, VERTICAL_W, VERTICAL_H } from "@/lib/vertical"
 
@@ -159,6 +160,7 @@ type State = {
   forwards: Map<string, ForwardWatch>
   capTail: Tail
   capStatsAt: number
+  capSpeed?: { speed: number; at: number }
   avAt: number
   healthAt: number
   avPrev: AvCounters | null
@@ -311,6 +313,7 @@ function pollCapture(s: State, now: number) {
   s.capStale = !fresh
   if (!fresh || st.at === s.capStatsAt) return
   s.capStatsAt = st.at
+  if (st.enc) s.capSpeed = { speed: st.enc.speed, at: now }
   if (st.programAudio?.on && now - (s.avAt ?? 0) >= AV_LINE_MS) {
     const a = avLine(st.programAudio, s.avPrev ?? null)
     dlog("·", "av", a.text, now)
@@ -366,6 +369,16 @@ export async function dropoutTick(now = Date.now()) {
   pollForwards(s)
   pollCapture(s, now)
   pollSrt(s, now)
+  pollLoad(s, now)
+}
+
+/** Mac load alert (lib/load-alert): load average + capture encoder speed, sustained 30s, with hysteresis. */
+function pollLoad(s: State, now: number) {
+  const speed = s.capSpeed && now - s.capSpeed.at < 10_000 ? s.capSpeed.speed : null
+  const load = macLoad()
+  const r = noteLoadSample({ load: load.one, speed }, now)
+  if (r.changed === "on") dlog("!", "capture", `Mac overloaded for 30s (${r.state.reason}): desk previews and multiview hidden until it calms down; ${loadText(load)}`)
+  if (r.changed === "off") dlog("+", "capture", `Mac load back to normal for 30s: desk previews and multiview back; ${loadText(load)}`)
 }
 
 export function startDropoutMonitor(intervalMs = 1000) {
