@@ -15,6 +15,7 @@ import { holdStandby, keepLoaded, previewDisplay, previewGentle, previewHlsCaps,
 import { muteOnlyAudio } from "@/lib/preview-audio"
 import { programAudioRouted, rampProgramAudio, resetProgramAudio, routeProgramAudio } from "@/lib/switch-crossfade"
 import { frameStateDue, hlsCreated, hlsDestroyed, latencyStateDue, ON_AIR_STUCK_MS, pageHung, playerRebuilt } from "@/lib/page-health"
+import { alignTick, forgetPlayer, newAlign, onAirLatency, reportPlayerLatency } from "@/lib/pair-align"
 import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
@@ -190,6 +191,10 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     let firstFrameSeen = false
     const jump: LiveJumpState = { overSince: null, lastJumpAt: 0 }
     const settle = newSettle()
+    // Capture page only: the standby player follows the on-air one's distance from live (lib/pair-align).
+    const pairAlign = isCapturePage() && !gentle ? newAlign() : null
+    const align = newAlign()
+    let alignLogAt = 0
     const reload = (why = `watchdog: picture stuck ${stuckMs / 1000}s while OBS publishes`) => {
       teardownWhy.current = why
       firstFrameSeen = false
@@ -257,12 +262,25 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
           if (e?.kind === "start") reportRef.current("·", `delay settling: ${(e.fromMs / 1000).toFixed(1)}s behind, normal ${(e.floorMs / 1000).toFixed(1)}s → catching up at ${s.rate}x`)
           else if (e?.kind === "done") reportRef.current("+", `delay settled: ${(e.fromMs / 1000).toFixed(1)}s → ${(e.toMs / 1000).toFixed(1)}s in ${Math.round(e.tookMs / 1000)}s`)
           else if (e?.kind === "abort") reportRef.current("·", `delay settle paused at ${(e.toMs / 1000).toFixed(1)}s (buffer thin), will retry`)
+        } else if (pairAlign && diagRef.current && !diagRef.current.onAir) {
+          const b = video.buffered
+          const ahead = b.length ? b.end(b.length - 1) - t : 0
+          const behind = b.length ? t - b.start(0) : 0
+          const ref = onAirLatency(diagRef.current.label, nowMs)
+          const diff = ref !== null && lat !== null ? lat - ref : null
+          const a = alignTick(align, diff, ahead, behind, nowMs)
+          if (a.seekSec !== null) { video.currentTime = t + a.seekSec; setResyncGen((g) => g + 1) }
+          if (video.playbackRate !== a.rate) video.playbackRate = a.rate
+          if (a.event) reportRef.current("·", `[align] ${a.event} → on-air player`, "align", 0)
+          if (nowMs - alignLogAt >= 30000 && diff !== null && lat !== null && ref !== null) { alignLogAt = nowMs; reportRef.current("·", `[align] latency standby ${lat}ms, on air ${ref}ms, gap ${Math.round(diff)}ms`, "align-sum", 0) }
         } else if (video.playbackRate !== 1) video.playbackRate = 1
+        if (pairAlign && diagRef.current) reportPlayerLatency(diagRef.current.label, lat, diagRef.current.onAir, nowMs)
       }
       last = t
     }, 150)
     return () => {
       window.clearInterval(id)
+      if (pairAlign && diagRef.current) forgetPlayer(diagRef.current.label)
       video.removeEventListener("stalled", onStall)
       video.removeEventListener("waiting", onStall)
       video.removeEventListener("error", onStall)
