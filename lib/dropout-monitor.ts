@@ -10,6 +10,7 @@ import { dlog, type DropLevel } from "@/lib/dropout-log"
 import { relayDir, relayPathsSnapshot } from "@/lib/relay"
 import { rtmpFiles } from "@/lib/encoder"
 import { rttView } from "@/lib/rtt-monitor"
+import { startOutputProbe } from "@/lib/output-probe"
 import { verticalSnapshot, VERTICAL_KBPS, VERTICAL_W, VERTICAL_H } from "@/lib/vertical"
 
 const PATH_LABEL: Record<string, string> = { program: "Main /program", "program-backup": "Backup /program-backup", capture: "Browser capture /capture", slate: "Slate /slate", vertical: "Vertical /vertical" }
@@ -372,6 +373,7 @@ export function startDropoutMonitor(intervalMs = 1000) {
   const s = state()
   if (s.timer) return
   dlog("·", "server", "dropout log started (server up)")
+  startOutputProbe() // read-only /capture probe every 10s (OUTPUT_PROBE=0 = off)
   let busy = false
   s.timer = setInterval(() => {
     if (busy) return
