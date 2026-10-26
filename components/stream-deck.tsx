@@ -1,4 +1,5 @@
 "use client"
+import { useShown } from "@/lib/use-shown"
 
 import { VerticalDeckTile } from "@/components/vertical-output"
 import { armFeed, failoverText, ProgramSourceSwitch, useFailoverEvents } from "@/components/program-source-switch"
@@ -348,6 +349,7 @@ function StreamFrame() {
   const box = useRef<HTMLSpanElement>(null)
   const [scale, setScale] = useState(0.3)
   const resume = useResumeGeneration() // iOS: a backgrounded iframe's players don't come back; remount it
+  const shown = useShown(box) // hidden tab / scrolled away: unmount, so its players stop pulling from MediaMTX
   useEffect(() => {
     const node = box.current
     if (!node) return
@@ -357,7 +359,7 @@ function StreamFrame() {
   }, [])
   return (
     <span ref={box} className="absolute inset-0 block overflow-hidden">
-      <iframe key={resume} data-testid="deck-preview-frame" data-gen={resume} title="/stream preview" src="/stream?mute=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1280, height: 720, transform: `scale(${scale})` }} />
+      {shown ? <iframe key={resume} data-testid="deck-preview-frame" data-gen={resume} title="/stream preview" src="/stream?mute=1" className="pointer-events-none absolute top-0 left-0 origin-top-left border-0" style={{ width: 1280, height: 720, transform: `scale(${scale})` }} /> : null}
     </span>
   )
 }

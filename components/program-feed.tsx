@@ -11,7 +11,7 @@ import { useAutoHide } from "@/components/auto-hide"
 import { whepPathFromHls } from "@/lib/whep-client"
 import { useWhep } from "@/lib/use-whep"
 import { isCapturePage, playerDiag } from "@/lib/player-diag"
-import { holdStandby, keepLoaded, previewDisplay, previewGentle, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
+import { holdStandby, keepLoaded, previewDisplay, previewGentle, previewHlsCaps, previewLight, programDisplay, STALL_HOLD_MS, type ProgramDisplay } from "@/lib/program-display"
 import { muteOnlyAudio } from "@/lib/preview-audio"
 import { programAudioRouted, rampProgramAudio, resetProgramAudio, routeProgramAudio } from "@/lib/switch-crossfade"
 import { frameStateDue, hlsCreated, hlsDestroyed, latencyStateDue, ON_AIR_STUCK_MS, pageHung, playerRebuilt } from "@/lib/page-health"
@@ -50,7 +50,7 @@ function useActiveSince(active: boolean, now: number) {
  * Loads LL-HLS into the <video> while `load`, and reports when the picture last advanced.
  * The element is the same for the player's whole life (WebAudio can attach to it once).
  */
-function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; hold?: boolean; /** /stream only: report to the dropout log (lib/player-diag) */ diag?: { label: string; onAir: boolean }; /** the element is about to go blank (teardown) or is broken (decode error): show the last frame */ onTrouble?: () => void } = {}) {
+function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; light?: boolean; hold?: boolean; /** /stream only: report to the dropout log (lib/player-diag) */ diag?: { label: string; onAir: boolean }; /** the element is about to go blank (teardown) or is broken (decode error): show the last frame */ onTrouble?: () => void } = {}) {
   const troubleRef = useRef(opts.onTrouble)
   useEffect(() => { troubleRef.current = opts.onTrouble })
   const diagRef = useRef(opts.diag)
@@ -126,7 +126,7 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         const tuning = gentle
           ? { lowLatencyMode: false, backBufferLength: 10, liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1 }
           : { lowLatencyMode: true, backBufferLength: 4, liveSyncDurationCount: 1, liveMaxLatencyDurationCount: 4, maxLiveSyncPlaybackRate: 1, liveSyncOnStallIncrease: 0 }
-        hls = new HlsLib({ enableWorker: true, ...tuning, manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
+        hls = new HlsLib({ enableWorker: true, ...tuning, ...previewHlsCaps(opts.light ?? false), manifestLoadingMaxRetry: Infinity, levelLoadingMaxRetry: Infinity, fragLoadingMaxRetry: 6 })
         hlsRef.current = hls
         hlsCreated()
         hls.loadSource(src)
@@ -366,6 +366,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
     touch: muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
     capturePage: isCapturePage(),
   }))
+  const [light] = useState(() => typeof window !== "undefined" && previewLight({ mute: new URLSearchParams(window.location.search).get("mute") === "1", capturePage: isCapturePage() }))
   const label = source === "backup" ? "Backup" : "Main"
   // Last-frame cover: a player rebuild / decode error clears the <video> (black). The last good frame
   // is drawn on a canvas on top until the element shows a new frame, so the output freezes, never blacks.
@@ -399,7 +400,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // standby input in a plain tab, never on the capture page) does not depend on it.
   const shownRef = useRef<ProgramDisplay>("under")
   const maySound = () => programWantsSound({ active: tail || (active && shownRef.current === "video"), hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
-  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, gentle, diag: { label, onAir }, onTrouble: showCover })
+  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, gentle, light, diag: { label, onAir }, onTrouble: showCover })
   // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
   // a decode error (element already blank) still has a frame to hold.
   const [periodic] = useState(() => isCapturePage())
