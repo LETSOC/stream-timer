@@ -273,7 +273,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
     prevAir.current = air.source
     if (from === air.source) return
     const go = !capturePage && pageShouldFade({ ms: crossfadeMs, outAlive: alive[from] && sourceReady[from], outRouted: programAudioRouted(from), inRouted: programAudioRouted(air.source) })
-    playerDiag("·", `[switch] ${go ? `page crossfade ${crossfadeMs}ms` : crossfadeMs > 0 ? "page hard cut (crossfade skipped: old input had no audio or WebAudio not running)" : "page hard cut"} → ${air.source === "main" ? "Main" : "Backup"}`)
+    // Capture page: its sound is the capture script's program-audio mix, which does the crossfade itself
+    // (its own "[capture] [switch] crossfade …" line), so this page never fades and says so.
+    playerDiag("·", `[switch] ${capturePage ? "page picture cut (audio crossfade done by the capture mix)" : go ? `page crossfade ${crossfadeMs}ms` : crossfadeMs > 0 ? "page hard cut (crossfade skipped: old input had no audio or WebAudio not running)" : "page hard cut"} → ${air.source === "main" ? "Main" : "Backup"}`)
     if (!go) { setFade(null); return }
     setFade({ out: from, in: air.source })
     const id = window.setTimeout(() => setFade(null), crossfadeMs + 50) // UI state only; the gain runs on the audio clock
