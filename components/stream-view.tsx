@@ -21,7 +21,7 @@ import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
 import { VisualsLayer } from "@/components/visuals-layer"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
-import { captureStartReady, handoverDone, previewGentle, previewMountSource, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
+import { captureStartReady, handoverDone, previewGentle, previewLight, previewMountSource, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { muteOnlyAudio } from "@/lib/preview-audio"
 import { crossfadeMsOf, pageShouldFade, programAudioRouted } from "@/lib/switch-crossfade"
 import { endCardAt } from "@/lib/transport"
@@ -91,6 +91,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
     touch: muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
     capturePage: isCapturePage(),
   }))
+  // Any muted operator preview (desk too, not only touch): skip the standby input (one player, not two).
+  const [lightPreview] = useState(() => typeof window !== "undefined" && previewLight({ mute: new URLSearchParams(window.location.search).get("mute") === "1", capturePage: isCapturePage() }))
   const hasOverrides = OVERRIDE_KEYS.some((key) => params.get(key))
   const viewKey = params.get("k") ?? ""
   const [blocked, setBlocked] = useState(false)
@@ -306,7 +308,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
       {(["main", "backup"] as const).map((source) => {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
-        if (!previewMountSource({ gentle: gentlePreview, live })) return null
+        if (!previewMountSource({ gentle: gentlePreview || lightPreview, live })) return null
         if (!(sourceReady[source] || (stage.program && live))) return null
         return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || (!isAir && fade?.out !== source)} crossfadeMs={crossfadeMs} tail={fade?.out === source} fadeIn={fade?.in === source} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} />
       })}

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { handoverDone, keepLoaded, diagPrefix, previewGentle, previewMountSource, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
+import { previewLight, previewHlsCaps, previewFrameShown, handoverDone, keepLoaded, diagPrefix, previewGentle, previewMountSource, programDisplay, READY_STALL_TIMEOUT_MS } from "@/lib/program-display"
 
 test("gentle HLS only for touch devices in a muted operator preview, never capture/OBS", () => {
   assert.equal(previewGentle({ mute: true, touch: true, capturePage: false }), true)
@@ -132,4 +132,28 @@ test("capture start: with Program up, the (re)started Browser capture waits for 
   assert.equal(captureStartReady({ ...b, capturePage: false }), true) // OBS Browser Source / plain tab: unchanged
   assert.equal(captureStartReady({ ...b, blocked: true }), true) // the script must still see "View key required"
   assert.ok(CAPTURE_FIRST_FRAME_WAIT_MS < 15_000) // capture-stream.mjs waits 15s for the marker
+})
+
+test("light preview: any ?mute=1 page except Browser capture", () => {
+  assert.equal(previewLight({ mute: true, capturePage: false }), true)
+  assert.equal(previewLight({ mute: false, capturePage: false }), false)
+  assert.equal(previewLight({ mute: true, capturePage: true }), false)
+})
+
+test("light preview skips the standby input; the real output keeps both", () => {
+  assert.equal(previewMountSource({ gentle: true, live: false }), false)
+  assert.equal(previewMountSource({ gentle: false, live: false }), true)
+  assert.equal(previewMountSource({ gentle: true, live: true }), true)
+})
+
+test("preview HLS caps only apply to a light preview", () => {
+  assert.deepEqual(previewHlsCaps(false), {})
+  assert.equal(previewHlsCaps(true).capLevelToPlayerSize, true)
+  assert.ok(Number(previewHlsCaps(true).maxBufferLength) <= 4)
+})
+
+test("preview iframe mounts only on screen in a visible tab", () => {
+  assert.equal(previewFrameShown({ intersecting: true, docVisible: true }), true)
+  assert.equal(previewFrameShown({ intersecting: false, docVisible: true }), false)
+  assert.equal(previewFrameShown({ intersecting: true, docVisible: false }), false)
 })
