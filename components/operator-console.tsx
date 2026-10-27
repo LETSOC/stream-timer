@@ -60,6 +60,7 @@ import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import { PathPanels } from "@/components/path-panels"
 import { SrtOptions } from "@/components/srt-options"
+import { srtLatencyNote } from "@/lib/srt-note"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
@@ -924,7 +925,7 @@ export function OperatorConsole() {
       {syncState === "conflict" ? (
         <div role="alert" data-testid="conflict-banner" className="border-b border-[#b42318]/40 bg-[#b42318]/10 px-4 py-3 font-mono text-[13px] text-[#8a1c13] sm:px-6">
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3">
-            <span>Changed in another tab or device. This tab is not saving, so it can&apos;t overwrite those changes.</span>
+            <span>Changed in another tab or device. This tab is not saving, so it can't overwrite those changes.</span>
             <Pill size="sm" onClick={() => window.location.reload()}>Reload latest</Pill>
           </div>
         </div>
@@ -1065,7 +1066,7 @@ export function OperatorConsole() {
             </div>
               <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
                 <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
-            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
+            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can't show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <p className="font-mono text-[12px] leading-5 text-black/70">
               Pause, play, go live, restore and the break/hold/welcome/end card buttons go to the live /stream straight away. On /stream a break, hold or welcome card beats the end card, which beats the countdown. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
@@ -2048,7 +2049,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
         <ConfirmButton data-testid={tid("stop")} className={pillClass("danger")} disabled={busy !== null || !live} confirmLabel={`Stop ${label.toLowerCase()}? · confirm`} onConfirm={stop}>{busy === "stopping" ? "Stopping…" : "Stop"}</ConfirmButton>
       </div>
       {status.connectError && live && phase !== "connected" ? <p role="alert" data-testid={tid("connect-error")} className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">{status.connectError}{status.restarts > 0 ? ` · retrying (${status.restarts})` : ""}. Not live yet.</p> : null}
-      {phase === "stalled" && live ? <p role="alert" data-testid={tid("stalled")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">ffmpeg is running but hasn&apos;t reported sending video recently. Check the ingest dashboard; Stop and Start again if it&apos;s not live.</p> : null}
+      {phase === "stalled" && live ? <p role="alert" data-testid={tid("stalled")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">ffmpeg is running but hasn't reported sending video recently. Check the ingest dashboard; Stop and Start again if it's not live.</p> : null}
       {status.adopted && live ? <p data-testid={tid("adopted")} className="font-mono text-[13px] text-black/70">Found this stream already running (started before the server restarted). Stop works on it.</p> : null}
       {status.failure && !live ? <p role="alert" data-testid={tid("failure")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">Failed: {status.failure.split("\n").filter(Boolean).slice(-3).join(" · ").slice(0, 400)}</p> : null}
       {message ? <p role="status" data-testid={tid("message")} className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
@@ -2058,8 +2059,9 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: { on: boolean; passphraseSet: boolean; port: number }; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null; srt?: SrtView }
+type SrtView = { on: boolean; passphraseSet: boolean; port: number; latencyMs?: number }
+type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: SrtView; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
@@ -2107,7 +2109,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
           Browser capture: {captureProgramAudio.mixing ? `mixing program audio · peak ${captureProgramAudio.peakDb === null || captureProgramAudio.peakDb === undefined ? "silent" : `${captureProgramAudio.peakDb.toFixed(0)} dBFS`}` : captureProgramAudio.on ? "program on, audio not flowing yet" : "not mixing program audio (screen isn’t program)"}
         </p>
       ) : null}
-      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can&apos;t show it.</p>
+      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can't show it.</p>
       <div className="flex flex-wrap gap-2">
         {program?.armed ? (
           <ConfirmButton data-testid="program-disarm" className={pillClass("danger", "sm")} disabled={busy} confirmLabel="Disarm BOTH? Main and Backup get disconnected · confirm" onConfirm={() => void act({ action: "disarm-program", feed: "both" }, "Disarmed.")}>Disarm both</ConfirmButton>
@@ -2130,10 +2132,11 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. Toggling briefly reconnects OBS. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
       </label>
       {relay?.backup?.lanIngest ? <MdnsRow relay={relay} busy={busy} act={act} /> : null}
+      <SrtFeed feed="main" srt={program?.srt} busy={busy} act={act} />
       {relay?.webrtc ? (
         <label className="flex items-start gap-2 font-mono text-[12px] text-black/70">
           <input type="checkbox" data-testid="webrtc-preview" className="mt-0.5 size-4 shrink-0" checked={relay.webrtc.on} disabled={busy} onChange={(e) => void act({ action: "webrtc-preview", on: e.target.checked }, e.target.checked ? "Fast previews (WebRTC) on." : "Previews use HLS (~3s).")} />
-          <span>Fast previews (WebRTC): desk and deck previews play in under a second (badge LIVE &lt;1s), muted; turning sound on, or any failure, falls back to HLS (~3s). Read-only: nothing can publish over WebRTC. Phones need UDP/TCP {relay.webrtc.icePort} to this Mac{relay.webrtc.iceHost === "127.0.0.1" ? " (now this Mac only: start with BIND_HOST=0.0.0.0)" : ""}; allow mediamtx in the macOS firewall.</span>
+          <span>Fast previews (WebRTC): desk and deck previews play in under a second (badge LIVE <1s), muted; turning sound on, or any failure, falls back to HLS (~3s). Read-only: nothing can publish over WebRTC. Phones need UDP/TCP {relay.webrtc.icePort} to this Mac{relay.webrtc.iceHost === "127.0.0.1" ? " (now this Mac only: start with BIND_HOST=0.0.0.0)" : ""}; allow mediamtx in the macOS firewall.</span>
         </label>
       ) : null}
       {obs ? (
@@ -2163,42 +2166,47 @@ function CredRow({ label, value, copyLabel, testid }: { label: string; value: st
 }
 
 /** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
-/** Optional SRT ingest for the Backup computer (UDP): additive, RTMP keeps working. */
-function SrtBackup({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
-  const srt = relay?.backup?.srt
-  const [srtUrl, setSrtUrl] = useState<{ url: string | null; lan: boolean; port: number; note: string } | null>(null)
+const SRT_FEED = {
+  backup: { action: "srt-backup", reveal: "reveal-backup-srt", tid: "backup-srt", label: "Backup", who: "OBS 2", hint: "for OBS 2 on Wi-Fi" },
+  main: { action: "srt-main", reveal: "reveal-program-srt", tid: "main-srt", label: "Main", who: "the Main encoder", hint: "for OBS / an ATEM with SRT" },
+} as const
+
+/** Optional SRT ingest for Main or Backup (UDP, one shared port, own toggle/passphrase each): additive, RTMP keeps working. */
+function SrtFeed({ feed, srt, busy, act }: { feed: keyof typeof SRT_FEED; srt: SrtView | undefined; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const f = SRT_FEED[feed]
+  const [srtUrl, setSrtUrl] = useState<{ url: string | null; lan: boolean; port: number; latencyMs?: number; note: string } | null>(null)
   const [pp, setPp] = useState("")
   useEffect(() => {
     if (!srtUrl) return
     const id = window.setTimeout(() => setSrtUrl(null), 30_000)
     return () => window.clearTimeout(id)
   }, [srtUrl])
-  if (!srt || relay?.backup?.pullFrom) return null
+  if (!srt) return null
   async function reveal() {
-    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup-srt" }) }).catch(() => null)
+    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: f.reveal }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
     setSrtUrl((await response.json().catch(() => null)) as typeof srtUrl)
   }
   const ppError = pp.trim() && (pp.trim().length < 10 || pp.trim().length > 79) ? "10 to 79 characters" : null
   return (
-    <div data-testid="backup-srt" className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
+    <div data-testid={f.tid} className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
       <label className="flex items-start gap-2">
-        <input type="checkbox" data-testid="backup-srt-on" className="mt-0.5 size-4 shrink-0" checked={srt.on} disabled={busy} onChange={(e) => void act({ action: "srt-backup", on: e.target.checked }, e.target.checked ? `Backup also accepts SRT on UDP ${srt.port}.` : "SRT for Backup is off.")} />
-        <span>Also accept Backup over SRT (UDP {srt.port}) · for OBS 2 on Wi-Fi. RTMP keeps working.</span>
+        <input type="checkbox" data-testid={`${f.tid}-on`} className="mt-0.5 size-4 shrink-0" checked={srt.on} disabled={busy} onChange={(e) => void act({ action: f.action, on: e.target.checked }, e.target.checked ? `${f.label} also accepts SRT on UDP ${srt.port}.` : `SRT for ${f.label} is off.`)} />
+        <span>Also accept {f.label} over SRT (UDP {srt.port}) · {f.hint}. RTMP keeps working.</span>
       </label>
       {srt.on ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <Input data-testid="backup-srt-passphrase" type="password" autoComplete="off" placeholder={srt.passphraseSet ? "passphrase set (hidden) · type a new one" : "SRT passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
-            <Pill size="sm" data-testid="backup-srt-passphrase-save" disabled={busy || !pp.trim() || Boolean(ppError)} onClick={() => { void act({ action: "srt-backup", passphrase: pp.trim() }, "SRT passphrase saved: update OBS 2."); setPp(""); setSrtUrl(null) }}>Set</Pill>
-            {srt.passphraseSet ? <Pill size="sm" tone="outline" data-testid="backup-srt-passphrase-clear" disabled={busy} onClick={() => { void act({ action: "srt-backup", passphrase: "" }, "SRT passphrase removed."); setSrtUrl(null) }}>No passphrase</Pill> : null}
+            <Input data-testid={`${f.tid}-passphrase`} type="password" autoComplete="off" placeholder={srt.passphraseSet ? "passphrase set (hidden) · type a new one" : "SRT passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
+            <Pill size="sm" data-testid={`${f.tid}-passphrase-save`} disabled={busy || !pp.trim() || Boolean(ppError)} onClick={() => { void act({ action: f.action, passphrase: pp.trim() }, `SRT passphrase saved: update ${f.who}.`); setPp(""); setSrtUrl(null) }}>Set</Pill>
+            {srt.passphraseSet ? <Pill size="sm" tone="outline" data-testid={`${f.tid}-passphrase-clear`} disabled={busy} onClick={() => { void act({ action: f.action, passphrase: "" }, "SRT passphrase removed."); setSrtUrl(null) }}>No passphrase</Pill> : null}
           </div>
           {ppError ? <p className="text-[#b42318]">Passphrase: {ppError}</p> : null}
-          <Pill size="sm" tone="outline" data-testid="backup-srt-reveal" onClick={() => (srtUrl ? setSrtUrl(null) : void reveal())}>{srtUrl ? "Hide SRT URL" : "SRT URL for OBS 2"}</Pill>
+          <Pill size="sm" tone="outline" data-testid={`${f.tid}-reveal`} onClick={() => (srtUrl ? setSrtUrl(null) : void reveal())}>{srtUrl ? "Hide SRT URL" : `SRT URL for ${f.who}`}</Pill>
           {srtUrl?.url ? (
-            <div data-testid="backup-srt-obs" className="space-y-1 rounded-lg bg-black/5 p-2">
-              <CredRow label="SRT" value={srtUrl.url} copyLabel="SRT URL for OBS 2" testid="backup-srt-url" />
-              <p className={srtUrl.lan ? "text-black/70" : "text-[#b45309]"}>{srtUrl.note} latency=300000 is 300 ms (µs in OBS); raise to 500000 on bad Wi-Fi. macOS: allow incoming UDP {srtUrl.port} for mediamtx (System Settings › Network › Firewall). Hides in 30s.</p>
+            <div data-testid={`${f.tid}-obs`} className="space-y-1 rounded-lg bg-black/5 p-2">
+              <CredRow label="SRT" value={srtUrl.url} copyLabel={`SRT URL for ${f.who}`} testid={`${f.tid}-url`} />
+              <p className={srtUrl.lan ? "text-black/70" : "text-[#b45309]"}>{srtUrl.note} {srtLatencyNote(srtUrl.latencyMs ?? srt.latencyMs)}. Open UDP {srtUrl.port} in the firewall (macOS: allow incoming connections for mediamtx). Hides in 30s.</p>
             </div>
           ) : srtUrl ? <p className="text-black/70">{srtUrl.note}</p> : null}
         </>
@@ -2245,7 +2253,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
           <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
         </div>
       ) : null}
-      <SrtBackup relay={relay} busy={busy} act={act} />
+      {relay?.backup?.pullFrom ? null : <SrtFeed feed="backup" srt={relay?.backup?.srt} busy={busy} act={act} />}
       <SrtOptions />
       <div className="flex flex-wrap items-center gap-2">
         <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
