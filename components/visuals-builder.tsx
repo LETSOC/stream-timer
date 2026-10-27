@@ -432,7 +432,7 @@ export function VisualsBuilder() {
                       <select data-testid="vb-motion" className={field} value={live?.strapMotion ?? "slide-left"} onChange={(e) => void act({ type: "strap", motion: e.target.value as StrapMotion })}>{STRAP_MOTIONS.map((m) => <option key={m} value={m}>{STRAP_MOTION_LABEL[m]}</option>)}</select></label>
                     <label className="grid gap-1"><Label live>Style override</Label>
                       <select data-testid="vb-style-override" className={field} value={live?.strapStyle ?? ""} onChange={(e) => void act({ type: "strap", style: e.target.value as StrapStyle | "" })}>
-                        <option value="">Each preset's own style</option>
+                        <option value="">Each preset{"'"}s own style</option>
                         {STRAP_STYLES.map((m) => <option key={m} value={m}>{STRAP_STYLE_LABEL[m]}</option>)}
                       </select></label>
                   </>
