@@ -73,7 +73,7 @@ export function useFailoverEvents(last: FailoverEvent | null | undefined, onEven
  * Main / Backup toggle with live status of each input and the auto-failover settings.
  * Used by the desk (Transport) and the phone deck (dark).
  */
-export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark, onArm, dark = false, disabled = false }: {
+export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark, onArm, dark = false, disabled = false, pending = null, onBlocked }: {
   /** Per-feed Disarm/Arm (two taps; on-air disarm warns when the other feed isn't healthy) */
   onArm?: (op: "arm" | "disarm", feed: ArmScope) => void
   /** "⚑ Mark" menu (dropout log markers) next to the inputs */
@@ -84,6 +84,10 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
   onFailover: (patch: Partial<FailoverSettings>) => void
   dark?: boolean
   disabled?: boolean
+  /** A switch to this source is in flight: its button says "Switching…" and both buttons ignore taps. */
+  pending?: ProgramSource | null
+  /** Given: a feed with no signal stays tappable and reports why it can't switch (instead of a silent disabled button). */
+  onBlocked?: (text: string) => void
 }) {
   const f = view?.failover
   const [stall, setStall] = useState<string | null>(null)
@@ -115,7 +119,9 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
           const off = feedDisarmedInView(view, source)
           const stateCls = state === "healthy" ? "bg-[#067647] text-white" : state === "suspect" ? "bg-[#f79009] text-black" : "bg-[#b42318] text-white"
           return (
-            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || dead} data-no-signal={dead || undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} data-armed={armedFor === source ? "1" : undefined} data-disarmed={off || undefined} onClick={() => {
+            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || (dead && !onBlocked)} aria-disabled={(dead && !!onBlocked) || !!pending || undefined} data-no-signal={dead || undefined} data-pending={pending === source ? "1" : undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} data-armed={armedFor === source ? "1" : undefined} data-disarmed={off || undefined} onClick={() => {
+                if (pending) return
+                if (dead) { setArmed(null); onBlocked?.(`${SOURCE_LABEL[source]} has no signal, so it can't go on air. Check OBS is sending to it.`); return }
                 if (on) { onSwitch(source); return }
                 if (armedFor !== source) { setArmed(source); return }
                 setArmed(null)
@@ -123,14 +129,15 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
                 onSwitch(source)
               }}
               onBlur={() => { if (armedFor === source) setArmed(null) }}
-              className={`min-h-16 min-w-0 overflow-hidden rounded-xl px-2.5 py-2 text-left disabled:opacity-50 ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"} ${armedFor === source ? (dark ? "ring-4 ring-[#fdb022] ring-offset-2 ring-offset-[#0b0b0f]" : "ring-2 ring-[#b42318] ring-offset-2") : ""}`}>
+              className={`min-h-16 min-w-0 overflow-hidden rounded-xl px-2.5 py-2 text-left disabled:opacity-50 ${dead && onBlocked ? "opacity-50" : ""} ${on ? (dark ? "bg-[#D9FF43] text-black" : "bg-black text-white") : dark ? "bg-white/10 text-white" : "border border-black/15 bg-white text-black"} ${armedFor === source ? (dark ? "ring-4 ring-[#fdb022] ring-offset-2 ring-offset-[#0b0b0f]" : "ring-2 ring-[#b42318] ring-offset-2") : ""}`}>
               <span className="flex min-w-0 items-center gap-1.5">
                 {view && h?.ready ? <span data-testid={`program-source-${source}-ready`} data-ready={h.readyOk ? "yes" : "no"} title={h.readyOk ? "READY: video + audio, fps stable, data fresh, 48 kHz" : `Not ready: ${h.issues?.join(", ")}`} aria-label={h.readyOk ? "READY" : "not ready"} className={`size-2.5 shrink-0 rounded-full ${h.readyOk ? "bg-[#12b76a]" : "border-2 border-[#f79009]"}`} /> : null}
                 <span className="min-w-0 truncate text-[15px] font-black">{on ? "● " : ""}{SOURCE_LABEL[source]}{source === "backup" && view?.backup.pull ? " (pull)" : ""}</span>
                 {off ? <span data-testid={`program-source-${source}-disarmed`} className="ml-auto shrink-0 rounded border border-current px-1 py-px font-mono text-[9px] font-bold leading-tight text-[#f79009]">DISARMED</span> : null}
                 {view && state && !off ? <span data-testid={`program-source-${source}-state`} data-input-state={state} title={h?.stateReason ?? undefined} className={`ml-auto shrink-0 rounded px-1 py-px font-mono text-[9px] font-bold leading-tight ${stateCls}`}>{STATE_LABEL[state]}</span> : null}
               </span>
-              {armedFor === source ? <span data-testid={`program-source-${source}-confirm`} className={`block font-mono text-[11px] font-bold ${dark ? "text-[#fdb022]" : "text-[#b42318]"}`}>Tap again to switch to {SOURCE_LABEL[source]}</span> : null}
+              {pending === source ? <span data-testid={`program-source-${source}-pending`} className={`block font-mono text-[11px] font-bold ${dark ? "text-[#fdb022]" : "text-[#b54708]"}`}>Switching…</span> : null}
+              {armedFor === source && pending !== source ? <span data-testid={`program-source-${source}-confirm`} className={`block font-mono text-[11px] font-bold ${dark ? "text-[#fdb022]" : "text-[#b42318]"}`}>Tap again to switch to {SOURCE_LABEL[source]}</span> : null}
               <span data-testid={`program-source-${source}-status`} className={`block truncate font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view && off ? "DISARMED · OBS can't publish · Arm below" : view ? (dead ? `no signal · ${st.text}` : h?.ready ? (h.readyOk ? "READY" : `not ready: ${h.issues?.join(", ")}`) : st.text) : "DISARMED · two-tap Arm below"}</span>
               {view && h?.ready ? (
                 <span data-testid={`program-source-${source}-readout`} className="mt-1 grid grid-cols-1 gap-x-1.5 font-mono text-[10px] leading-snug opacity-80 min-[520px]:grid-cols-2">
