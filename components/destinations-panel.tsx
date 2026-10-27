@@ -271,7 +271,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
             <input data-testid="dest-panel-name" className={input} value={form.name} maxLength={60} placeholder="e.g. YouTube main" onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </label>
           <label className="block font-mono text-[12px] font-bold">Server
-            <input data-testid="dest-panel-server" className={input} value={form.server} autoComplete="off" spellCheck={false} placeholder="rtmp://a.rtmp.youtube.com/live2" onChange={(e) => setForm({ ...form, server: e.target.value })} />
+            <input data-testid="dest-panel-server" className={input} value={form.server} autoComplete="off" spellCheck={false} placeholder="rtmp://a.rtmp.youtube.com/live2 or srt://host:8890" onChange={(e) => setForm({ ...form, server: e.target.value })} />
           </label>
           <div className="font-mono text-[12px] font-bold">
             <label htmlFor="dest-panel-key">Stream key</label>
@@ -282,7 +282,7 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
                 {form.showKey ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}
               </button>
             </div>
-            <p className="mt-1 font-normal text-black/60">{form.mode === "edit" ? "Leave blank to keep the existing stream key." : "Leave empty if the Server field already has the full URL."}</p>
+            <p className="mt-1 font-normal text-black/60">{form.mode === "edit" ? "Leave blank to keep the existing stream key." : "Leave empty if the Server field already has the full URL. SRT: paste the whole srt://host:port?streamid=…&latency=…&pkt_size=1316 URL in Server (relay forwards only; streamid and passphrase are kept hidden)."}</p>
           </div>
           {form.mode === "add" ? (
             <fieldset className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-[12px]">
