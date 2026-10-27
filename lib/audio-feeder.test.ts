@@ -80,6 +80,19 @@ test("delay line: exact delay, grow and shrink", () => {
   assert.equal(c[0], 65, "shrinking drops the queue")
 })
 
+test("delay line: fade crossfades a delay change, no jump", () => {
+  const line = createDelayLine({ fadeMs: 1 }) // 48-frame fade
+  const ramp = (from: number, n: number) => Float32Array.from({ length: n * 2 }, (_, i) => from + Math.floor(i / 2) + 1)
+  line.setDelayMs(1) // 48 frames; empty line → applied at once
+  line.process(ramp(0, 96))
+  line.setDelayMs(2) // 96 frames → fade
+  const a = line.process(ramp(96, 96)) as Float32Array
+  for (let i = 1; i < 96; i++) assert.ok(Math.abs(a[i * 2] - a[(i - 1) * 2]) <= 2.01, `step ${i}`)
+  assert.equal(a[95 * 2], 96 - 96 + 96, "after the fade: new delay exactly")
+  const b = line.process(ramp(192, 4)) as Float32Array
+  assert.equal(b[0], 193 - 96)
+})
+
 test("sync beep: 100ms of 1 kHz at each wall second", () => {
   const b = syncBeep(48000, 999_000) as Float32Array
   const on = (ms: number) => Math.abs(b[Math.round((ms * 48)) * 2]) + Math.abs(b[(Math.round(ms * 48) + 6) * 2])
