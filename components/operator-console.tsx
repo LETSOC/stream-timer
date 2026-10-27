@@ -2121,7 +2121,8 @@ type RelayForwardView = { destId: string; name: string; host: string; state: "bl
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
 type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null; srt?: SrtView }
 type SrtView = { on: boolean; passphraseSet: boolean; port: number; latencyMs?: number }
-type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: SrtView; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type CaptureOutView = { on: boolean; passphraseSet: boolean; port: number; latencyMs: number; lan: boolean }
+type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; captureOut?: CaptureOutView; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: SrtView; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
@@ -2275,6 +2276,57 @@ function SrtFeed({ feed, srt, busy, act }: { feed: keyof typeof SRT_FEED; srt: S
   )
 }
 
+/** Outside clients READ /capture over SRT (own read-only login). Any change rewrites MediaMTX's config, so every change is two taps. */
+function CaptureSrtOut({ out, busy, act }: { out: CaptureOutView | undefined; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const [view, setView] = useState<{ url: string | null; server: string | null; streamid: string | null; passphrase: string | null; lan: boolean; port: number; latencyMs: number; note: string } | null>(null)
+  const [pp, setPp] = useState("")
+  useEffect(() => {
+    if (!view) return
+    const id = window.setTimeout(() => setView(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [view])
+  if (!out) return null
+  async function reveal() {
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-capture-srt" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    setView((await response.json().catch(() => null)) as typeof view)
+  }
+  const restart = "Restarts MediaMTX: drops publishers and pushes"
+  const ppError = pp.trim() && (pp.trim().length < 10 || pp.trim().length > 79) ? "10 to 79 characters" : null
+  return (
+    <div data-testid="capture-srt-out" className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
+      <ConfirmButton role="checkbox" aria-checked={out.on} data-testid="capture-srt-out-on" className="flex w-full items-start gap-2 rounded text-left" disabled={busy} confirmLabel={`${restart} · tap again to ${out.on ? "turn off" : "turn on"}`} onConfirm={() => { setView(null); void act({ action: "srt-capture-out", on: !out.on }, out.on ? "SRT read-out of /capture is off." : `/capture can be read over SRT on UDP ${out.port}.`) }}>
+        <span aria-hidden className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border border-black/50 text-[11px] leading-none ${out.on ? "bg-black text-white" : "bg-white"}`}>{out.on ? "✓" : ""}</span>
+        <span>Allow reading the output (/capture) over SRT (UDP {out.port}), with its own read-only login.</span>
+      </ConfirmButton>
+      <p className="text-[#b45309]">Changing this (or its passphrase) restarts MediaMTX and drops current publishers and pushes. Set it before the show.</p>
+      {out.on ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input data-testid="capture-srt-out-passphrase" type="password" autoComplete="off" placeholder={out.passphraseSet ? "passphrase set (hidden) · type a new one" : "read passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
+            <ConfirmButton data-testid="capture-srt-out-passphrase-save" className={pillClass("solid", "sm")} disabled={busy || !pp.trim() || Boolean(ppError)} confirmLabel={`${restart} · confirm`} onConfirm={() => { void act({ action: "srt-capture-out", passphrase: pp.trim() }, "Read passphrase saved: update the readers."); setPp(""); setView(null) }}>Set</ConfirmButton>
+            {out.passphraseSet ? <ConfirmButton data-testid="capture-srt-out-passphrase-clear" className={pillClass("outline", "sm")} disabled={busy} confirmLabel={`${restart} · confirm`} onConfirm={() => { void act({ action: "srt-capture-out", passphrase: "" }, "Read passphrase removed."); setView(null) }}>No passphrase</ConfirmButton> : null}
+          </div>
+          {ppError ? <p className="text-[#b42318]">Passphrase: {ppError}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Pill size="sm" tone="outline" data-testid="capture-srt-out-reveal" onClick={() => (view ? setView(null) : void reveal())}>{view ? "Hide read URL" : "Reveal read URL"}</Pill>
+            <ConfirmButton data-testid="capture-srt-out-rotate" className={pillClass("outline", "sm")} disabled={busy} confirmLabel="New login? Current SRT readers are cut off · confirm" onConfirm={() => { setView(null); void act({ action: "rotate-capture-read" }, "New /capture read login. Reveal it and update the readers.") }}>Regenerate login</ConfirmButton>
+          </div>
+          {view?.url && view.server && view.streamid ? (
+            <div data-testid="capture-srt-out-urls" className="space-y-1 rounded-lg bg-black/5 p-2">
+              <CredRow label="URL" value={view.url} copyLabel="SRT read URL" testid="capture-srt-out-url" />
+              <CredRow label="Server" value={view.server} copyLabel="SRT server" testid="capture-srt-out-server" />
+              <CredRow label="Stream" value={view.streamid} copyLabel="SRT streamid" testid="capture-srt-out-streamid" />
+              {view.passphrase ? <CredRow label="Pass" value={view.passphrase} copyLabel="SRT passphrase" testid="capture-srt-out-pass" /> : null}
+              <p className={view.lan ? "text-black/70" : "text-[#b45309]"}>{view.note} Latency {view.latencyMs} ms ({view.latencyMs * 1000} µs in the URL). Hides in 30s.</p>
+            </div>
+          ) : view ? <p className="text-black/70">{view.note}</p> : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
   const backup = relay?.backup
   const [obs, setObs] = useState<{ server: string; streamKey: string; lanServer?: string | null; mdnsServer?: string | null } | null>(null)
@@ -2403,6 +2455,7 @@ function RelayCardInner() {
               <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (set ${name === "slate" ? "Slate" : "Browser capture"} → Relay)`}</span>
             </div>
             <p className="font-mono text-[12px] text-black/60">Forwards: tick per destination in Saved destinations (right column).</p>
+            {name === "capture" ? <CaptureSrtOut out={relay?.captureOut} busy={busy} act={act} /> : null}
             {info && (info.forwards.length > 0 || info.source) && info.ready ? <DiagnosisLine testid={`relay-diagnosis-${name}`} value={info.diagnosis} /> : null}
             <Pill size="sm" tone="outline" data-testid={`relay-preview-${name}`} aria-pressed={preview === name} disabled={!info?.ready} onClick={() => setPreview(preview === name ? null : name)}>{preview === name ? "Hide preview" : "Preview what the relay receives"}</Pill>
             {preview === name && info?.ready ? (
