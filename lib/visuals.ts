@@ -14,7 +14,8 @@ export const PLATFORMS = ["instagram", "x", "linkedin", "youtube", "tiktok", "we
 export type Platform = (typeof PLATFORMS)[number]
 export const PLATFORM_LABEL: Record<Platform, string> = { instagram: "Instagram", x: "X", linkedin: "LinkedIn", youtube: "YouTube", tiktok: "TikTok", web: "Web", none: "No icon" }
 
-export const CORNERS = ["bottom-left", "top-left", "top-right", "bottom-right"] as const
+/** Screen order (pickers are a 2x2 grid): top left, top right / bottom left, bottom right. */
+export const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const
 export type Corner = (typeof CORNERS)[number]
 export const CORNER_LABEL: Record<Corner, string> = { "bottom-left": "Bottom left", "top-left": "Top left", "top-right": "Top right", "bottom-right": "Bottom right" }
 
@@ -22,6 +23,60 @@ export const STRAP_MODES = ["out", "in", "loop"] as const
 export type StrapMode = (typeof STRAP_MODES)[number]
 
 export type StrapPreset = { id: string; name: string; title: string; handle: string; platform: Platform; style: StrapStyle }
+
+/**
+ * Per-design look (builder › Name strap › Design): name and subline text size (% of the designed size;
+ * the box, padding and accents scale with the name size, the subline lines with the subline size) and
+ * which accents show. An accent that is off is not rendered at all, so the box shrinks to fit.
+ */
+export const STRAP_ACCENTS = ["dot", "arrow", "bar", "live", "icon"] as const
+export type StrapAccent = (typeof STRAP_ACCENTS)[number]
+export const STRAP_ACCENT_LABEL: Record<StrapAccent, string> = { dot: "Accent circle", arrow: "Arrow ↗", bar: "Accent bar", live: "Live dot", icon: "Platform icon" }
+/** Which accents each design has (in the order they are drawn). */
+export const STYLE_ACCENTS: Record<StrapStyle, readonly StrapAccent[]> = { house: ["dot", "arrow", "icon"], line: ["bar", "live", "icon"], block: ["icon"], pill: ["live", "icon"], gradient: ["icon"] }
+export const TEXT_SCALE_RANGE = { min: 50, max: 200 } as const
+export type StrapDesign = { nameSize: number; subSize: number; /** accents switched off (all on by default) */ off: StrapAccent[] }
+export type StrapDesigns = Record<StrapStyle, StrapDesign>
+export const DEFAULT_STRAP_DESIGN: StrapDesign = { nameSize: 100, subSize: 100, off: [] }
+export const DEFAULT_STRAP_DESIGNS: StrapDesigns = Object.fromEntries(STRAP_STYLES.map((s) => [s, DEFAULT_STRAP_DESIGN])) as StrapDesigns
+
+/** Text size %: 50–200, whole numbers; junk falls back. */
+export function clampTextScale(value: unknown, fallback = 100): number {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN
+  if (!Number.isFinite(n)) return fallback
+  return Math.round(Math.min(TEXT_SCALE_RANGE.max, Math.max(TEXT_SCALE_RANGE.min, n)))
+}
+
+/** Junk-tolerant. `legacy` = the old house toggles (strapAccentCircle / strapArrow) for configs saved before designs. */
+export function parseStrapDesigns(value: unknown, legacy: { circle?: boolean; arrow?: boolean } = {}): StrapDesigns {
+  const r = value && typeof value === "object" ? (value as Record<string, unknown>) : null
+  return Object.fromEntries(STRAP_STYLES.map((style) => {
+    const d = r && r[style] && typeof r[style] === "object" ? (r[style] as Record<string, unknown>) : null
+    const off = d && Array.isArray(d.off)
+      ? STYLE_ACCENTS[style].filter((a) => (d.off as unknown[]).includes(a))
+      : style === "house" ? STYLE_ACCENTS.house.filter((a) => (a === "dot" && legacy.circle === false) || (a === "arrow" && legacy.arrow === false)) : []
+    return [style, { nameSize: clampTextScale(d?.nameSize), subSize: clampTextScale(d?.subSize), off }]
+  })) as StrapDesigns
+}
+
+export const strapAccentOn = (design: StrapDesign | undefined, accent: StrapAccent) => !(design?.off ?? []).includes(accent)
+
+/** Toggle one accent of one design (pure). */
+export function toggleStrapAccent(designs: StrapDesigns, style: StrapStyle, accent: StrapAccent): StrapDesigns {
+  const d = designs[style]
+  const off = d.off.includes(accent) ? d.off.filter((a) => a !== accent) : [...d.off, accent]
+  return { ...designs, [style]: { ...d, off: STYLE_ACCENTS[style].filter((a) => off.includes(a)) } }
+}
+
+/** Text size % for the pills and the ticker (builder inspector). 100 = the designed size. */
+export const TEXT_SCALE_PARTS = ["ticker", "talk", "festival", "qa", "sponsor"] as const
+export type TextScalePart = (typeof TEXT_SCALE_PARTS)[number]
+export type TextScale = Record<TextScalePart, number>
+export const DEFAULT_TEXT_SCALE: TextScale = { ticker: 100, talk: 100, festival: 100, qa: 100, sponsor: 100 }
+export function parseTextScale(value: unknown): TextScale {
+  const r = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  return Object.fromEntries(TEXT_SCALE_PARTS.map((k) => [k, clampTextScale(r[k])])) as TextScale
+}
 
 /** Motion timing (ms). In 0.68s cubic-bezier(.16,1,.3,1), out 0.48s. */
 export const STRAP_IN_MS = 680
