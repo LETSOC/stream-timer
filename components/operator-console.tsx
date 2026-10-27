@@ -925,7 +925,7 @@ export function OperatorConsole() {
       {syncState === "conflict" ? (
         <div role="alert" data-testid="conflict-banner" className="border-b border-[#b42318]/40 bg-[#b42318]/10 px-4 py-3 font-mono text-[13px] text-[#8a1c13] sm:px-6">
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3">
-            <span>Changed in another tab or device. This tab is not saving, so it can't overwrite those changes.</span>
+            <span>Changed in another tab or device. This tab is not saving, so it can{"'"}t overwrite those changes.</span>
             <Pill size="sm" onClick={() => window.location.reload()}>Reload latest</Pill>
           </div>
         </div>
@@ -1066,7 +1066,7 @@ export function OperatorConsole() {
             </div>
               <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
                 <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
-            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can't show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
+            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can{"'"}t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <p className="font-mono text-[12px] leading-5 text-black/70">
               Pause, play, go live, restore and the break/hold/welcome/end card buttons go to the live /stream straight away. On /stream a break, hold or welcome card beats the end card, which beats the countdown. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
@@ -2049,7 +2049,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
         <ConfirmButton data-testid={tid("stop")} className={pillClass("danger")} disabled={busy !== null || !live} confirmLabel={`Stop ${label.toLowerCase()}? · confirm`} onConfirm={stop}>{busy === "stopping" ? "Stopping…" : "Stop"}</ConfirmButton>
       </div>
       {status.connectError && live && phase !== "connected" ? <p role="alert" data-testid={tid("connect-error")} className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">{status.connectError}{status.restarts > 0 ? ` · retrying (${status.restarts})` : ""}. Not live yet.</p> : null}
-      {phase === "stalled" && live ? <p role="alert" data-testid={tid("stalled")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">ffmpeg is running but hasn't reported sending video recently. Check the ingest dashboard; Stop and Start again if it's not live.</p> : null}
+      {phase === "stalled" && live ? <p role="alert" data-testid={tid("stalled")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">ffmpeg is running but hasn{"'"}t reported sending video recently. Check the ingest dashboard; Stop and Start again if it{"'"}s not live.</p> : null}
       {status.adopted && live ? <p data-testid={tid("adopted")} className="font-mono text-[13px] text-black/70">Found this stream already running (started before the server restarted). Stop works on it.</p> : null}
       {status.failure && !live ? <p role="alert" data-testid={tid("failure")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">Failed: {status.failure.split("\n").filter(Boolean).slice(-3).join(" · ").slice(0, 400)}</p> : null}
       {message ? <p role="status" data-testid={tid("message")} className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
@@ -2109,7 +2109,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
           Browser capture: {captureProgramAudio.mixing ? `mixing program audio · peak ${captureProgramAudio.peakDb === null || captureProgramAudio.peakDb === undefined ? "silent" : `${captureProgramAudio.peakDb.toFixed(0)} dBFS`}` : captureProgramAudio.on ? "program on, audio not flowing yet" : "not mixing program audio (screen isn’t program)"}
         </p>
       ) : null}
-      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can't show it.</p>
+      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can{"'"}t show it.</p>
       <div className="flex flex-wrap gap-2">
         {program?.armed ? (
           <ConfirmButton data-testid="program-disarm" className={pillClass("danger", "sm")} disabled={busy} confirmLabel="Disarm BOTH? Main and Backup get disconnected · confirm" onConfirm={() => void act({ action: "disarm-program", feed: "both" }, "Disarmed.")}>Disarm both</ConfirmButton>
@@ -2136,7 +2136,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
       {relay?.webrtc ? (
         <label className="flex items-start gap-2 font-mono text-[12px] text-black/70">
           <input type="checkbox" data-testid="webrtc-preview" className="mt-0.5 size-4 shrink-0" checked={relay.webrtc.on} disabled={busy} onChange={(e) => void act({ action: "webrtc-preview", on: e.target.checked }, e.target.checked ? "Fast previews (WebRTC) on." : "Previews use HLS (~3s).")} />
-          <span>Fast previews (WebRTC): desk and deck previews play in under a second (badge LIVE <1s), muted; turning sound on, or any failure, falls back to HLS (~3s). Read-only: nothing can publish over WebRTC. Phones need UDP/TCP {relay.webrtc.icePort} to this Mac{relay.webrtc.iceHost === "127.0.0.1" ? " (now this Mac only: start with BIND_HOST=0.0.0.0)" : ""}; allow mediamtx in the macOS firewall.</span>
+          <span>Fast previews (WebRTC): desk and deck previews play in under a second (badge LIVE {"<"}1s), muted; turning sound on, or any failure, falls back to HLS (~3s). Read-only: nothing can publish over WebRTC. Phones need UDP/TCP {relay.webrtc.icePort} to this Mac{relay.webrtc.iceHost === "127.0.0.1" ? " (now this Mac only: start with BIND_HOST=0.0.0.0)" : ""}; allow mediamtx in the macOS firewall.</span>
         </label>
       ) : null}
       {obs ? (
