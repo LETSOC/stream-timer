@@ -184,7 +184,7 @@ export function VisualsDeck() {
         <details className="mt-2">
           <summary className="cursor-pointer font-mono text-[12px] text-white/60">Style · motion · position</summary>
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <button type="button" disabled={off} aria-pressed={v?.strapStyle === ""} onClick={() => void act({ type: "strap", style: "" })} className={v?.strapStyle === "" ? SEL : PLAIN}>Preset's</button>
+            <button type="button" disabled={off} aria-pressed={v?.strapStyle === ""} onClick={() => void act({ type: "strap", style: "" })} className={v?.strapStyle === "" ? SEL : PLAIN}>Preset{"'"}s</button>
             {STRAP_STYLES.map((st: StrapStyle) => <button key={st} type="button" data-testid={`strap-style-${st}`} disabled={off} aria-pressed={v?.strapStyle === st} onClick={() => void act({ type: "strap", style: st })} className={v?.strapStyle === st ? SEL : PLAIN}>{STRAP_STYLE_LABEL[st]}</button>)}
           </div>
           <div className="mt-2 grid grid-cols-3 gap-2">
