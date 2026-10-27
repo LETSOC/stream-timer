@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react"
 import { forwardStats } from "@/components/destinations-panel"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { handleUnauthorized } from "@/lib/use-operator"
+import { fetchT, keepIfSame } from "@/lib/fetch-timeout"
+import { usePoll } from "@/lib/use-poll"
 
 type Dest = { id: string; name: string; host: string; activateAt?: number | null; timerPath?: "slate" | "capture" | "vertical" | null }
 type Fwd = { destId: string; state: string; reconnects?: number; restarts?: number; health?: { fps?: number | null; kbps?: number | null; speed?: number | null }; error?: string | null }
@@ -45,12 +47,12 @@ export function PathPanels({ dests, onEdit, onDestsChanged }: { dests: Dest[]; o
   const [msg, setMsg] = useState<{ tone: "info" | "error"; text: string } | null>(null)
 
   const load = useCallback(async () => {
-    const r = await fetch("/api/relay", { cache: "no-store" }).catch(() => null)
-    if (!r?.ok) return
+    const r = await fetchT("/api/relay", { cache: "no-store" }).catch(() => null)
+    if (!r?.ok) return false
     const body = await r.json().catch(() => null)
-    if (body?.paths) setRelay(body)
+    if (body?.paths) setRelay((cur) => keepIfSame(cur, body))
   }, [])
-  useEffect(() => { const t = setTimeout(load, 0); const i = setInterval(load, 2000); return () => { clearTimeout(t); clearInterval(i) } }, [load])
+  usePoll(load, 2000)
 
   const [armed, setArmed] = useState<string | null>(null)
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(null), 3000); return () => clearTimeout(t) }, [armed])
@@ -59,7 +61,7 @@ export function PathPanels({ dests, onEdit, onDestsChanged }: { dests: Dest[]; o
     const key = `${path}:${id}`
     setArmed(null)
     setPending((s) => new Set(s).add(key))
-    const r = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "forward", path, destinationId: id, on }) }).catch(() => null)
+    const r = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "forward", path, destinationId: id, on }) }, 30_000).catch(() => null)
     const body = r ? ((await r.json().catch(() => null)) as { error?: string } | null) : null
     setPending((s) => { const n = new Set(s); n.delete(key); return n })
     const error = tickError(name, path, on, r ? { ok: r.ok, status: r.status, error: body?.error ?? null } : null)
@@ -76,7 +78,7 @@ export function PathPanels({ dests, onEdit, onDestsChanged }: { dests: Dest[]; o
 
   const add = async (path: "slate" | "capture" | "vertical") => {
     if (!form.name.trim() || !form.server.trim()) return setMsg({ tone: "error", text: "Name and server required." })
-    const r = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add", name: form.name, url: joinRtmpServerAndKey(form.server, form.key) }) }).catch(() => null)
+    const r = await fetchT("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "add", name: form.name, url: joinRtmpServerAndKey(form.server, form.key) }) }).catch(() => null)
     if (!r) return setMsg({ tone: "error", text: "Could not reach the server." })
     if (handleUnauthorized(r)) return
     const body = await r.json().catch(() => null)
