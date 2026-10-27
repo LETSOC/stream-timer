@@ -21,6 +21,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { destinationFingerprint, directChannelDests, readChannelStatus, killGroup, pidRunsScript, redact, relayChildEnv } from "@/lib/encoder"
 import { listDestinations, resolveDestination, setDestinationTimer } from "@/lib/rtmp-destinations"
+import { listProcesses } from "@/lib/proc-list"
 import { diagnose, EMPTY_HEALTH, healthFromSamples, parseProgressBlocks, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 
 export const RELAY_PATHS = ["slate", "capture", "vertical"] as const
@@ -437,9 +438,10 @@ export function parseRelayLoops(psOutput: string, loopPath: string): OwnRelayLoo
   }
   return found
 }
+/** Our relay loops, live (not cached: the kill paths depend on it). /proc on Linux, `ps` on macOS (lib/proc-list). */
 export function findRelayLoops(): OwnRelayLoop[] {
-  const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
-  return result.status === 0 ? parseRelayLoops(result.stdout, LOOP()) : []
+  const list = listProcesses()
+  return list !== null ? parseRelayLoops(list, LOOP()) : []
 }
 /** Process groups the stray-publisher scan must ignore (our forwards publish over RTMP). */
 export function relayProcessGroups(): number[] {
