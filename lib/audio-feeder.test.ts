@@ -93,6 +93,20 @@ test("delay line: fade crossfades a delay change, no jump", () => {
   assert.equal(b[0], 193 - 96)
 })
 
+test("delay line: a delay change during a fade waits for it (regression: re-trigger jumped)", () => {
+  const line = createDelayLine({ fadeMs: 2 }) // 96-frame fade
+  let t = 0
+  const tone = (n: number) => { const a = new Float32Array(n * 2); for (let i = 0; i < n; i++, t++) a[i * 2] = a[i * 2 + 1] = Math.sin((2 * Math.PI * 440 * t) / 48000); return a }
+  line.process(tone(4800))
+  let prev = NaN, worst = 0
+  for (let b = 0; b < 40; b++) {
+    line.setDelayMs(b % 2 ? 10 : 47) // wobbles > 20ms every 20-frame block, like a loaded server
+    const o = line.process(tone(20)) as Float32Array
+    for (let i = 0; i < 20; i++) { if (!Number.isNaN(prev)) worst = Math.max(worst, Math.abs(o[i * 2] - prev)); prev = o[i * 2] }
+  }
+  assert.ok(worst < 0.12, `largest sample step ${worst.toFixed(3)} (a 440 Hz sine moves at most 0.058)`)
+})
+
 test("sync beep: 100ms of 1 kHz at each wall second", () => {
   const b = syncBeep(48000, 999_000) as Float32Array
   const on = (ms: number) => Math.abs(b[Math.round((ms * 48)) * 2]) + Math.abs(b[(Math.round(ms * 48) + 6) * 2])
