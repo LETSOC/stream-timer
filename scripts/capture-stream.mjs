@@ -422,6 +422,7 @@ function takeProgram(n) {
   return splice(readProgramFrames(consume), n, d, fade)
 }
 const GAIN_STEP = 1 / (0.2 * RATE)
+let bedDelaySet = false // first bed delay is applied at once; later ones need >20ms change
 let bedLine = null // delay line (screencast lag + positive trim), created with the feeder
 /** `wallMs` = timeline time of the first frame (beeps of the sync test line up with the flashes). */
 function pcmBlock(n, wallMs) {
@@ -439,8 +440,9 @@ function pcmBlock(n, wallMs) {
     }
   }
   const wantBed = Math.max(0, screencastLag() + Math.max(0, sync.trimMs))
-  const curBed = bedLine.delayMs()
-  bedLine.setDelayMs(Math.abs(wantBed - curBed) < 15 ? wantBed : curBed + Math.sign(wantBed - curBed) * Math.min(15, Math.abs(wantBed - curBed)))
+  // Hysteresis: lag wobbles a few ms every block on a busy box; only move the bed when off by >20ms
+  // (the delay line then crossfades old→new instead of jumping, so no click).
+  if (!bedDelaySet || Math.abs(wantBed - bedLine.delayMs()) > 20) { bedLine.setDelayMs(wantBed); bedDelaySet = true }
   const bed = bedLine.process(feeder ? feeder.readFloat(n, wallMs) : new Float32Array(n * 2))
   // Showreel: off Program only; same picture delay as the page program path. Bed ducks while it flows.
   const reel = prog.wanted ? (reelQ.bytes ? clearShowreel(reelQ) : undefined, null) : takeShowreel(reelQ, n, Math.max(35, Math.min(1500, PAGE_AV_BASE_MS + screencastLag() + sync.trimMs)))
@@ -483,7 +485,7 @@ delete childEnv.PROGRAM_READ_FILE
 
 // Stream audio, hot-swappable while live (scripts/audio-feeder.mjs; silence if no settings file).
 const feeder = createAudioFeeder({ liveFile: process.env.AUDIO_LIVE_FILE || "", appliedFile: process.env.AUDIO_APPLIED_FILE || "", ffmpegBin, env: childEnv, log })
-bedLine = createDelayLine()
+bedLine = createDelayLine({ fadeMs: 25 })
 
 let browser = null
 let ffmpeg = null
