@@ -275,11 +275,12 @@ export function StreamDeck() {
       <div className="grid grid-cols-2 gap-2">
         {(["countdown", ...CARD_OVERLAYS] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
         {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : screen === "end" ? "Program · end card over it (tap to stay on)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
-        {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn&apos;t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
-        {state?.programSources ? (
+        {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn't sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
+        {/* Always shown (like the desk): disarmed feeds stay visible with a two-tap Arm, even with both off. */}
+        {state ? (
           <div className="col-span-2 mt-1">
             <h2 className="mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Program source</h2>
-            <ProgramSourceSwitch dark view={state.programSources} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => setToast({ tone: r.ok ? "ok" : "error", text: r.text })) }} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
+            <ProgramSourceSwitch dark view={state.programSources ?? null} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => setToast({ tone: r.ok ? "ok" : "error", text: r.text })) }} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
           </div>
         ) : null}
         {state?.programSources ? <LanIngestInfo /> : null}
