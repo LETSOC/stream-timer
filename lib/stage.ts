@@ -6,7 +6,7 @@ import { CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize } from "@/lib/countdown-
 import { DEFAULT_LOGOS, DEFAULT_QR, DEFAULT_SCENES, SCENE_IDS, parseLogoIds, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_LAYOUT, parseVisualsLayout, type VisualsLayout } from "@/lib/visuals-layout"
 import { safeUrl, sanitizeSpeakers, type SpeakerCard } from "@/lib/event"
-import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
+import { clampHold, clampInset, DEFAULT_STRAPS, parseCorner, parseStrapMode, parseStrapMotion, sanitizeStraps, sanitizeTickerItems, parseTalkMode, parseTalkTimer, parseTickerType, visualText, STRAP_STYLES, DEFAULT_STRAP_DESIGNS, DEFAULT_TEXT_SCALE, parseStrapDesigns, parseTextScale, type StrapDesigns, type TextScale, type TalkMode, type TickerType, type Corner, type StrapMode, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
 export type StageOptions = {
   /** /stream audio routing (what plays in the page itself: interactive viewers and OBS browser source) */
@@ -29,6 +29,10 @@ export type StageOptions = {
   /** House strap: pulsing white accent circle and the ↗ arrow badge (design toggles). Saved. */
   strapAccentCircle: boolean
   strapArrow: boolean
+  /** Builder › Name strap › Design: per-design name/subline size and accents. Saved. */
+  strapDesigns: StrapDesigns
+  /** Builder: text size % for the ticker, talk/festival pill, Q&A and Sponsored pills. Saved. */
+  textScale: TextScale
   /** Logos 1–5 (builder › Save): source (built-in / uploaded / pasted SVG), colour, caption text. */
   logos: Logos
   /** Live (deck): which logos show. */
@@ -160,6 +164,8 @@ export const DEFAULT_STAGE: StageOptions = {
   strapText: "#ffffff",
   strapAccentCircle: true,
   strapArrow: true,
+  strapDesigns: DEFAULT_STRAP_DESIGNS,
+  textScale: DEFAULT_TEXT_SCALE,
   logos: DEFAULT_LOGOS,
   logosOn: [],
   qr: DEFAULT_QR,
@@ -300,6 +306,9 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     strapText: pick("strapText", (v, f) => hexColor(v, f)),
     strapAccentCircle: pick("strapAccentCircle", (v) => v !== false),
     strapArrow: pick("strapArrow", (v) => v !== false),
+    // Before designs existed the house toggles were strapAccentCircle / strapArrow: they seed the house design.
+    strapDesigns: has("strapDesigns") ? parseStrapDesigns(r.strapDesigns) : has("strapAccentCircle") || has("strapArrow") ? { ...base.strapDesigns, house: { ...base.strapDesigns.house, off: parseStrapDesigns(undefined, { circle: r.strapAccentCircle !== false, arrow: r.strapArrow !== false }).house.off } } : base.strapDesigns,
+    textScale: pick("textScale", (v) => parseTextScale(v)),
     logos: pick("logos", (v, f) => parseLogos(v, f)),
     logosOn: pick("logosOn", (v) => parseLogoIds(v)),
     qr: pick("qr", (v, f) => parseQr(v, f)),
