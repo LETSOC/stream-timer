@@ -8,6 +8,7 @@ import { programReadFile, relayForwardFingerprints, relayProcessGroups } from "@
 import { listProcesses, processCommand } from "@/lib/proc-list";
 import { audioHash, prepareChannelAudio, readAppliedAudio, readAudioSettings, type AudioMode } from "@/lib/audio-bed";
 import { captureSourceHealth, EMPTY_HEALTH, healthFromSamples, parseStatsLines, type CaptureSourceStats, type HealthStats, type SourceHealth } from "@/lib/stream-health";
+import { isSrtUrl, redactSrt } from "@/lib/srt-destination";
 
 export const ROOT = process.cwd();
 // Overridable so the lifecycle tests can use a temp dir and fake scripts.
@@ -46,11 +47,11 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Hides passwords and stream keys: everything after the host in an rtmp(s) URL, plus any password= value. */
+/** Hides passwords and stream keys: everything after the host in an rtmp(s) URL, plus any password= value; SRT streamid/passphrase too. */
 export function redact(text: string): string {
-  return text
+  return redactSrt(text
     .replace(/(rtmps?:\/\/[^\s/'"]+)\/[^\s'"]*/gi, "$1/••••")
-    .replace(/(password=)[^\s&'"]+/gi, "$1••••");
+    .replace(/(password=)[^\s&'"]+/gi, "$1••••"));
 }
 
 /** Child processes never need the encoder token. */
@@ -803,6 +804,7 @@ export function startRtmpStream(input: StartInput, rtmpUrl: string, now = Date.n
 async function startRtmpStreamUnlocked(input: StartInput, rtmpUrl: string, source: RtmpSource = { kind: "slate" }): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
   const ch: RtmpChannel = source.kind
   const files = rtmpFiles(ch)
+  if (isSrtUrl(rtmpUrl)) return { ok: false, error: "SRT destinations work as relay forwards only: set this channel to Relay, then tick the destination under its relay path.", status: 400 }
   const checked = validateRtmpUrl(rtmpUrl)
   if (!checked.ok) return { ok: false, error: checked.error, status: 400 }
   const url = checked.url
