@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { allowedRtmpHost, DATA_DIR, validateRtmpUrl } from "@/lib/encoder"
 import { joinRtmpServerAndKey, maskRtmpDisplay, splitRtmpUrl } from "@/lib/rtmp-join"
+import { isSrtUrl, maskSrtUrl, srtHostUrl, validateSrtUrl } from "@/lib/srt-destination"
 
 /**
  * Named RTMP destinations, stored server-side in data/rtmp-destinations.json (0600, gitignored with /data/).
@@ -59,7 +60,10 @@ export function maskRtmpUrl(url: string): { host: string; masked: string } {
 }
 
 function mask(item: Destination): MaskedDestination {
-  return { id: item.id, name: item.name, createdAt: item.createdAt, updatedAt: item.updatedAt ?? null, activateAt: item.activateAt ?? null, timerPath: item.timerPath ?? null, display: maskRtmpDisplay(item.url), ...maskRtmpUrl(item.url) }
+  const base = { id: item.id, name: item.name, createdAt: item.createdAt, updatedAt: item.updatedAt ?? null, activateAt: item.activateAt ?? null, timerPath: item.timerPath ?? null }
+  // SRT: the secret is in streamid/passphrase (masked); latency/pkt_size stay readable.
+  if (isSrtUrl(item.url)) return { ...base, ...maskSrtUrl(item.url) }
+  return { ...base, display: maskRtmpDisplay(item.url), ...maskRtmpUrl(item.url) }
 }
 
 export function listDestinations(): { selectedId: string | null; selectedCaptureId: string | null; items: MaskedDestination[] } {
@@ -83,7 +87,7 @@ export function addDestination(rawName: unknown, rawUrl: unknown, now = Date.now
   const store = read()
   const item: Destination = { id: crypto.randomUUID(), name, url: checked.value, createdAt: now }
   store.items.push(item)
-  if (!store.selectedId) store.selectedId = item.id
+  if (!store.selectedId && !isSrtUrl(item.url)) store.selectedId = item.id // SRT is relay-forward only, never a direct pick
   write(store)
   return { ok: true, value: mask(item) }
 }
@@ -99,9 +103,18 @@ export function renameDestination(id: unknown, rawName: unknown): Result<MaskedD
   return { ok: true, value: mask(item) }
 }
 
-/** Shared by add/update: rtmp:// or rtmps:// only (javascript:, http:, file: … refused), allow-listed host. */
+/**
+ * Shared by add/update: rtmp://, rtmps:// or srt:// only (javascript:, http:, file: … refused), allow-listed host.
+ * SRT hosts go through the same RTMP_ALLOWED_HOSTS list ("*" = any; unset = LAN/private + known providers).
+ */
 function checkUrl(raw: string): Result<string> {
-  if (/^\s*srt:/i.test(raw)) return { ok: false, error: "SRT destinations aren't supported: forwards publish RTMP. Use the service's rtmp:// or rtmps:// ingest.", status: 400 }
+  if (/^\s*srt:/i.test(raw)) {
+    const srt = validateSrtUrl(raw)
+    if (!srt.ok) return { ok: false, error: srt.error, status: 400 }
+    const hostUrl = srtHostUrl(srt.url)
+    if (!hostUrl || !allowedRtmpHost(hostUrl)) return { ok: false, error: "That SRT host is not in RTMP_ALLOWED_HOSTS (SRT destinations use the same list; add the host, or * for any).", status: 400 }
+    return { ok: true, value: srt.url }
+  }
   const checked = validateRtmpUrl(raw)
   if (!checked.ok) return { ok: false, error: checked.error, status: 400 }
   if (!allowedRtmpHost(checked.url)) return { ok: false, error: "That RTMP host is not in RTMP_ALLOWED_HOSTS.", status: 400 }
@@ -152,7 +165,8 @@ export function destinationEditInfo(id: unknown): { id: string; name: string; se
   const item = read().items.find((entry) => entry.id === id)
   if (!item) return null
   const { server, key } = splitRtmpUrl(item.url)
-  return { id: item.id, name: item.name, server, keyTail: key.length > 6 ? key.slice(-4) : "", keyKind: !key ? "none" : key.startsWith("?") ? "query" : "path", activateAt: item.activateAt ?? null, timerPath: item.timerPath ?? null }
+  // SRT: server = srt://host:port, key = "?streamid=…" (no tail: its end is often the passphrase).
+  return { id: item.id, name: item.name, server, keyTail: key.length > 6 && !isSrtUrl(item.url) ? key.slice(-4) : "", keyKind: !key ? "none" : key.startsWith("?") ? "query" : "path", activateAt: item.activateAt ?? null, timerPath: item.timerPath ?? null }
 }
 
 export function deleteDestination(id: unknown): Result<null> {
@@ -160,7 +174,7 @@ export function deleteDestination(id: unknown): Result<null> {
   const before = store.items.length
   store.items = store.items.filter((entry) => entry.id !== id)
   if (store.items.length === before) return { ok: false, error: "No such destination.", status: 404 }
-  if (store.selectedId === id) store.selectedId = store.items[0]?.id ?? null
+  if (store.selectedId === id) store.selectedId = store.items.find((entry) => !isSrtUrl(entry.url))?.id ?? null
   if (store.selectedCaptureId === id) store.selectedCaptureId = null
   write(store)
   return { ok: true, value: null }
@@ -169,6 +183,7 @@ export function deleteDestination(id: unknown): Result<null> {
 export function selectDestination(id: unknown, channel: "slate" | "capture" = "slate"): Result<null> {
   const store = read()
   if (id !== null && id !== RELAY_TARGET && !store.items.some((entry) => entry.id === id)) return { ok: false, error: "No such destination.", status: 404 }
+  if (store.items.some((entry) => entry.id === id && isSrtUrl(entry.url))) return { ok: false, error: "SRT destinations work as relay forwards only: pick Relay for this channel, then tick the destination under its relay path.", status: 400 }
   if (channel === "capture") store.selectedCaptureId = id as string | null
   else store.selectedId = id as string | null
   write(store)
