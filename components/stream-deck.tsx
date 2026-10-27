@@ -275,7 +275,7 @@ export function StreamDeck() {
       <div className="grid grid-cols-2 gap-2">
         {(["countdown", ...CARD_OVERLAYS] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
         {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : screen === "end" ? "Program · end card over it (tap to stay on)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
-        {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn't sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
+        {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn{"'"}t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
         {/* Always shown (like the desk): disarmed feeds stay visible with a two-tap Arm, even with both off. */}
         {state ? (
           <div className="col-span-2 mt-1">
