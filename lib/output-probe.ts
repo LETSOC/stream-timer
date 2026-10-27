@@ -1,7 +1,7 @@
 /**
  * Output probe (read-only): every 10s, while Browser capture is running, one short ffprobe read (~4s)
  * of what the capture actually publishes on the relay (/capture), logged to the dropout log as fps,
- * A/V PTS gap, keyframe interval and bitrate. One extra MediaMTX reader; nothing else about the relay
+ * A/V interleave gap, keyframe interval and bitrate. One extra MediaMTX reader; nothing else about the relay
  * changes. Separate process, never awaited by capture; skipped while the previous probe still runs.
  * OUTPUT_PROBE=0 turns it off.
  */
@@ -15,46 +15,53 @@ export const OUTPUT_PROBE_MS = 10_000
 export const PROBE_READ_S = 4 // 2s GOP: always at least two keyframes in the read
 export const AV_GAP_FLAG_MS = 80
 
-export type ProbeResult = { fps: number | null; avGapMs: number | null; keyframeS: number | null; kbps: number | null; video: number; audio: number }
+export type ProbeResult = { fps: number | null; gapMs: number | null; keyframeS: number | null; kbps: number | null; video: number; audio: number }
 
-/** Pure: ffprobe `-show_entries packet=codec_type,pts_time,size,flags -of compact=p=0` output → numbers. */
+/**
+ * Pure: ffprobe `-show_entries packet=codec_type,pts_time,size,flags -of compact=p=0` output → numbers.
+ * A fresh RTMP reader gets audio at once but video only from the next keyframe, so everything before the
+ * first video keyframe is dropped (it made a 0–2s "gap" that just showed where in the GOP the read began).
+ * Audio counts toward the bitrate only inside the video's time span. gapMs = interleave gap at the end of the read: how
+ * far the last audio and video timestamps are apart. It is NOT a content A/V sync measurement (use the
+ * desk's A/V sync test for that).
+ */
 export function parseProbePackets(text: string): ProbeResult {
-  const v: number[] = []
-  const a: number[] = []
-  const keys: number[] = []
-  let bytes = 0
+  const pk: { type: "video" | "audio"; pts: number; size: number; key: boolean }[] = []
   for (const line of text.split("\n")) {
     const f: Record<string, string> = {}
     for (const kv of line.trim().split("|")) { const i = kv.indexOf("="); if (i > 0) f[kv.slice(0, i)] = kv.slice(i + 1) }
     const pts = Number(f.pts_time)
     if (!Number.isFinite(pts) || (f.codec_type !== "video" && f.codec_type !== "audio")) continue
-    bytes += Number(f.size) || 0
-    if (f.codec_type === "audio") { a.push(pts); continue }
-    v.push(pts)
-    if ((f.flags ?? "").startsWith("K")) keys.push(pts)
+    pk.push({ type: f.codec_type, pts, size: Number(f.size) || 0, key: f.codec_type === "video" && (f.flags ?? "").startsWith("K") })
   }
-  const span = (xs: number[]) => (xs.length > 1 ? Math.max(...xs) - Math.min(...xs) : 0)
-  const vSpan = span(v)
-  const allSpan = span([...v, ...a])
+  const keyPts = pk.filter((p) => p.key).map((p) => p.pts)
+  const allV = pk.filter((p) => p.type === "video").map((p) => p.pts)
+  // From the first video keyframe on (no keyframe in the read: from the first video packet).
+  const from = keyPts.length ? Math.min(...keyPts) : allV.length ? Math.min(...allV) : -Infinity
+  const vp = pk.filter((p) => p.type === "video" && p.pts >= from)
+  const v = vp.map((p) => p.pts)
+  const vMin = v.length ? Math.min(...v) : 0
+  const vMax = v.length ? Math.max(...v) : 0
+  const AUDIO_SLACK_S = 0.05 // one AAC frame is ~21ms
+  const ap = pk.filter((p) => p.type === "audio" && (!v.length || (p.pts >= vMin && p.pts <= vMax + AUDIO_SLACK_S)))
+  const a = ap.map((p) => p.pts)
+  const vSpan = v.length > 1 ? vMax - vMin : 0
   const fps = vSpan > 0 ? +((v.length - 1) / vSpan).toFixed(1) : null
-  // A/V PTS gap: how far the two streams' timestamps are apart at the start and at the end of the read.
-  let avGapMs: number | null = null
-  if (v.length && a.length) {
-    const start = Math.abs(Math.min(...v) - Math.min(...a))
-    const end = Math.abs(Math.max(...v) - Math.max(...a))
-    avGapMs = Math.round(Math.max(start, end) * 1000)
-  }
-  const ks = [...keys].sort((x, y) => x - y)
+  // End of the read: last video vs last audio (audio from the first keyframe on, either side of the video end).
+  const aEnd = pk.filter((p) => p.type === "audio" && p.pts >= from).map((p) => p.pts)
+  const gapMs = v.length && aEnd.length && a.length ? Math.round(Math.abs(vMax - Math.max(...aEnd)) * 1000) : null
+  const ks = keyPts.filter((k) => k >= from).sort((x, y) => x - y)
   const keyframeS = ks.length > 1 ? +((ks[ks.length - 1] - ks[0]) / (ks.length - 1)).toFixed(2) : null
-  const kbps = allSpan > 0 ? Math.round((bytes * 8) / allSpan / 1000) : null
-  return { fps, avGapMs, keyframeS, kbps, video: v.length, audio: a.length }
+  const bytes = [...vp, ...ap].reduce((n, p) => n + p.size, 0)
+  const kbps = vSpan > 0 ? Math.round((bytes * 8) / vSpan / 1000) : null
+  return { fps, gapMs, keyframeS, kbps, video: v.length, audio: pk.filter((p) => p.type === "audio").length }
 }
 
-/** Pure: the dropout line for one probe (level "!" when the A/V gap is over 80ms). */
+/** Pure: the dropout line for one probe (level "!" when the interleave gap is over 80ms). */
 export function probeLine(r: ProbeResult): { level: "!" | "·"; text: string } {
   const q = (x: number | null, unit: string) => (x === null ? "?" : `${x}${unit}`)
-  const gapBad = r.avGapMs !== null && r.avGapMs > AV_GAP_FLAG_MS
-  const text = `output probe (/capture): ${q(r.fps, "fps")} · A/V pts gap ${q(r.avGapMs, "ms")}${gapBad ? ` (over ${AV_GAP_FLAG_MS}ms)` : ""} · keyframe every ${q(r.keyframeS, "s")} · ${q(r.kbps, "kbps")}${r.audio === 0 ? " · no audio packets" : ""}`
+  const gapBad = r.gapMs !== null && r.gapMs > AV_GAP_FLAG_MS
+  const text = `output probe (/capture): ${q(r.fps, "fps")} · interleave gap ${q(r.gapMs, "ms")}${gapBad ? ` (over ${AV_GAP_FLAG_MS}ms)` : ""} · keyframe every ${q(r.keyframeS, "s")} · ${q(r.kbps, "kbps")}${r.audio === 0 ? " · no audio packets" : ""}`
   return { level: gapBad || r.audio === 0 || r.video === 0 ? "!" : "·", text }
 }
 
