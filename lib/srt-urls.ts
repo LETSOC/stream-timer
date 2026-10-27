@@ -1,17 +1,18 @@
 /**
  * SRT URL builders for the desk.
  *
- * MediaMTX SRT (port 8890, when srtBackup is on):
+ * MediaMTX SRT (one UDP port, 8890 or SRT_PORT; Main and Backup each have their own toggle):
  *   Main:   srt://<host>:8890?streamid=publish:program:<user>:<pass>&latency=300000&pkt_size=1316
  *   Backup: srt://<host>:8890?streamid=publish:program-backup:<user>:<pass>&latency=300000&pkt_size=1316
+ * latency is µs: SRT_LATENCY_MS (default 300) × 1000.
  *
  * SRS (parallel, docker, ports 19360 RTMP / 10080 SRT — not controlled by the app):
  *   RTMP: rtmp://<host>:19360/live  key backup2
  *   SRT:  srt://<host>:10080?streamid=#!::r=live/backup2,m=publish&latency=300000
  */
-import { credentials, lanIp, PROGRAM_PATH, readSettings, SRT_LATENCY_US, srtPort } from "@/lib/relay"
+import { credentials, lanIp, PROGRAM_PATH, readSettings, srtLatencyMs, srtLatencyUs, srtObsUrl, srtPort } from "@/lib/relay"
 
-export type SrtReveal = { url: string | null; lan: boolean; port: number; note: string }
+export type SrtReveal = { url: string | null; lan: boolean; port: number; latencyMs: number; note: string }
 
 /** Build a MediaMTX-style SRT publish URL. */
 export function buildMediamtxSrtUrl(input: {
@@ -24,30 +25,35 @@ export function buildMediamtxSrtUrl(input: {
   passphrase?: string
 }): string {
   const sid = `publish:${input.path}:${input.user}:${input.pass}`
-  const lat = input.latencyUs ?? SRT_LATENCY_US
+  const lat = input.latencyUs ?? srtLatencyUs()
   const pp = input.passphrase ? `&passphrase=${input.passphrase}` : ""
   return `srt://${input.host}:${input.port}?streamid=${sid}&latency=${lat}&pkt_size=1316${pp}`
 }
 
 /** Build an SRS-style SRT publish URL (streamid format differs). */
-export function buildSrsSrtUrl(host: string, key = "backup2", port = 10080, latencyUs = SRT_LATENCY_US): string {
+export function buildSrsSrtUrl(host: string, key = "backup2", port = 10080, latencyUs = srtLatencyUs()): string {
   return `srt://${host}:${port}?streamid=#!::r=live/${key},m=publish&latency=${latencyUs}`
 }
 
 /**
- * Main SRT URL for OBS (MediaMTX, same port as Backup SRT).
- * Requires srtBackup on (the SRT listener is shared). Uses the program credentials.
+ * Pure: Main SRT reveal from settings + credentials. Main has its own toggle and passphrase; the
+ * listener (UDP port) is shared with Backup SRT. Host: the LAN/public IP while LAN ingest is on.
  */
+export function mainSrtReveal(input: { srtMain: boolean; passphrase: string; lanIngest: boolean; lanHost: string | null; user?: string; pass?: string; port: number; latencyMs: number }): SrtReveal {
+  const { port, latencyMs } = input
+  if (!input.srtMain) return { url: null, lan: false, port, latencyMs, note: "SRT for Main is off. Tick ‘Also accept Main over SRT’ first." }
+  const host = input.lanIngest ? (input.lanHost ?? "127.0.0.1") : "127.0.0.1"
+  const lan = host !== "127.0.0.1"
+  if (!input.user || !input.pass) return { url: null, lan, port, latencyMs, note: "No Main credentials yet. Arm the program feed first." }
+  const url = srtObsUrl({ host, port, path: PROGRAM_PATH, user: input.user, pass: input.pass, passphrase: input.passphrase, latencyUs: latencyMs * 1000 })
+  return { url, lan, port, latencyMs, note: lan ? "OBS / encoder: Settings › Stream › Custom, paste as Server, leave Stream Key blank." : "Main SRT (this machine only). Turn on LAN ingest so an encoder on another machine can reach SRT." }
+}
+
+/** Main SRT URL for OBS / an SRT encoder (operator-only reveal; never in status or logs). */
 export function programSrtUrl(): SrtReveal {
   const s = readSettings()
   const c = credentials()
-  const port = srtPort()
-  if (!s.srtBackup) return { url: null, lan: false, port, note: "SRT is off. Tick ‘Also accept Backup over SRT’ first (the listener is shared)." }
-  const host = s.lanIngest ? (lanIp() ?? "127.0.0.1") : "127.0.0.1"
-  const lan = host !== "127.0.0.1"
-  if (!c.programUser || !c.programPass) return { url: null, lan, port, note: "No Main credentials yet. Arm the program feed first." }
-  const url = buildMediamtxSrtUrl({ host, port, path: PROGRAM_PATH, user: c.programUser, pass: c.programPass, passphrase: s.srtPassphrase || undefined })
-  return { url, lan, port, note: lan ? "Main SRT (LAN)." : "Main SRT (this machine only). Turn on LAN ingest for the other computer." }
+  return mainSrtReveal({ srtMain: s.srtMain, passphrase: s.srtMainPassphrase, lanIngest: s.lanIngest, lanHost: s.lanIngest ? lanIp() : null, user: c.programUser, pass: c.programPass, port: srtPort(), latencyMs: srtLatencyMs() })
 }
 
 /** SRS option URLs (parallel ingest, not MediaMTX). Returns null host if LAN IP unknown. */
