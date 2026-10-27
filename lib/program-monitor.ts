@@ -20,6 +20,7 @@ import { BACKUP_PATH, PROGRAM_PATH, relayReadUrl } from "@/lib/relay"
 import { readChannelStatus } from "@/lib/encoder"
 import { changeLogger, plog, PROGRAM_LOG_VERBOSE } from "@/lib/program-log"
 import { dlog } from "@/lib/dropout-log"
+import { probeAfterSwitch } from "@/lib/output-probe"
 import { disarmPlan, FEED_LABEL, other, type ArmScope, type Feed } from "@/lib/program-arm"
 import type { RelayResult } from "@/lib/relay"
 const onChange = changeLogger()
@@ -97,6 +98,7 @@ export function noteSourceSwitch(event: FailoverEvent) {
   m.log = [...m.log, event].slice(-HISTORY_MAX)
   try { fs.writeFileSync(historyFile(), JSON.stringify(m.log)) } catch { /* best effort */ }
   eventBus().emit("program-sources")
+  if (event.from !== event.to) probeAfterSwitch(event.to) // read-only /capture probe ~3s later, logged in full
 }
 export function onProgramSources(listener: () => void): () => void {
   const bus = eventBus()
