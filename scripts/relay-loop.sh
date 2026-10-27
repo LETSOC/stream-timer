@@ -7,7 +7,8 @@
 #   <tag> identifies the process for adoption after a server restart (e.g. "mediamtx",
 #   "forward:slate:<destination id>:dest=<fingerprint>"). Never a key.
 # Env: LOOP_STATE_FILE (JSON state for the desk), LOOP_REDACT=1 hides everything after the
-# host in rtmp(s) URLs in the output (ffmpeg prints its output URL).
+# host in rtmp(s) URLs, and everything after host:port in srt:// URLs (streamid, passphrase), in
+# the output (ffmpeg prints its output URL).
 #      LOOP_WATCH_LOG=<log> (forwards): stall watchdog. ffmpeg's -progress output in that log must
 #      show total_size growing; if it doesn't for LOOP_STALL_SECS (25) after LOOP_STALL_GRACE (30)
 #      the child is killed and restarted (LOOP_WATCH_KEY picks another counter, e.g. out_time_us for the tee muxer, which reports total_size=N/A); (e.g. a Castr connection that hangs without ffmpeg exiting).
@@ -72,7 +73,7 @@ while true; do
   if [[ "${LOOP_REDACT:-}" == "1" ]]; then
     # Process substitution (not a pipe) so $! is ffmpeg itself: wait gets ffmpeg's exit code and
     # the watchdog/stop kill ffmpeg, not the redaction filter.
-    "$@" < /dev/null > >(perl -pe 'BEGIN { $| = 1 } s#(rtmps?://[^/\s'"'"'"]+)/[^\s'"'"'"]*#$1/[redacted]#gi') 2>&1 &
+    "$@" < /dev/null > >(perl -pe 'BEGIN { $| = 1 } s#(rtmps?://[^/\s'"'"'"]+)/[^\s'"'"'"]*#$1/[redacted]#gi; s#(srt://[^/?\s'"'"'"]+)[^\s'"'"'"]*#$1?[redacted]#gi; s#\b(passphrase|streamid)=[^\s&'"'"'"]+#$1=[redacted]#gi') 2>&1 &
   else
     "$@" 2>&1 < /dev/null &
   fi
