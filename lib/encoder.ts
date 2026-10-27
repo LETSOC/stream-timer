@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { EncoderStatus } from "@/lib/encoder-status";
 import { programReadFile, relayForwardFingerprints, relayProcessGroups } from "@/lib/relay";
+import { listProcesses, processCommand } from "@/lib/proc-list";
 import { audioHash, prepareChannelAudio, readAppliedAudio, readAudioSettings, type AudioMode } from "@/lib/audio-bed";
 import { captureSourceHealth, EMPTY_HEALTH, healthFromSamples, parseStatsLines, type CaptureSourceStats, type HealthStats, type SourceHealth } from "@/lib/stream-health";
 
@@ -70,9 +71,10 @@ function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
  */
 export function pidRunsScript(pid: number, scriptPath: string): boolean {
   if (!alive(pid)) return false;
-  const result = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" });
-  if (result.status !== 0) return false;
-  return result.stdout.includes(path.basename(scriptPath));
+  // /proc/<pid>/cmdline on Linux (no fork, doesn't block the event loop); `ps` on macOS.
+  const command = processCommand(pid);
+  if (command === null) return false;
+  return command.includes(path.basename(scriptPath));
 }
 
 export type StopResult = { forced: boolean; survived: boolean }
@@ -607,8 +609,8 @@ export function parseOwnSupervisors(psOutput: string, supervisorPath: string): n
 let ownCache: { at: number; value: OwnSupervisor[] } = { at: 0, value: [] }
 export function findOwnSupervisorList(): OwnSupervisor[] {
   if (Date.now() - ownCache.at < 3000) return ownCache.value
-  const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
-  const value = result.status === 0 ? parseOwnSupervisorList(result.stdout, SUPERVISOR) : []
+  const list = listProcesses()
+  const value = list !== null ? parseOwnSupervisorList(list, SUPERVISOR) : []
   ownCache = { at: Date.now(), value }
   return value
 }
@@ -691,9 +693,9 @@ let strayCache: { at: number; value: StrayPublisher[] } = { at: 0, value: [] }
 /** Cached for 5s because the desk polls status every couple of seconds. */
 export function findStrayPublishers(): StrayPublisher[] {
   if (Date.now() - strayCache.at < 5000) return strayCache.value
-  const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
+  const list = listProcesses()
   const own = [...RTMP_CHANNELS.map((ch) => readRtmpPid(ch)), ...findOwnSupervisors(), ...relayProcessGroups()].filter((item): item is number => item !== null)
-  const value = result.status === 0 ? parseStrayPublishers(result.stdout, own, process.pid) : []
+  const value = list !== null ? parseStrayPublishers(list, own, process.pid) : []
   strayCache = { at: Date.now(), value }
   return value
 }
