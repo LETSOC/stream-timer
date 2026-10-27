@@ -4,22 +4,25 @@ import { StatusToast, TOAST_MS } from "@/components/status-toast"
 import Link from "next/link"
 import { AppNav } from "@/components/app-nav"
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
+import { useDeckSocket } from "@/lib/use-deck-socket"
 import { deckScreen, type Screen, type TransportAction } from "@/lib/transport"
 import { isScene, LOGO_IDS, type LogoId } from "@/lib/visuals-assets"
 import { CORNER_LABEL, CORNERS, formatClock, sanitizeTickerItems, STRAP_HOLD_RANGE, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, type Corner, type StrapStyle } from "@/lib/visuals"
 import { deckLights, parseDuration, stepStrap, talkReadout, TALK_PRESETS_MIN } from "@/lib/visuals-deck"
 import { ConfirmButton } from "@/components/confirm-button"
+import { CARD_OVERLAYS } from "@/lib/stage"
+import { LinkPill } from "@/components/link-pill"
 
-const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling", offline: "Offline" }
-const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
 /**
  * Phone deck for the Visuals layer (/stream + /overlay/*). One row per component with an on-air light;
  * every tap applies at once over the deck WebSocket. Strap presets and layout are edited in the
  * builder (/visuals/builder) or the desk › Visuals. Risky taps (layer OFF, Clear all) need two taps.
  */
-const SCENE_BUTTONS: [Screen, string][] = [["program", "LIVE"], ["hold09", "HOLD 09"], ["hold08", "HOLD 08"], ["hold07", "HOLD 07"], ["hold06", "HOLD 06"], ["hold05", "HOLD 05"], ["welcome", "WELCOME"], ["standby", "STANDBY"], ["break", "BREAK"], ["hold", "HOLD"], ["showreel", "SHOWREEL"], ["end", "END"]]
+// Same order and labels as the deck's Screen section (stream-deck.tsx, CARD_OVERLAYS order).
+const DESK_SCENES = CARD_OVERLAYS.filter((n) => !isScene(n))
+const VISUALS_SCENES = CARD_OVERLAYS.filter((n) => isScene(n))
+const SCENE_LABEL: Record<Screen, string> = { program: "LIVE", countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", end: "END (CARD)" }
 const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", end: "END" }
 const LOGO_SHORT = ["1 □", "2 ○", "3 □", "4 ○", "5 W"]
 const BTN = "min-h-12 rounded-[14px] px-2 text-[15px] font-black touch-manipulation disabled:opacity-35"
@@ -32,10 +35,16 @@ const DESK_CARD = `${BTN} border border-[#53b1fd] bg-[#53b1fd]/10 text-[#b2ddff]
 const DESK_CARD_ON = `${BTN} bg-[#53b1fd] text-black`
 const VISUALS_CARD = `${BTN} border border-[#9b8afb] bg-[#9b8afb]/10 text-[#d9d6fe]`
 const VISUALS_CARD_ON = `${BTN} bg-[#9b8afb] text-black`
+// LIVE and END full width, like the deck: solid grey / red outline, lime when on.
+const LIVE = `${BTN} bg-white/10 text-white active:bg-white/20`
+const LIVE_ON = `${BTN} bg-[#D9FF43] text-black`
+const END = `${BTN} border-2 border-[#f97066] bg-transparent text-[#fda29b]`
+const END_ON = `${BTN} bg-[#D9FF43] text-black`
 function sceneClass(target: Screen, active: boolean): string {
   if (isScene(target)) return active ? VISUALS_CARD_ON : VISUALS_CARD
   if (target === "welcome" || target === "break" || target === "hold") return active ? DESK_CARD_ON : DESK_CARD
-  return active ? SEL : target === "program" ? GO : PLAIN
+  if (target === "end") return active ? END_ON : END
+  return active ? LIVE_ON : LIVE
 }
 
 function Row({ title, on, label, children, testId }: { title: string; on: boolean; label?: string; children: ReactNode; testId: string }) {
@@ -79,6 +88,11 @@ export function VisualsDeck() {
   const holdSec = hold ?? v?.strapHoldSec ?? 5
   const scr: Screen | null = state ? deckScreen(state, now) : null
   const off = !state || busy
+  // Every scene/card switch (LIVE too) takes two taps; END is hold-to-confirm (3s), like the deck.
+  const sceneBtn = (target: Screen, extra = "") => {
+    const active = scr === target
+    return <ConfirmButton key={target} data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} holdMs={target === "end" ? 3000 : undefined} confirmLabel="Tap again" className={`${sceneClass(target, active)} min-h-12 px-2 text-[15px] ${extra}`} onConfirm={() => { setSceneBusy(target); void act({ type: "screen", screen: target }).finally(() => setSceneBusy(null)) }}>{sceneBusy === target ? "…" : active ? `● ${SCENE_LABEL[target]}` : SCENE_LABEL[target]}</ConfirmButton>
+  }
 
   // Minimal toasts: errors always; "ok" only where the screen doesn't already show the change.
   async function act(action: TransportAction, ok?: string) {
@@ -120,10 +134,7 @@ export function VisualsDeck() {
           <h1 className="text-xl font-black tracking-tight uppercase">Visuals</h1>
         </div>
         <AppNav page="visuals" />
-        <span data-testid="visuals-link-state" className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 font-mono text-[12px] text-white/70">
-          <span aria-hidden className={`size-2 rounded-full ${LINK_TONE[link]}`} />
-          {LINK_LABEL[link]}
-        </span>
+        <LinkPill link={link} testId="visuals-link-state" />
       </header>
 
       <Row title="/stream layer" on={lights?.layer ?? false} label={lights?.layer ? "ON" : "OFF · OBS only"} testId="vd-layer">
@@ -144,16 +155,16 @@ export function VisualsDeck() {
       </Row>
 
       <Row title="Scenes" on={scr !== null && scr !== "program" && scr !== "countdown"} label={scr ? SCENE_NOW[scr] : "—"} testId="vd-scenes">
-        <div className="grid grid-cols-3 gap-1.5">
-          {SCENE_BUTTONS.map(([target, label]) => {
-            const active = scr === target
-            const cls = `${sceneClass(target, active)} min-h-11 px-1 text-[13px]`
-            // Every scene/card switch (LIVE too) takes two taps, on phone and desktop, program live or not.
-            return <ConfirmButton key={target} data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} holdMs={target === "end" ? 3000 : undefined} confirmLabel="Tap again" className={cls} onConfirm={() => { setSceneBusy(target); void act({ type: "screen", screen: target }).finally(() => setSceneBusy(null)) }}>{sceneBusy === target ? "…" : label}</ConfirmButton>
-          })}
+        {/* Same order and colours as the deck's Screen section: LIVE, Desk cards (blue), Visuals scenes (purple), END. */}
+        <div className="grid grid-cols-2 gap-2">
+          {sceneBtn("program", "col-span-2")}
+          <p data-testid="vd-scenes-desk-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#84caff] uppercase">Desk</p>
+          {DESK_SCENES.map((t) => sceneBtn(t))}
+          <p data-testid="vd-scenes-visuals-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#bdb4fe] uppercase">Visuals</p>
+          {VISUALS_SCENES.map((t) => sceneBtn(t))}
+          {sceneBtn("end", "col-span-2")}
         </div>
-        <p data-testid="vd-scene-legend" className="mt-2 font-mono text-[11px] font-bold tracking-[0.12em] uppercase"><span className="text-[#84caff]">■ Desk</span> <span className="ml-2 text-[#bdb4fe]">■ Visuals</span></p>
-        <p className="mt-1 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes.</p>
+        <p className="mt-2 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes. END: hold 3s.</p>
       </Row>
 
       <Row title="Name strap" on={lights?.strap ?? false} label={lights?.strap ? "ON AIR" : v?.strapMode === "loop" ? "LOOP" : "OFF"} testId="vd-strap">
