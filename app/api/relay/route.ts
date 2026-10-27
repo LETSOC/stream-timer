@@ -3,8 +3,8 @@ import { authorizeMutation, requireOperator } from "@/lib/auth"
 import { notePlannedBack } from "@/lib/program-rearm"
 import { disarmFeed } from "@/lib/program-monitor"
 import type { ArmScope } from "@/lib/program-arm"
-import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
-import { programSrtUrl, srsOptionUrls } from "@/lib/srt-urls"
+import { setWebrtcPreview, armProgram, backupObsUrl, backupSrtUrl, setSrtBackup, programObsUrl, setBackupPull, setFailover, setLanIngest, setMdnsName, setSrtMain, setSrtCaptureOut, rotateCaptureReadLogin, RELAY_PATHS, relayStatus, rotateProgramCredentials, setForward, startRelay, stopRelay, type RelayPath } from "@/lib/relay"
+import { programOutSrtUrl, programSrtUrl, srsOptionUrls } from "@/lib/srt-urls"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 const scopeOf = (v: unknown): ArmScope => (v === "main" || v === "backup" ? v : "both")
@@ -59,6 +59,14 @@ export async function POST(request: Request) {
       return reply(await setWebrtcPreview(body.on === true))
     case "srt-backup":
       return reply(await setSrtBackup({ on: body.on, passphrase: body.passphrase }))
+    case "srt-main":
+      return reply(await setSrtMain({ on: body.on, passphrase: body.passphrase }))
+    case "srt-capture-out":
+      return reply(await setSrtCaptureOut({ on: body.on, passphrase: body.passphrase }))
+    case "rotate-capture-read":
+      return reply(await rotateCaptureReadLogin())
+    case "reveal-capture-srt":
+      return Response.json(programOutSrtUrl(), { headers: NO_STORE })
     case "reveal-backup":
       return Response.json(backupObsUrl(), { headers: NO_STORE })
     case "backup-pull":
@@ -71,6 +79,6 @@ export async function POST(request: Request) {
     case "failover":
       return reply(await setFailover(body.failover))
     default:
-      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | reveal-program-srt | rotate-program | reveal-backup | reveal-backup-srt | reveal-srs | srt-backup | backup-pull | failover | lan-ingest | mdns-name }." }, { status: 400 })
+      return Response.json({ error: "Expected { action: start | stop | forward | arm-program | disarm-program | reveal-program | reveal-program-srt | rotate-program | reveal-backup | reveal-backup-srt | reveal-srs | srt-backup | srt-main | srt-capture-out | rotate-capture-read | reveal-capture-srt | backup-pull | failover | lan-ingest | mdns-name }." }, { status: 400 })
   }
 }

@@ -1,7 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { memo, useState } from "react"
 import { copyOrShow } from "@/components/copy-fallback"
+import { fetchT } from "@/lib/fetch-timeout"
+import { usePoll } from "@/lib/use-poll"
 import type { AvLive, AvSample } from "@/lib/av-diagnostics"
 import type { MediamtxPathStat } from "@/lib/relay"
 
@@ -11,7 +13,9 @@ const ms = (v: number | null | undefined) => (typeof v === "number" ? `${v} ms` 
 const mb = (b: number | null) => (b === null ? "—" : b > 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`)
 
 /** Desk › A/V diagnostics: read-only numbers, STREAM timecode toggle, Mark → data/av-log.jsonl, CSV, MediaMTX stats. */
-export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: boolean; fps: number }) {
+export const AvDiagnosticsPanel = memo(AvDiagnosticsPanelInner)
+
+function AvDiagnosticsPanelInner({ streamTimecode, fps }: { streamTimecode: boolean; fps: number }) {
   const [diag, setDiag] = useState<Diag | null>(null)
   const [reading, setReading] = useState("")
   const [note, setNote] = useState("")
@@ -23,21 +27,21 @@ export function AvDiagnosticsPanel({ streamTimecode, fps }: { streamTimecode: bo
   if (seenProp !== `${streamTimecode}:${fps}`) { setSeenProp(`${streamTimecode}:${fps}`); setTc(null) }
   const tcOn = tc?.on ?? streamTimecode
   const tcFps = tc?.fps ?? fps
-  useEffect(() => {
-    let alive = true
-    const load = () => void fetch("/api/av-diagnostics", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((b: Diag | null) => { if (alive && b) setDiag(b) }).catch(() => undefined)
-    load()
-    const id = window.setInterval(load, 1000)
-    return () => { alive = false; window.clearInterval(id) }
-  }, [])
+  // One request at a time, paused while the tab is hidden (lib/poll).
+  usePoll(async () => {
+    const r = await fetchT("/api/av-diagnostics", { cache: "no-store" })
+    const b = r.ok ? ((await r.json()) as Diag | null) : null
+    if (!b) return false
+    setDiag(b)
+  }, 1000)
 
   async function setTimecode(patch: { show?: boolean; fps?: number }) {
     setTc({ on: patch.show ?? tcOn, fps: patch.fps ?? tcFps })
-    const r = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "timecode", ...patch }, from: "desk" }) }).catch(() => null)
+    const r = await fetchT("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "timecode", ...patch }, from: "desk" }) }).catch(() => null)
     if (!r?.ok) { setTc(null); setMsg("Could not change the STREAM timecode.") }
   }
   async function post(body: Record<string, unknown>) {
-    const r = await fetch("/api/av-diagnostics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null)
+    const r = await fetchT("/api/av-diagnostics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null)
     return r?.ok ? ((await r.json()) as { sample?: AvSample; count?: number; archived?: string | null }) : null
   }
   async function mark() {

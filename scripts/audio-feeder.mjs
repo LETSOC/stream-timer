@@ -280,36 +280,48 @@ export function syncBeep(n, wallMs) {
  * Fixed audio delay (float stereo). setDelay jumps (rare, manual trims). Used for the A/V offset trim
  * and Browser capture's screencast-lag compensation.
  */
-export function createDelayLine() {
+// Delay line. fadeMs > 0: a delay change crossfades (linear, same signal at two offsets) from the old
+// read point to the new one over fadeMs instead of jumping — a hard jump is a click.
+export function createDelayLine({ fadeMs = 0 } = {}) {
   let buf = new Float32Array(0) // queued frames (interleaved)
   let delay = 0 // frames
+  const fadeLen = Math.max(0, Math.round((fadeMs * RATE) / 1000))
+  const spare = fadeLen > 0 ? Math.round(0.25 * RATE) : 0 // extra history so a longer delay has audio to read (not silence)
+  let fade = null // { from: frames, pos: frames done }
+  let pending = null // delay asked for during a fade, applied when it ends
   return {
-    setDelayMs(ms) { delay = Math.max(0, Math.round((ms * RATE) / 1000)) },
-    delayMs() { return (delay * 1000) / RATE },
+    setDelayMs(ms) {
+      const d = Math.max(0, Math.round((ms * RATE) / 1000))
+      // Mid-fade: restarting would jump from the blend to the old read (a click); finish first, then move.
+      if (fade) { pending = d === delay ? null : d; return }
+      if (d === delay) return
+      if (fadeLen > 0 && buf.length > 0) fade = { from: delay, pos: 0 }
+      delay = d
+    },
+    delayMs() { return ((pending ?? delay) * 1000) / RATE },
     process(input) {
       const n = input.length / 2
-      if (delay === 0 && buf.length === 0) return input
+      if (delay === 0 && buf.length === 0 && !fade && spare === 0) return input
       const joined = new Float32Array(buf.length + input.length)
       joined.set(buf); joined.set(input, buf.length)
       const total = joined.length / 2
-      const need = n + delay
-      let out
-      if (total >= need) {
-        // Enough: output the oldest n frames beyond the delay, keep `delay` frames queued (drops any surplus after a shorter delay).
-        const start = total - need
-        out = joined.subarray(start * 2, (start + n) * 2)
-        buf = joined.slice((start + n) * 2)
-      } else {
-        // Delay grew: pad with silence first.
-        const pad = need - total
-        out = new Float32Array(n * 2)
-        if (pad >= n) buf = joined
-        else {
-          const take = n - pad
-          out.set(joined.subarray(0, take * 2), pad * 2)
-          buf = joined.slice(take * 2)
+      const out = new Float32Array(n * 2)
+      // Output frame i reads input frame (total - n - d + i); before the history starts it is silence.
+      const read = (d, i, c) => { const k = total - n - d + i; return k < 0 ? 0 : joined[k * 2 + c] }
+      for (let i = 0; i < n; i++) {
+        if (fade) {
+          const g = (fade.pos + 0.5) / fadeLen
+          for (let c = 0; c < 2; c++) out[i * 2 + c] = read(fade.from, i, c) * (1 - g) + read(delay, i, c) * g
+          if (++fade.pos >= fadeLen) {
+            fade = null
+            if (pending !== null) { fade = { from: delay, pos: 0 }; delay = pending; pending = null }
+          }
+        } else {
+          out[i * 2] = read(delay, i, 0); out[i * 2 + 1] = read(delay, i, 1)
         }
       }
+      const keep = Math.min(total, Math.max(delay, fade ? fade.from : 0) + spare)
+      buf = joined.slice((total - keep) * 2)
       return out
     },
   }

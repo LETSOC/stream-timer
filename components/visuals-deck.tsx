@@ -6,7 +6,7 @@ import { AppNav } from "@/components/app-nav"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import { deckScreen, type Screen, type TransportAction } from "@/lib/transport"
-import { LOGO_IDS, type LogoId } from "@/lib/visuals-assets"
+import { isScene, LOGO_IDS, type LogoId } from "@/lib/visuals-assets"
 import { CORNER_LABEL, CORNERS, formatClock, sanitizeTickerItems, STRAP_HOLD_RANGE, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, type Corner, type StrapStyle } from "@/lib/visuals"
 import { deckLights, parseDuration, stepStrap, talkReadout, TALK_PRESETS_MIN } from "@/lib/visuals-deck"
 import { ConfirmButton } from "@/components/confirm-button"
@@ -27,6 +27,16 @@ const GO = `${BTN} bg-[#12b76a] text-black`
 const STOP = `${BTN} bg-[#f04438] text-white`
 const PLAIN = `${BTN} border border-white/25 bg-white/[0.06] text-white`
 const SEL = `${BTN} bg-white text-[#0b0b0f]`
+// Desk cards (Welcome / Break / Hold) blue, Visuals scenes (HOLD 05–09, Standby, Showreel) purple, like the desk.
+const DESK_CARD = `${BTN} border border-[#53b1fd] bg-[#53b1fd]/10 text-[#b2ddff]`
+const DESK_CARD_ON = `${BTN} bg-[#53b1fd] text-black`
+const VISUALS_CARD = `${BTN} border border-[#9b8afb] bg-[#9b8afb]/10 text-[#d9d6fe]`
+const VISUALS_CARD_ON = `${BTN} bg-[#9b8afb] text-black`
+function sceneClass(target: Screen, active: boolean): string {
+  if (isScene(target)) return active ? VISUALS_CARD_ON : VISUALS_CARD
+  if (target === "welcome" || target === "break" || target === "hold") return active ? DESK_CARD_ON : DESK_CARD
+  return active ? SEL : target === "program" ? GO : PLAIN
+}
 
 function Row({ title, on, label, children, testId }: { title: string; on: boolean; label?: string; children: ReactNode; testId: string }) {
   return (
@@ -45,6 +55,8 @@ export function VisualsDeck() {
   const { link, state, run } = useDeckSocket()
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
+  // Scene tapped, server not answered yet: that button shows "…".
+  const [sceneBusy, setSceneBusy] = useState<Screen | null>(null)
   const [toast, setToast] = useState<{ tone: "ok" | "error"; text: string } | null>(null)
   const [hold, setHold] = useState<number | null>(null)
   const [custom, setCustom] = useState("")
@@ -135,12 +147,13 @@ export function VisualsDeck() {
         <div className="grid grid-cols-3 gap-1.5">
           {SCENE_BUTTONS.map(([target, label]) => {
             const active = scr === target
-            const cls = `${active ? SEL : target === "program" ? GO : PLAIN} min-h-11 px-1 text-[13px]`
+            const cls = `${sceneClass(target, active)} min-h-11 px-1 text-[13px]`
             // Every scene/card switch (LIVE too) takes two taps, on phone and desktop, program live or not.
-            return <ConfirmButton key={target} data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} holdMs={target === "end" ? 3000 : undefined} confirmLabel="Tap again" className={cls} onConfirm={() => void act({ type: "screen", screen: target })}>{label}</ConfirmButton>
+            return <ConfirmButton key={target} data-testid={`vd-scene-${target}`} aria-pressed={active} disabled={off} holdMs={target === "end" ? 3000 : undefined} confirmLabel="Tap again" className={cls} onConfirm={() => { setSceneBusy(target); void act({ type: "screen", screen: target }).finally(() => setSceneBusy(null)) }}>{sceneBusy === target ? "…" : label}</ConfirmButton>
           })}
         </div>
-        <p className="mt-2 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes.</p>
+        <p data-testid="vd-scene-legend" className="mt-2 font-mono text-[11px] font-bold tracking-[0.12em] uppercase"><span className="text-[#84caff]">■ Desk</span> <span className="ml-2 text-[#bdb4fe]">■ Visuals</span></p>
+        <p className="mt-1 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes.</p>
       </Row>
 
       <Row title="Name strap" on={lights?.strap ?? false} label={lights?.strap ? "ON AIR" : v?.strapMode === "loop" ? "LOOP" : "OFF"} testId="vd-strap">
@@ -171,7 +184,7 @@ export function VisualsDeck() {
         <details className="mt-2">
           <summary className="cursor-pointer font-mono text-[12px] text-white/60">Style · motion · position</summary>
           <div className="mt-2 grid grid-cols-3 gap-2">
-            <button type="button" disabled={off} aria-pressed={v?.strapStyle === ""} onClick={() => void act({ type: "strap", style: "" })} className={v?.strapStyle === "" ? SEL : PLAIN}>Preset&apos;s</button>
+            <button type="button" disabled={off} aria-pressed={v?.strapStyle === ""} onClick={() => void act({ type: "strap", style: "" })} className={v?.strapStyle === "" ? SEL : PLAIN}>Preset{"'"}s</button>
             {STRAP_STYLES.map((st: StrapStyle) => <button key={st} type="button" data-testid={`strap-style-${st}`} disabled={off} aria-pressed={v?.strapStyle === st} onClick={() => void act({ type: "strap", style: st })} className={v?.strapStyle === st ? SEL : PLAIN}>{STRAP_STYLE_LABEL[st]}</button>)}
           </div>
           <div className="mt-2 grid grid-cols-3 gap-2">

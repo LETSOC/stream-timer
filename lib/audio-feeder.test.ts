@@ -80,6 +80,33 @@ test("delay line: exact delay, grow and shrink", () => {
   assert.equal(c[0], 65, "shrinking drops the queue")
 })
 
+test("delay line: fade crossfades a delay change, no jump", () => {
+  const line = createDelayLine({ fadeMs: 1 }) // 48-frame fade
+  const ramp = (from: number, n: number) => Float32Array.from({ length: n * 2 }, (_, i) => from + Math.floor(i / 2) + 1)
+  line.setDelayMs(1) // 48 frames; empty line → applied at once
+  line.process(ramp(0, 96))
+  line.setDelayMs(2) // 96 frames → fade
+  const a = line.process(ramp(96, 96)) as Float32Array
+  for (let i = 1; i < 96; i++) assert.ok(Math.abs(a[i * 2] - a[(i - 1) * 2]) <= 2.01, `step ${i}`)
+  assert.equal(a[95 * 2], 96 - 96 + 96, "after the fade: new delay exactly")
+  const b = line.process(ramp(192, 4)) as Float32Array
+  assert.equal(b[0], 193 - 96)
+})
+
+test("delay line: a delay change during a fade waits for it (regression: re-trigger jumped)", () => {
+  const line = createDelayLine({ fadeMs: 2 }) // 96-frame fade
+  let t = 0
+  const tone = (n: number) => { const a = new Float32Array(n * 2); for (let i = 0; i < n; i++, t++) a[i * 2] = a[i * 2 + 1] = Math.sin((2 * Math.PI * 440 * t) / 48000); return a }
+  line.process(tone(4800))
+  let prev = NaN, worst = 0
+  for (let b = 0; b < 40; b++) {
+    line.setDelayMs(b % 2 ? 10 : 47) // wobbles > 20ms every 20-frame block, like a loaded server
+    const o = line.process(tone(20)) as Float32Array
+    for (let i = 0; i < 20; i++) { if (!Number.isNaN(prev)) worst = Math.max(worst, Math.abs(o[i * 2] - prev)); prev = o[i * 2] }
+  }
+  assert.ok(worst < 0.12, `largest sample step ${worst.toFixed(3)} (a 440 Hz sine moves at most 0.058)`)
+})
+
 test("sync beep: 100ms of 1 kHz at each wall second", () => {
   const b = syncBeep(48000, 999_000) as Float32Array
   const on = (ms: number) => Math.abs(b[Math.round((ms * 48)) * 2]) + Math.abs(b[(Math.round(ms * 48) + 6) * 2])

@@ -29,7 +29,7 @@ const since = opt("--since")
 if (since) events = events.filter((e) => londonParts(e.at).time >= since)
 /** Upstream → downstream: the earliest link that broke is the likely origin. */
 const ORDER = ["ingest", "srt", "relay", "rearm", "switch", "player", "capture", "push", "server"]
-const STAGE: Record<string, string> = { ingest: "OBS → relay ingest", srt: "Backup SRT link", relay: "relay (MediaMTX)", rearm: "auto re-arm / arm", switch: "Main/Backup switch", player: "/stream page player (in capture)", capture: "Browser capture (screencast → encoder)", push: "forward → YouTube/destination", server: "server" }
+const STAGE: Record<string, string> = { ingest: "OBS → relay ingest", srt: "SRT link (Main/Backup)", relay: "relay (MediaMTX)", rearm: "auto re-arm / arm", switch: "Main/Backup switch", player: "/stream page player (in capture)", capture: "Browser capture (screencast → encoder)", push: "forward → YouTube/destination", server: "server" }
 
 const counts = new Map<string, number>()
 for (const e of events) if (isRealProblem(e)) counts.set(e.cat, (counts.get(e.cat) ?? 0) + 1)

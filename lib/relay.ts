@@ -21,6 +21,8 @@ import fs from "node:fs"
 import path from "node:path"
 import { destinationFingerprint, directChannelDests, readChannelStatus, killGroup, pidRunsScript, redact, relayChildEnv } from "@/lib/encoder"
 import { listDestinations, resolveDestination, setDestinationTimer } from "@/lib/rtmp-destinations"
+import { isSrtUrl } from "@/lib/srt-destination"
+import { listProcesses } from "@/lib/proc-list"
 import { diagnose, EMPTY_HEALTH, healthFromSamples, parseProgressBlocks, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 
 export const RELAY_PATHS = ["slate", "capture", "vertical"] as const
@@ -136,10 +138,33 @@ export type RelaySettings = {
   srtBackup: boolean
   /** Optional SRT encryption for /program-backup publishers ("" = off; 10–79 chars). */
   srtPassphrase: string
+  /** Also accept the Main publisher (/program) over SRT on the same UDP port. Off = config as before. */
+  srtMain: boolean
+  /** Optional SRT encryption for /program publishers ("" = off; 10–79 chars). Separate from Backup's. */
+  srtMainPassphrase: string
+  /** Let outside clients READ /capture over SRT (same UDP port) with their own read-only login. Off = config as before. */
+  srtCaptureOut: boolean
+  /** Optional SRT encryption for /capture readers ("" = off; 10–79 chars). */
+  srtCaptureOutPassphrase: string
   /** Fast (WebRTC/WHEP, read-only) operator previews. Default on; off = HLS only and `webrtc: no`. */
   webrtcPreview: boolean
 }
+/** Default SRT latency put in revealed URLs (µs). SRT_LATENCY_MS overrides it (e.g. 1000 over the internet). */
 export const SRT_LATENCY_US = 300_000
+/** Pure: SRT_LATENCY_MS (integer ms, 20–8000) or the 300 ms default. */
+export function srtLatencyMs(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.SRT_LATENCY_MS?.trim()
+  const value = raw && /^\d+$/.test(raw) ? Number(raw) : NaN
+  return Number.isInteger(value) && value >= 20 && value <= 8000 ? value : SRT_LATENCY_US / 1000
+}
+/** The latency revealed SRT URLs carry, in µs (SRT/OBS/ffmpeg take µs in the URL). */
+export function srtLatencyUs(env: Record<string, string | undefined> = process.env): number {
+  return srtLatencyMs(env) * 1000
+}
+/** Pure: is MediaMTX's SRT listener wanted (Backup SRT while not pulled, Main SRT, or /capture read-out)? */
+export function srtListenerOn(s: Pick<RelaySettings, "srtBackup" | "srtMain" | "backupPullUrl"> & { srtCaptureOut?: boolean }): boolean {
+  return (s.srtBackup && !s.backupPullUrl) || s.srtMain || s.srtCaptureOut === true
+}
 export function srtPort(): number { return Number(process.env.SRT_PORT) || 8890 }
 /** Pure: "" ok (off), else 10–79 printable chars without quotes/backslash (YAML + SRT limits). */
 export function srtPassphraseError(p: string): string | null {
@@ -164,6 +189,10 @@ export function readSettings(): RelaySettings {
     srtBackup: raw?.srtBackup === true,
     webrtcPreview: raw?.webrtcPreview !== false,
     srtPassphrase: typeof raw?.srtPassphrase === "string" && srtPassphraseError(raw.srtPassphrase) === null ? raw.srtPassphrase : "",
+    srtMain: raw?.srtMain === true,
+    srtMainPassphrase: typeof raw?.srtMainPassphrase === "string" && srtPassphraseError(raw.srtMainPassphrase) === null ? raw.srtMainPassphrase : "",
+    srtCaptureOut: raw?.srtCaptureOut === true,
+    srtCaptureOutPassphrase: typeof raw?.srtCaptureOutPassphrase === "string" && srtPassphraseError(raw.srtCaptureOutPassphrase) === null ? raw.srtCaptureOutPassphrase : "",
   }
 }
 function writeSettings(settings: RelaySettings) {
@@ -173,6 +202,8 @@ function writeSettings(settings: RelaySettings) {
 type Credentials = { publishUser: string; publishPass: string; readUser: string; readPass: string; /** OBS's own publish login, for /program only. */ programUser?: string; programPass?: string; /** Backup publisher's own login, for /program-backup only. */ backupUser?: string; backupPass?: string; /** Vertical (9:16) output's publish login, for /vertical only, localhost only. */ verticalUser?: string; verticalPass?: string }
 export const PROGRAM_PATH = "program"
 export const BACKUP_PATH = "program-backup"
+/** The program output path outside clients may read over SRT (srtCaptureOut). */
+export const CAPTURE_PATH = "capture"
 function token(bytes = 18) {
   return crypto.randomBytes(bytes).toString("base64url")
 }
@@ -186,6 +217,16 @@ export function credentials(): Credentials {
   }
   const created = { publishUser: `pub_${token(4)}`, publishPass: token(), readUser: `read_${token(4)}`, readPass: token(), programUser: `obs_${token(4)}`, programPass: token(), backupUser: `bak_${token(4)}`, backupPass: token(), verticalUser: `vrt_${token(4)}`, verticalPass: token() }
   writePrivate(file("credentials.json"), JSON.stringify(created))
+  return created
+}
+
+/** Read-only SRT login for /capture (outside readers). Own file in the data dir (0600), never logged or in status. */
+export type CaptureReadLogin = { user: string; pass: string }
+export function captureReadLogin(): CaptureReadLogin {
+  const existing = readJson<CaptureReadLogin>(file("capture-read.json"))
+  if (existing?.user && existing.pass) return existing
+  const created = { user: `out_${token(4)}`, pass: token() }
+  writePrivate(file("capture-read.json"), JSON.stringify(created))
   return created
 }
 
@@ -209,7 +250,7 @@ export function rotateProgramCredentials(which: "main" | "backup" = "main"): Pro
  * Internal publishers may publish to slate/capture only; OBS's login (only while `programArmed`)
  * may publish to /program only. Arming changes only the logins (and the Backup pull path): see below.
  */
-export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; /** per-feed disarm while armed */ disarmed?: FeedDisarmed; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string; /** SRT for the Backup publisher (bound like RTMP ingest) */ srt?: { port: number; passphrase: string }; /** WHEP read-only previews */ webrtc?: { httpPort: number; iceHost: string; icePort: number; additionalHosts: string[] } }): string {
+export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number; hls: number; api: number }; creds: Credentials; programArmed?: boolean; /** per-feed disarm while armed */ disarmed?: FeedDisarmed; backupPullUrl?: string; /** RTMP ingest host when LAN ingest is on (else `host`) */ ingestHost?: string; /** SRT for the Backup publisher (bound like RTMP ingest) */ srt?: { port: number; passphrase: string }; /** SRT for the Main publisher (/program): same listener and port */ srtMain?: { port: number; passphrase: string }; /** WHEP read-only previews */ webrtc?: { httpPort: number; iceHost: string; icePort: number; additionalHosts: string[] }; /** Outside readers of /capture over SRT: same listener and port */ captureOut?: { port: number; passphrase: string; user: string; pass: string } }): string {
   const { host, ports, creds } = input
   // LAN ingest: only the RTMP listener moves; HLS and the API stay on `host`. Only the program/backup
   // publish logins may connect from other addresses, and only to publish their own path. Reads,
@@ -232,6 +273,14 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
   const local = "['127.0.0.1/32', '::1/128']"
   // SRT (Backup publisher) whenever it is turned on and the Backup isn't pulled, armed or not (see above).
   const srt = !pullUrl && input.srt ? input.srt : null
+  // SRT for Main (/program): the same listener (one UDP port), armed or not, independent of the Backup pull.
+  // The listener only lets in logins that exist: Main/Backup (only while armed) from anywhere, internal
+  // logins from loopback only. The streamid picks the path: publish:<path>:<user>:<pass>.
+  const srtMain = input.srtMain ?? null
+  // /capture read-out: one extra login (read /capture only, any IP) and, with a passphrase, srtReadPassphrase
+  // on /capture. Absent = not one byte of the config changes. Streamid: read:capture:<user>:<pass>.
+  const captureOut = input.captureOut?.user && input.captureOut.pass ? input.captureOut : null
+  const srtListen = srt ?? srtMain ?? captureOut
   return [
     "# Generated by stream-timer (lib/relay.ts) on every relay start. Do not edit; do not commit.",
     "logLevel: info",
@@ -240,7 +289,7 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     "writeTimeout: 10s",
     "rtsp: no",
     `rtspAddress: ${host}:${ports.rtmp + 1}`,
-    ...(srt ? ["srt: yes", `srtAddress: ${lan ? input.ingestHost : host}:${srt.port}`] : ["srt: no"]),
+    ...(srtListen ? ["srt: yes", `srtAddress: ${lan ? input.ingestHost : host}:${srtListen.port}`] : ["srt: no"]),
     // WebRTC: reads only. Signalling on 127.0.0.1 (the app proxies it behind operator auth); no
     // publisher login can reach it (OBS logins are RTMP/SRT; internal publishers are local RTMP).
     ...(input.webrtc ? [
@@ -299,11 +348,17 @@ export function buildMediamtxConfig(input: { host: string; ports: { rtmp: number
     `    pass: ${JSON.stringify(creds.readPass)}`,
     `    ips: ${local}`,
     "    permissions: [{ action: read }, { action: api }]",
+    ...(captureOut ? [
+      `  - user: ${JSON.stringify(captureOut.user)}`,
+      `    pass: ${JSON.stringify(captureOut.pass)}`,
+      "    ips: ['0.0.0.0/0', '::/0']",
+      `    permissions: [{ action: read, path: ${CAPTURE_PATH} }]`,
+    ] : []),
     "paths:",
-    ...RELAY_PATHS.map((name) => `  ${name}: {}`),
+    ...RELAY_PATHS.map((name) => (name === CAPTURE_PATH && captureOut?.passphrase ? `  ${name}: { srtReadPassphrase: ${JSON.stringify(captureOut.passphrase)} }` : `  ${name}: {}`)),
     // A reconnecting OBS (Wi-Fi blip, kill -9) takes over its path at once instead of being refused
     // until the dead session times out.
-    `  ${PROGRAM_PATH}: { overridePublisher: yes }`,
+    `  ${PROGRAM_PATH}: { overridePublisher: yes${srtMain?.passphrase ? `, srtPublishPassphrase: ${JSON.stringify(srtMain.passphrase)}` : ""} }`,
     // Backup: a second publisher, or MediaMTX pulls it (always on while armed, so failover is instant).
     pull ? `  ${BACKUP_PATH}: { source: ${JSON.stringify(pull)}, sourceOnDemand: no }` : `  ${BACKUP_PATH}: { overridePublisher: yes${srt?.passphrase ? `, srtPublishPassphrase: ${JSON.stringify(srt.passphrase)}` : ""} }`,
     "",
@@ -411,9 +466,10 @@ export function parseRelayLoops(psOutput: string, loopPath: string): OwnRelayLoo
   }
   return found
 }
+/** Our relay loops, live (not cached: the kill paths depend on it). /proc on Linux, `ps` on macOS (lib/proc-list). */
 export function findRelayLoops(): OwnRelayLoop[] {
-  const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
-  return result.status === 0 ? parseRelayLoops(result.stdout, LOOP()) : []
+  const list = listProcesses()
+  return list !== null ? parseRelayLoops(list, LOOP()) : []
 }
 /** Process groups the stray-publisher scan must ignore (our forwards publish over RTMP). */
 export function relayProcessGroups(): number[] {
@@ -500,7 +556,7 @@ async function ensureServerUnlocked(): Promise<RelayResult> {
 }
 
 function desiredConfig() {
-  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, disarmed: readSettings().disarmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined, srt: readSettings().srtBackup ? { port: srtPort(), passphrase: readSettings().srtPassphrase } : undefined, webrtc: webrtcConfig() })
+  return buildMediamtxConfig({ host: bindHost(), ports: relayPorts(), creds: credentials(), programArmed: readSettings().programArmed, disarmed: readSettings().disarmed, backupPullUrl: readSettings().backupPullUrl, ingestHost: readSettings().lanIngest ? ingestHost() : undefined, srt: readSettings().srtBackup ? { port: srtPort(), passphrase: readSettings().srtPassphrase } : undefined, srtMain: readSettings().srtMain ? { port: srtPort(), passphrase: readSettings().srtMainPassphrase } : undefined, webrtc: webrtcConfig(), captureOut: readSettings().srtCaptureOut ? { port: srtPort(), passphrase: readSettings().srtCaptureOutPassphrase, ...captureReadLogin() } : undefined })
 }
 function webrtcConfig() {
   if (!readSettings().webrtcPreview) return undefined
@@ -576,7 +632,7 @@ async function listPublishers(): Promise<Publisher[] | null> {
   }
   try {
     const rtmp = await get("rtmp")
-    const srt = readSettings().srtBackup ? await get("srt").catch(() => []) : []
+    const srt = srtListenerOn(readSettings()) ? await get("srt").catch(() => []) : []
     return [...rtmp, ...srt]
   } catch { return null }
 }
@@ -643,20 +699,21 @@ export function programObsUrl(): { server: string; streamKey: string; url: strin
 }
 
 /** Backup publisher settings (second computer). Operator-only, on demand. */
-/** Pure: the SRT URL OBS 2 pastes as Server (Stream Key blank). latency is µs. */
-export function srtObsUrl(input: { host: string; port: number; user: string; pass: string; passphrase: string; latencyUs?: number }): string {
-  const sid = `publish:${BACKUP_PATH}:${input.user}:${input.pass}`
-  return `srt://${input.host}:${input.port}?streamid=${sid}&latency=${input.latencyUs ?? SRT_LATENCY_US}&pkt_size=1316${input.passphrase ? `&passphrase=${input.passphrase}` : ""}`
+/** Pure: the SRT URL OBS pastes as Server (Stream Key blank). latency is µs. path: Backup unless given. */
+export function srtObsUrl(input: { host: string; port: number; user: string; pass: string; passphrase: string; latencyUs?: number; path?: typeof PROGRAM_PATH | typeof BACKUP_PATH }): string {
+  const sid = `publish:${input.path ?? BACKUP_PATH}:${input.user}:${input.pass}`
+  return `srt://${input.host}:${input.port}?streamid=${sid}&latency=${input.latencyUs ?? srtLatencyUs()}&pkt_size=1316${input.passphrase ? `&passphrase=${input.passphrase}` : ""}`
 }
 /** SRT settings for OBS 2 (operator-only reveal). url null = SRT off; lan false = only reachable from this machine. */
-export function backupSrtUrl(): { url: string | null; lan: boolean; port: number; note: string } {
+export function backupSrtUrl(): { url: string | null; lan: boolean; port: number; latencyMs: number; note: string } {
   const s = readSettings()
   const c = credentials()
-  if (!s.srtBackup) return { url: null, lan: false, port: srtPort(), note: "SRT for Backup is off." }
-  if (s.backupPullUrl) return { url: null, lan: false, port: srtPort(), note: "Backup pulls from a URL; SRT publish is off while pulling." }
+  const latencyMs = srtLatencyMs()
+  if (!s.srtBackup) return { url: null, lan: false, port: srtPort(), latencyMs, note: "SRT for Backup is off." }
+  if (s.backupPullUrl) return { url: null, lan: false, port: srtPort(), latencyMs, note: "Backup pulls from a URL; SRT publish is off while pulling." }
   const lanHost = s.lanIngest ? lanIp() : null
   const url = srtObsUrl({ host: lanHost ?? "127.0.0.1", port: srtPort(), user: c.backupUser ?? "", pass: c.backupPass ?? "", passphrase: s.srtPassphrase })
-  return { url, lan: Boolean(lanHost), port: srtPort(), note: lanHost ? "OBS 2: Settings › Stream › Custom, paste as Server, leave Stream Key blank." : "Turn on LAN ingest so OBS 2 on another machine can reach SRT (this URL only works on this Mac)." }
+  return { url, lan: Boolean(lanHost), port: srtPort(), latencyMs, note: lanHost ? "OBS 2: Settings › Stream › Custom, paste as Server, leave Stream Key blank." : "Turn on LAN ingest so OBS 2 on another machine can reach SRT (this URL only works on this Mac)." }
 }
 export function setSrtBackup(raw: { on?: unknown; passphrase?: unknown }): Promise<RelayResult> {
   return withLock(async () => {
@@ -668,6 +725,56 @@ export function setSrtBackup(raw: { on?: unknown; passphrase?: unknown }): Promi
     writeSettings({ ...cur, srtBackup: on, srtPassphrase: passphrase })
     if (relayRunning()) writeConfigIfChanged()
     return { ok: true, note: on ? `Backup also accepts SRT on UDP ${srtPort()}${passphrase ? " (encrypted)" : ""}.` : "SRT for Backup is off." }
+  })
+}
+/** Main (/program) over SRT on the same UDP port, with its own optional passphrase. RTMP keeps working. */
+export function setSrtMain(raw: { on?: unknown; passphrase?: unknown }): Promise<RelayResult> {
+  return withLock(async () => {
+    const cur = readSettings()
+    const passphrase = typeof raw.passphrase === "string" ? raw.passphrase.trim() : cur.srtMainPassphrase
+    const why = srtPassphraseError(passphrase)
+    if (why) return { ok: false, status: 400, error: why }
+    const on = typeof raw.on === "boolean" ? raw.on : cur.srtMain
+    writeSettings({ ...cur, srtMain: on, srtMainPassphrase: passphrase })
+    if (relayRunning()) writeConfigIfChanged()
+    return { ok: true, note: on ? `Main also accepts SRT on UDP ${srtPort()}${passphrase ? " (encrypted)" : ""}.` : "SRT for Main is off." }
+  })
+}
+
+/** Outside readers of /capture over SRT (own read-only login, optional passphrase). Changes MediaMTX's config. */
+export function setSrtCaptureOut(raw: { on?: unknown; passphrase?: unknown }): Promise<RelayResult> {
+  return withLock(async () => {
+    const cur = readSettings()
+    const passphrase = typeof raw.passphrase === "string" ? raw.passphrase.trim() : cur.srtCaptureOutPassphrase
+    const why = srtPassphraseError(passphrase)
+    if (why) return { ok: false, status: 400, error: why }
+    const on = typeof raw.on === "boolean" ? raw.on : cur.srtCaptureOut
+    if (on) captureReadLogin()
+    writeSettings({ ...cur, srtCaptureOut: on, srtCaptureOutPassphrase: passphrase })
+    if (relayRunning()) writeConfigIfChanged()
+    // Passphrase changed or turned off: readers on the old settings are dropped (MediaMTX recreates /capture).
+    return { ok: true, note: on ? `/capture can be read over SRT on UDP ${srtPort()}${passphrase ? " (encrypted)" : ""}.` : "SRT read-out of /capture is off." }
+  })
+}
+/** Pure: SRT conns READING a path (MediaMTX /v3/srtconns/list), as API kick paths. */
+export function readerKickTargets(body: unknown, pathName: string): string[] {
+  const items = (body as { items?: unknown[] } | null)?.items
+  if (!Array.isArray(items)) return []
+  return items.map((raw) => raw as Record<string, unknown>).filter((c) => c.state === "read" && c.path === pathName && typeof c.id === "string").map((c) => `srtconns/kick/${encodeURIComponent(c.id as string)}`)
+}
+/** New read-only /capture login; current SRT readers are disconnected (they need the new URL). */
+export function rotateCaptureReadLogin(): Promise<RelayResult> {
+  return withLock(async () => {
+    writePrivate(file("capture-read.json"), JSON.stringify({ user: `out_${token(4)}`, pass: token() }))
+    if (!readSettings().srtCaptureOut || !relayRunning()) return { ok: true, note: "New /capture read login." }
+    writeConfigIfChanged()
+    const api = `http://127.0.0.1:${relayPorts().api}/v3`
+    try {
+      const response = await fetch(`${api}/srtconns/list`, { headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500), cache: "no-store" })
+      const targets = response.ok ? readerKickTargets(await response.json(), CAPTURE_PATH) : []
+      for (const target of targets) await fetch(`${api}/${target}`, { method: "POST", headers: { Authorization: basicAuth() }, signal: AbortSignal.timeout(1500) }).catch(() => undefined)
+    } catch { /* relay busy: old readers drop when they reconnect */ }
+    return { ok: true, note: "New /capture read login. Old SRT readers were disconnected; give them the new URL." }
   })
 }
 
@@ -813,7 +920,7 @@ export function programReadyCached(source: ProgramSource = "main"): boolean | nu
   return readSettings().programArmed ? sourceCache[source].ready : null
 }
 
-export type ProgramStatus = { armed: boolean; /** per-feed OBS login on */ feeds: { main: boolean; backup: boolean }; ready: boolean; tracks: string[]; kbps: number | null; fps: number | null; video: string | null; audio: string | null; /** What MediaMTX says OBS sends as audio (null = no audio track). */ audioTrack: { codec: string; channels: number | null; sampleRate: number | null } | null; readers: number; since: string | null }
+export type ProgramStatus = { armed: boolean; /** per-feed OBS login on */ feeds: { main: boolean; backup: boolean }; ready: boolean; tracks: string[]; kbps: number | null; fps: number | null; video: string | null; audio: string | null; /** What MediaMTX says OBS sends as audio (null = no audio track). */ audioTrack: { codec: string; channels: number | null; sampleRate: number | null } | null; readers: number; since: string | null; /** Main over SRT (same UDP port as Backup SRT) */ srt: { on: boolean; passphraseSet: boolean; port: number; latencyMs: number } }
 
 /** Channel start (destination "relay"): make sure the MediaMTX server is up. Does not touch forwards. */
 export function ensureRelayServer(): Promise<RelayResult> {
@@ -976,10 +1083,13 @@ async function reconcileUnlocked() {
   }
 }
 
-/** Pure-ish: the forward ffmpeg. The destination URL (with its key) is an argv entry: ffmpeg has no other way to take an RTMP output URL. */
+/**
+ * Pure-ish: the forward ffmpeg. The destination URL (with its key) is an argv entry: ffmpeg has no other way to take an output URL.
+ * RTMP(S): FLV. SRT: MPEG-TS over libsrt (the URL carries streamid/latency/pkt_size/passphrase). Same stats, timeouts and loop.
+ */
 export function forwardCommand(name: RelayPath, destinationUrl: string): string[] {
   return [process.env.FFMPEG_BIN || "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info", "-nostats", "-progress", "pipe:1", "-stats_period", "5",
-    "-rw_timeout", "10000000", "-i", relayReadUrl(name), "-map", "0", "-c", "copy", "-f", "flv", "-rw_timeout", "15000000", destinationUrl]
+    "-rw_timeout", "10000000", "-i", relayReadUrl(name), "-map", "0", "-c", "copy", "-f", isSrtUrl(destinationUrl) ? "mpegts" : "flv", "-rw_timeout", "15000000", destinationUrl]
 }
 
 let reconcileAt = 0
@@ -1023,7 +1133,11 @@ function logAgeMs(key: string): number | null {
  * path, or rtmp:// where the platform wants rtmps://.
  */
 export function friendlyForwardError(line: string, url?: string): string {
-  const scheme = url?.startsWith("rtmps:") ? "rtmps" : url?.startsWith("rtmp:") ? "rtmp" : null
+  const scheme = url?.startsWith("rtmps:") ? "rtmps" : url?.startsWith("rtmp:") ? "rtmp" : url && isSrtUrl(url) ? "srt" : null
+  if (scheme === "srt") {
+    if (/(Connection setup failure|connection rejected|rejected|Permission denied|authentication)/i.test(line)) return "SRT connection refused: check the streamid (path, user, pass) and passphrase, and that the far end accepts this path."
+    if (/(timed out|Operation timed out)/i.test(line)) return "SRT timed out: check host and port, and that UDP is open on the far end."
+  }
   if (/End of file/i.test(line)) return `Platform closed the connection — check the stream URL/key (TikTok/Instagram keys expire each session; get a fresh one)${scheme === "rtmp" ? ". If the platform gives an rtmps:// URL, use that" : ""}.`
   if (/Connection refused/i.test(line)) return "Connection refused — wrong server/port, or the ingest is down."
   if (/(Connection timed out|Operation timed out|timed out)/i.test(line)) return "Timed out reaching the ingest — check the server address and your network."
@@ -1062,18 +1176,18 @@ export function parseIngestLog(log: string): { listen: string | null; lastReject
     if (l) listen = l[1]
     // Only real publish refusals: auth failures, a path that isn't allowed/configured, or a taken path.
     // A reader/preview hanging up (connection reset, EOF, timeout) is not a refusal.
-    const conn = /\[RTMP\] \[conn ([^\]]+)\]/.exec(line)
+    const conn = /\[(?:RTMP|SRT)\] \[conn ([^\]]+)\]/.exec(line)
     if (conn && /(failed to authenticate|authentication failed|already being published|is not configured|not allowed|permission denied)/i.test(line) && !/closed: terminated/.test(line)) {
       const at = /^(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2})/.exec(line)?.[1] ?? ""
       const loop = /^(127\.|\[?::1\]?:)/.test(conn[1])
-      lastReject = { at, from: loop ? "this computer" : conn[1].replace(/:\d+$/, ""), text: line.replace(/^\S+ \S+ (INF|WAR|ERR) /, "").replace(/\?[^\s'"]*/g, "?…").slice(0, 200) }
+      lastReject = { at, from: loop ? "this computer" : conn[1].replace(/:\d+$/, ""), text: line.replace(/^\S+ \S+ (INF|WAR|ERR) /, "").replace(/\?[^\s'"]*/g, "?…").replace(/\b(publish|read):([\w-]+):[^\s'"]+/g, "$1:$2:…").slice(0, 200) }
     }
   }
   return { listen, lastReject }
 }
 
-export type BackupStatus = { srt: { on: boolean; passphraseSet: boolean; port: number }; lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings; audioTrack: ProgramStatus["audioTrack"] }
-export type RelayStatus = { webrtc: { on: boolean; icePort: number; iceHost: string }; ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
+export type BackupStatus = { srt: { on: boolean; passphraseSet: boolean; port: number; latencyMs: number }; lanIngest: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; /** pull source: scheme://host only (no path/keys) */ pullFrom: string | null; failover: FailoverSettings; audioTrack: ProgramStatus["audioTrack"] }
+export type RelayStatus = { webrtc: { on: boolean; icePort: number; iceHost: string }; /** /capture read-out over SRT (never the login) */ captureOut: { on: boolean; passphraseSet: boolean; port: number; latencyMs: number; lan: boolean }; ingest: IngestDiag; backup: BackupStatus; program: ProgramStatus; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; /** forwards on */ enabled: boolean; publishing: RelayPath[]; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RelayPath, RelayPathStatus> }
 
 /** The audio track OBS publishes (tracks2 if MediaMTX has it, else the plain track names). */
 export function programAudioTrack(prog: Pick<ApiPath, "tracks" | "tracks2">): ProgramStatus["audioTrack"] {
@@ -1143,6 +1257,7 @@ export async function relayStatus(): Promise<RelayStatus> {
     audio: a ? `${a.codec === "MPEG-4 Audio" ? "AAC" : a.codec} ${Math.round((a.codecProps?.sampleRate ?? 0) / 1000)}k ${a.codecProps?.channelCount === 1 ? "mono" : "stereo"}` : null,
     audioTrack: prog?.ready ? programAudioTrack(prog) : null,
     readers: prog?.readers.length ?? 0, since: prog?.ready ? prog.readyTime : null,
+    srt: { on: settings.srtMain, passphraseSet: settings.srtMainPassphrase !== "", port: srtPort(), latencyMs: srtLatencyMs() },
   }
   const lastLines = tailOf("mediamtx").split("\n").filter((line) => /ERR|FATAL/.test(line))
   // Upload estimate: every forward plus any channel publishing straight to a destination.
@@ -1152,13 +1267,14 @@ export async function relayStatus(): Promise<RelayStatus> {
   if (settings.backupPullUrl) try { const u = new URL(settings.backupPullUrl); pullFrom = `${u.protocol}//${u.host}` } catch { pullFrom = "(url)" }
   const bk = api?.get(BACKUP_PATH)
   const webrtcPreview = settings.webrtcPreview
-  const backup: BackupStatus = { srt: { on: settings.srtBackup, passphraseSet: settings.srtPassphrase !== "", port: srtPort() }, lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover, audioTrack: bk?.ready ? programAudioTrack(bk) : null }
+  const backup: BackupStatus = { srt: { on: settings.srtBackup, passphraseSet: settings.srtPassphrase !== "", port: srtPort(), latencyMs: srtLatencyMs() }, lanIngest: settings.lanIngest, ...programSourceHealth("backup"), pullFrom, failover: settings.failover, audioTrack: bk?.ready ? programAudioTrack(bk) : null }
   const parsedLog = parseIngestLog(mtx ? tailOf("mediamtx", 65536) : "")
   // Live bind from MediaMTX itself (the startup log line scrolls out of the tail on a busy relay).
   const live = api ? await liveGlobalConfig() : null
   const ingest: IngestDiag = { resyncs: mediamtxConfigResyncs(), listen: (live?.rtmpAddress !== "?" ? live?.rtmpAddress : undefined) ?? (api ? parsedLog.listen : null), lan: settings.lanIngest, lanUrl: lanServerUrl(), mdnsUrl: mdnsServerUrl(), mdns: mdnsStatus(), lastReject: parsedLog.lastReject, logFile: file("mediamtx.log") }
   return {
     webrtc: { on: webrtcPreview, icePort: webrtcPorts().ice, iceHost: webrtcIceHost() },
+    captureOut: { on: settings.srtCaptureOut, passphraseSet: settings.srtCaptureOutPassphrase !== "", port: srtPort(), latencyMs: srtLatencyMs(), lan: settings.lanIngest },
     ingest,
     backup,
     program,

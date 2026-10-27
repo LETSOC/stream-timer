@@ -5,7 +5,9 @@ import { LocalAccessPill } from "@/components/local-access-pill"
 import { pullUrlError } from "@/lib/program-source"
 import Link from "next/link"
 import { AppNav } from "@/components/app-nav"
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { fetchT, keepIfSame } from "@/lib/fetch-timeout"
+import { usePoll } from "@/lib/use-poll"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -60,10 +62,13 @@ import { AvDiagnosticsPanel } from "@/components/av-diagnostics-panel"
 import { CopyFallbackHost, copyOrShow } from "@/components/copy-fallback"
 import { PathPanels } from "@/components/path-panels"
 import { SrtOptions } from "@/components/srt-options"
+import { srtLatencyNote } from "@/lib/srt-note"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
 } from "@/lib/ffmpeg-command"
+
+type SaveFailure = "conflict" | "error" | "offline"
 
 export function OperatorConsole() {
   const [event, updateEvent] = useStoredEvent()
@@ -144,6 +149,12 @@ export function OperatorConsole() {
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
   const [program, setProgram] = useState(false)
   const [programSource, setProgramSource] = useState<"main" | "backup">("main")
+  // Main/Backup switch in flight (one at a time; the 1s poll must not flip the buttons back meanwhile).
+  const switchingRef = useRef(false)
+  const [switchingTo, setSwitchingTo] = useState<ProgramSource | null>(null)
+  // Card tap sent, server not confirmed yet: that button shows "…".
+  const [pendingScreen, setPendingScreen] = useState<Screen | null>(null)
+  const pendingTimer = useRef<number | null>(null)
   const [streamAudio, setStreamAudio] = useState<{ program: boolean; bed: boolean }>({ program: true, bed: false })
   // Both program inputs' health + failover settings (server monitor), polled; null = relay not armed.
   const [sources, setSources] = useState<ProgramSourcesView | null>(null)
@@ -191,17 +202,16 @@ export function OperatorConsole() {
   }, [])
   /** Errors and messages that aren't copies or sync. */
   const setToast = useCallback((text: string | null) => (text ? showToast("error", text) : dismissToast()), [showToast, dismissToast])
-  useEffect(() => {
-    let stop = false
-    const poll = () => fetch("/api/deck/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null; streamAudio?: { program: boolean; bed: boolean } } | null) => {
-      if (!stop && body) setSources(body.programSources ?? null)
-      if (!stop && body?.streamAudio) setStreamAudio((cur) => (cur.program === body.streamAudio!.program && cur.bed === body.streamAudio!.bed ? cur : body.streamAudio!))
-      if (!stop && (body?.programSource === "main" || body?.programSource === "backup")) setProgramSource(body.programSource)
-    }).catch(() => undefined)
-    void poll()
-    const id = window.setInterval(poll, 1000)
-    return () => { stop = true; window.clearInterval(id) }
-  }, [])
+  usePoll(async () => {
+    const response = await fetchT("/api/deck/state", { cache: "no-store" })
+    if (!response.ok) return false
+    const body = (await response.json().catch(() => null)) as { programSource?: ProgramSource; programSources?: ProgramSourcesView | null; streamAudio?: { program: boolean; bed: boolean } } | null
+    if (!body) return false
+    setSources((cur) => keepIfSame(cur, body.programSources ?? null))
+    if (body.streamAudio) setStreamAudio((cur) => (cur.program === body.streamAudio!.program && cur.bed === body.streamAudio!.bed ? cur : body.streamAudio!))
+    // While this desk's own switch is in flight, the poll must not flip the buttons back.
+    if ((body.programSource === "main" || body.programSource === "backup") && !switchingRef.current) setProgramSource(body.programSource)
+  }, 1000)
   // Failovers (and switches from other devices) toast on every desk.
   useFailoverEvents(sources?.last, (e) => showToast("failover", failoverText(e)))
   // Preview-only aids (never sent to /stream), remembered in localStorage.
@@ -291,27 +301,15 @@ export function OperatorConsole() {
 
   const pausedMs = pausedAt ? pausedAt.getTime() : 0
 
-  useEffect(() => {
-    let cancelled = false
-    const load = () => {
-      void fetch("/api/encoder", { cache: "no-store" })
-        .then((response) => response.json())
-        .then((body: { strayPublishers?: { pid: number }[]; rtmpOwnProcesses?: number; rtmpChannels?: Partial<Record<RtmpChannelId, RtmpChannelView>> }) => {
-          if (cancelled) return
-          setRtmpOwnCount(typeof body.rtmpOwnProcesses === "number" ? body.rtmpOwnProcesses : 0)
-          // Every desk polls the same server status, so both channels' state stays in sync across devices.
-          setRtmpChannels({ slate: body.rtmpChannels?.slate ?? STOPPED_CHANNEL, capture: body.rtmpChannels?.capture ?? STOPPED_CHANNEL })
-          setStrayPids(Array.isArray(body.strayPublishers) ? body.strayPublishers.map((item) => item.pid) : [])
-        })
-        .catch(() => undefined)
-    }
-    load()
-    const id = window.setInterval(load, 1500)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [])
+  usePoll(async () => {
+    const response = await fetchT("/api/encoder", { cache: "no-store" })
+    if (!response.ok) return false
+    const body = (await response.json()) as { strayPublishers?: { pid: number }[]; rtmpOwnProcesses?: number; rtmpChannels?: Partial<Record<RtmpChannelId, RtmpChannelView>> }
+    setRtmpOwnCount(typeof body.rtmpOwnProcesses === "number" ? body.rtmpOwnProcesses : 0)
+    // Every desk polls the same server status, so both channels' state stays in sync across devices.
+    setRtmpChannels((cur) => keepIfSame(cur, { slate: body.rtmpChannels?.slate ?? STOPPED_CHANNEL, capture: body.rtmpChannels?.capture ?? STOPPED_CHANNEL }))
+    setStrayPids((cur) => keepIfSame(cur, Array.isArray(body.strayPublishers) ? body.strayPublishers.map((item) => item.pid) : []))
+  }, 1500)
 
   const applyStage = useCallback((stage: Partial<StageOptions>) => {
     if (stage.checker) setChecker(stage.checker)
@@ -379,7 +377,7 @@ export function OperatorConsole() {
     }
     const savedRtmp = window.localStorage.getItem("hyphen-countdown-rtmp")
     if (savedRtmp) setLegacyRtmp(savedRtmp) // pre-server-destinations URL: offered once as "Save to server as …"
-    void fetch("/api/event", { cache: "no-store" })
+    void fetchT("/api/event", { cache: "no-store" })
       .then((response) => response.json())
       .then((body: { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; hasSaved?: boolean; rev?: unknown; recovered?: unknown }) => {
         if (typeof body.rev === "number") revRef.current = body.rev
@@ -425,24 +423,17 @@ export function OperatorConsole() {
   }, [hydrated, valid, target, testUntil, pausedMs])
 
   const loadDests = useCallback(async () => {
-    const response = await fetch("/api/rtmp-destinations", { cache: "no-store" }).catch(() => null)
-    if (!response?.ok) return
+    const response = await fetchT("/api/rtmp-destinations", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return false
     const body = (await response.json().catch(() => null)) as { selectedId?: string | null; selectedCaptureId?: string | null; items?: Dest[] } | null
-    if (body && Array.isArray(body.items)) setDests({ selectedId: body.selectedId ?? null, selectedCaptureId: body.selectedCaptureId ?? null, items: body.items })
+    if (body && Array.isArray(body.items)) { const next = { selectedId: body.selectedId ?? null, selectedCaptureId: body.selectedCaptureId ?? null, items: body.items }; setDests((cur) => keepIfSame(cur, next)) }
+    return true
   }, [])
-  useEffect(() => {
-    if (!hydrated) return
-    const first = window.setTimeout(() => void loadDests(), 0)
-    // Same cadence as desk sync, so a destination added or selected on another device shows up here.
-    const id = window.setInterval(() => void loadDests(), 2000)
-    return () => {
-      window.clearTimeout(first)
-      window.clearInterval(id)
-    }
-  }, [hydrated, loadDests])
+  // Same cadence as desk sync, so a destination added or selected on another device shows up here.
+  usePoll(() => loadDests(), 2000, hydrated)
   async function destAction(payload: Record<string, unknown>): Promise<boolean> {
     setDestError("")
-    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
+    const response = await fetchT("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
     if (!response) {
       setDestError("Could not reach the server.")
       return false
@@ -461,7 +452,7 @@ export function OperatorConsole() {
       setRevealed(null)
       return
     }
-    const response = await fetch("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal", id }) }).catch(() => null)
+    const response = await fetchT("/api/rtmp-destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal", id }) }).catch(() => null)
     if (!response || handleUnauthorized(response)) return
     const body = (await response.json().catch(() => null)) as { url?: string } | null
     if (response.ok && body?.url) {
@@ -504,15 +495,15 @@ export function OperatorConsole() {
 
   // ---------- live sync between desks (MacBook, iPhone, other tabs) ----------
   const [conflicts, setConflicts] = useState<Partial<Record<SectionId, SectionValues>>>({})
-  const syncNowRef = useRef<() => void>(() => undefined)
+  const syncNowRef = useRef<() => Promise<unknown>>(() => Promise.resolve())
   const syncStateRef = useRef({ published, draftSnap })
   useEffect(() => {
     syncStateRef.current = { published, draftSnap }
   })
   const pullRemote = useCallback(async (force = false) => {
     if (pendingSaves.current > 0 || saveTimer.current !== null) return // our own save is on its way; check next tick
-    const response = await fetch("/api/event", { cache: "no-store" }).catch(() => null)
-    if (!response?.ok) return
+    const response = await fetchT("/api/event", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return false
     const body = (await response.json().catch(() => null)) as { event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<StageOptions>; rev?: unknown } | null
     if (!body || typeof body.rev !== "number") return
     if (!force && body.rev === revRef.current) return
@@ -552,7 +543,7 @@ export function OperatorConsole() {
     }
   }, [updateEvent, applyStage, showToast, setPausedAt, setTestUntil])
   useEffect(() => {
-    syncNowRef.current = () => void pullRemote(true)
+    syncNowRef.current = () => pullRemote(true)
   }, [pullRemote])
   // Instant sync: the deck WebSocket pushes the rev on every save; the 2s poll below stays as the fallback.
   const { link: wsLink } = useDeckSocket({
@@ -562,46 +553,48 @@ export function OperatorConsole() {
       let tries = 0
       const pull = () => {
         if ((revRef.current ?? -1) >= remote.rev || tries++ > 15) return
-        syncNowRef.current()
+        void syncNowRef.current()
         window.setTimeout(pull, 150)
       }
       pull()
     },
   })
+  usePoll(() => pullRemote(), 2000, hydrated)
   useEffect(() => {
     if (!hydrated) return
-    const id = window.setInterval(() => void pullRemote(), 2000)
     const onFocus = () => void pullRemote()
     window.addEventListener("focus", onFocus)
-    document.addEventListener("visibilitychange", onFocus)
-    return () => {
-      window.clearInterval(id)
-      window.removeEventListener("focus", onFocus)
-      document.removeEventListener("visibilitychange", onFocus)
-    }
+    return () => window.removeEventListener("focus", onFocus)
   }, [hydrated, pullRemote])
 
-  /** Serialised save: one PUT at a time, in order; only the newest response updates the badge. */
-  function sendSave(payload: typeof savePayload, after?: (ok: boolean) => void) {
-    if (!token || !published) return
+  /**
+   * Serialised save: one PUT at a time, in order; only the newest response updates the badge.
+   * Each PUT has a deadline (fetchT), so one stuck request can't freeze every later tap and the sync.
+   * `after(ok, why, sentRev)`: why = "conflict" (409, stale rev), "error" (other refusal), "offline" (no answer).
+   * Returns false when nothing was sent (no session yet, or the same payload is already on its way).
+   */
+  function sendSave(payload: typeof savePayload, after?: (ok: boolean, why?: SaveFailure, sentRev?: number) => void): boolean {
+    if (!token || !published) return false
     if (saveTimer.current !== null) {
       window.clearTimeout(saveTimer.current)
       saveTimer.current = null
     }
     const json = JSON.stringify(payload)
-    if (json === lastSent.current) return
+    if (json === lastSent.current) return false
     lastSent.current = json
     const seq = ++saveSeq.current
     pendingSaves.current += 1
     saveChain.current = saveChain.current.then(async () => {
+      let sentRev: number | undefined
       try {
-        const response = await fetch("/api/event", {
+        sentRev = revRef.current
+        const response = await fetchT("/api/event", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...JSON.parse(json), rev: revRef.current }),
+          body: JSON.stringify({ ...JSON.parse(json), rev: sentRev }),
         })
         if (handleUnauthorized(response)) return
-        after?.(response.ok)
+        after?.(response.ok, response.ok ? undefined : response.status === 409 ? "conflict" : "error", sentRev)
         if (response.ok) {
           const saved = (await response.json().catch(() => null)) as { rev?: number } | null
           if (typeof saved?.rev === "number") revRef.current = saved.rev
@@ -612,7 +605,7 @@ export function OperatorConsole() {
           lastSent.current = ""
           setSyncState("conflict")
           setSyncError("Changed on another device. Pulled the latest; check any flagged sections.")
-          window.setTimeout(() => syncNowRef.current(), 0)
+          window.setTimeout(() => void syncNowRef.current(), 0)
           return
         }
         if (response.ok) {
@@ -625,7 +618,7 @@ export function OperatorConsole() {
         setSyncState("error")
         setSyncError(body?.error ?? `Server returned ${response.status}.`)
       } catch {
-        after?.(false)
+        after?.(false, "offline", sentRev)
         if (seq !== saveSeq.current) return
         lastSent.current = ""
         setSyncState("local")
@@ -634,6 +627,7 @@ export function OperatorConsole() {
         pendingSaves.current -= 1
       }
     })
+    return true
   }
   /** Put a section's saved values (or a stored draft) back into the desk fields. */
   function applyDraft(values: SectionValues) {
@@ -672,9 +666,11 @@ export function OperatorConsole() {
   function showScreen(next: Screen) {
     runTransport({ type: "screen", screen: next })
   }
+  /** Tapped card waiting for the server: " …" after its label until the save is confirmed (or fails). */
+  const busyLabel = (id: Screen, label: string) => (pendingScreen === id ? `${label} …` : label)
 
   async function uploadImage(file: File, apply: (url: string) => void) {
-    const response = await fetch("/api/upload", { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file })
+    const response = await fetchT("/api/upload", { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }, 120_000)
     if (handleUnauthorized(response)) return
     const body = (await response.json().catch(() => null)) as { url?: string; error?: string } | null
     if (response.ok && body?.url) apply(body.url)
@@ -715,7 +711,7 @@ export function OperatorConsole() {
   const endHref = operator.viewKey ? `/end?k=${encodeURIComponent(operator.viewKey)}` : "/end"
 
   async function rotateViewKey() {
-    const response = await fetch("/api/view-key", { method: "POST" })
+    const response = await fetchT("/api/view-key", { method: "POST" })
     if (handleUnauthorized(response)) return
     const body = (await response.json().catch(() => null)) as { key?: string; error?: string } | null
     if (response.ok && body?.key) setOperator((current) => ({ ...current, viewKey: body.key ?? "" }))
@@ -723,7 +719,7 @@ export function OperatorConsole() {
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined)
+    await fetchT("/api/auth/logout", { method: "POST" }).catch(() => undefined)
     hardNavigate("/login")
   }
 
@@ -747,7 +743,7 @@ export function OperatorConsole() {
    * Every Transport button goes through lib/transport (the same code the phone deck runs on the
    * server), then into this desk's state and straight to the server.
    */
-  function runTransport(action: TransportAction) {
+  function runTransport(action: TransportAction, retried = false) {
     const base = { event: published?.event ?? event, testUntil, pausedAt: pausedMs || null, stage: savePayload.stage }
     const result = applyTransport(base, action, nowMs())
     if (!result.ok) {
@@ -783,9 +779,43 @@ export function OperatorConsole() {
       updateEvent(restored)
       setPublished((current) => (current ? { ...current, event: { ...current.event, ...restored } } : current))
     }
-    sendSave({ event: next.event, testUntil: next.testUntil, pausedAt: next.pausedAt, stage: next.stage })
+    const screen = action.type === "screen" ? action.screen : null
+    const sent = sendSave({ event: next.event, testUntil: next.testUntil, pausedAt: next.pausedAt, stage: next.stage }, (ok, why, sentRev) => {
+      if (ok) return settleScreen(screen)
+      if (why === "conflict" && !retried) {
+        // Another device (or a failover) saved first. Wait until this desk has pulled that save in,
+        // then apply the same tap once more on top of it instead of silently dropping it.
+        let tries = 0
+        const again = () => {
+          // Pulled: give React a moment to commit the fresh state, so the retry builds on it.
+          if (revRef.current !== sentRev || tries++ > 12) return void window.setTimeout(() => runTransportRef.current(action, true), 100)
+          void syncNowRef.current()
+          window.setTimeout(again, 150)
+        }
+        window.setTimeout(again, 50)
+        return
+      }
+      settleScreen(screen)
+      setToast(why === "offline" ? "No answer from the server. Check the preview and tap again." : why === "conflict" ? "Changed on another device. Check the state and tap again." : "Not saved. Check the preview and tap again.")
+    })
+    if (screen && sent) {
+      setPendingScreen(screen)
+      if (pendingTimer.current !== null) window.clearTimeout(pendingTimer.current)
+      // Backstop: the save has its own deadline, this only guards against a reply that never calls back.
+      pendingTimer.current = window.setTimeout(() => setPendingScreen(null), 15_000)
+    } else if (screen) {
+      settleScreen(screen)
+    }
     return true
   }
+  function settleScreen(screen: Screen | null) {
+    if (!screen) return
+    setPendingScreen((current) => (current === screen ? null : current))
+  }
+  const runTransportRef = useRef(runTransport)
+  useEffect(() => {
+    runTransportRef.current = runTransport
+  })
   /**
    * ± min on the planned Event › End time.
    * If that section has an unsaved draft, the extension goes into the draft (Save publishes it,
@@ -818,22 +848,44 @@ export function OperatorConsole() {
     setHoldCountdown(false)
     setForceEnd(false)
   }
-  /** Main/Backup: through the server's transport (logged, synced to every device over the deck socket). */
+  /**
+   * Main/Backup: through the server's transport (logged, synced to every device over the deck socket).
+   * One switch at a time, with a deadline; the buttons show "Switching…" meanwhile.
+   */
   async function switchProgramSource(source: ProgramSource) {
-    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source }, from: "desk" }) }).catch(() => null)
-    const body = (await response?.json().catch(() => null)) as { ok?: boolean; error?: string; state?: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } } | null
-    if (!response?.ok || !body?.ok) return setToast(body?.error ?? "Could not switch the program source.")
-    if (body.state?.programSource) setProgramSource(body.state.programSource)
-    if (body.state) setSources(body.state.programSources ?? null)
+    if (switchingRef.current) return
+    switchingRef.current = true
+    setSwitchingTo(source)
+    try {
+      const response = await fetchT("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "programSource", source }, from: "desk" }) }).catch(() => null)
+      if (!response) return setToast("No answer from the server. Check Main/Backup and tap again.")
+      if (handleUnauthorized(response)) return
+      const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; state?: { programSource?: ProgramSource; programSources?: ProgramSourcesView | null } } | null
+      if (body?.state?.programSource) setProgramSource(body.state.programSource)
+      if (body?.state) setSources(body.state.programSources ?? null)
+      if (!response.ok || !body?.ok) return setToast(body?.error ?? "Could not switch the program source.")
+      // The switch saved a new revision on the server: pull it now, so this desk's next card tap isn't refused as stale.
+      window.setTimeout(() => void syncNowRef.current(), 0)
+    } finally {
+      switchingRef.current = false
+      setSwitchingTo(null)
+    }
   }
   async function saveStreamAudio(patch: { program?: boolean; bed?: boolean }) {
     const prev = streamAudio
     setStreamAudio({ ...prev, ...patch })
-    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "streamAudio", ...patch }, from: "desk" }) }).catch(() => null)
-    if (!response?.ok) { setStreamAudio(prev); setToast("Could not save the /stream audio routing.") }
+    const response = await fetchT("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "streamAudio", ...patch }, from: "desk" }) }).catch(() => null)
+    if (!response?.ok) { setStreamAudio(prev); setToast("Could not save the /stream audio routing."); return }
+    window.setTimeout(() => void syncNowRef.current(), 0)
   }
+  const saveStreamAudioRef = useRef(saveStreamAudio)
+  useEffect(() => {
+    saveStreamAudioRef.current = saveStreamAudio
+  })
+  // Stable callback, so the memoised AudioCard doesn't re-render on every desk tick.
+  const onStreamAudio = useCallback((patch: { program?: boolean; bed?: boolean }) => void saveStreamAudioRef.current(patch), [])
   async function saveFailover(patch: Partial<FailoverSettings>) {
-    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
     if (!response?.ok) setToast("Could not save the failover setting.")
   }
   const jumpPreview = (seconds: number) => runTransport({ type: "jump", seconds })
@@ -924,7 +976,7 @@ export function OperatorConsole() {
       {syncState === "conflict" ? (
         <div role="alert" data-testid="conflict-banner" className="border-b border-[#b42318]/40 bg-[#b42318]/10 px-4 py-3 font-mono text-[13px] text-[#8a1c13] sm:px-6">
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3">
-            <span>Changed in another tab or device. This tab is not saving, so it can&apos;t overwrite those changes.</span>
+            <span>Changed in another tab or device. This tab is not saving, so it can{"'"}t overwrite those changes.</span>
             <Pill size="sm" onClick={() => window.location.reload()}>Reload latest</Pill>
           </div>
         </div>
@@ -1027,7 +1079,7 @@ export function OperatorConsole() {
               <button type="button" role="radio" aria-checked={liveMode} data-testid="mode-live" onClick={() => runTransport({ type: "mode", live: true })} className={`h-8 rounded-full font-mono text-[13px] ${liveMode ? "bg-[#d93200] text-white" : "text-black/70"}`}>Live</button>
             </div>
             <div className="grid grid-cols-1 gap-2">
-              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" className={`${pillClass("live")} min-h-12 text-[16px]`} onConfirm={goLiveNow}>Go live now</ConfirmButton>
+              <ConfirmButton ref={goLiveRef} aria-keyshortcuts="G" data-on={previewRemaining?.done ? "1" : undefined} className={`${pillClass("live")} min-h-12 text-[16px] ${previewRemaining?.done ? "ring-2 ring-[#d93200] ring-offset-2" : ""}`} onConfirm={goLiveNow}>{previewRemaining?.done ? "● Live: countdown at zero" : "Go live now"}</ConfirmButton>
             </div>
             <div data-testid="transport-time" className="space-y-2 rounded-2xl bg-black/[0.03] p-2">
             <div className="flex flex-wrap gap-2">
@@ -1037,25 +1089,26 @@ export function OperatorConsole() {
                 [1800, "30min"],
                 [3600, "1 hour"],
               ].map(([seconds, label]) => (
-                <Pill key={label} size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => jumpPreview(Number(seconds))}>{label} left</Pill>
+                <Pill key={label} tone="outline" size="sm" disabled={liveMode} title={liveMode ? "Switch to Rehearsal to use test clocks" : undefined} onClick={() => jumpPreview(Number(seconds))}>{label} left</Pill>
               ))}
             </div>
             <div className="grid grid-cols-1 gap-2">
-              <Pill ref={pauseRef} aria-keyshortcuts="Space" disabled={liveMode} onClick={() => runTransport({ type: pausedAt ? "resume" : "pause" })}>
-                {pausedAt ? "Play" : "Pause"}
+              <Pill ref={pauseRef} aria-keyshortcuts="Space" tone={pausedAt ? "paused" : "outline"} aria-pressed={Boolean(pausedAt)} disabled={liveMode} onClick={() => runTransport({ type: pausedAt ? "resume" : "pause" })}>
+                {pausedAt ? "● Paused · Play" : "Pause"}
               </Pill>
             </div>
             </div>
             <div data-testid="transport-cards" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-              <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} col-span-2 whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
-              <ConfirmButton data-testid="show-welcome" className={`${pillClass(overlay === "welcome" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show welcome · confirm" onConfirm={() => showScreen("welcome")}>{overlay === "welcome" ? "● Welcome card on" : "Show welcome card"}</ConfirmButton>
-              <ConfirmButton data-testid="show-break" className={`${pillClass(overlay === "break" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show break · confirm" onConfirm={() => showScreen("break")}>{overlay === "break" ? "● Break card on" : "Show break card"}</ConfirmButton>
-              <ConfirmButton data-testid="show-hold" className={`${pillClass(overlay === "hold" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show hold · confirm" onConfirm={() => showScreen("hold")}>{overlay === "hold" ? "● Hold card on" : "Show hold card"}</ConfirmButton>
-              {SCENE_IDS.filter((id) => id.startsWith("hold")).map((id) => <ConfirmButton key={id} data-testid={`show-${id}`} className={`${pillClass(overlay === id ? "solid" : "outline")} whitespace-nowrap`} confirmLabel={`Show ${SCENE_DESK_LABEL[id]} · confirm`} onConfirm={() => showScreen(id)}>{overlay === id ? `● ${SCENE_DESK_LABEL[id]} on` : `Show ${SCENE_DESK_LABEL[id]}`}</ConfirmButton>)}
-              <ConfirmButton data-testid="show-showreel" className={`${pillClass(overlay === "showreel" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show Showreel · confirm" onConfirm={() => showScreen("showreel")}>{overlay === "showreel" ? "● Showreel on" : "Show Showreel"}</ConfirmButton>
-              <ConfirmButton data-testid="show-standby" className={`${pillClass(overlay === "standby" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Show Standby · confirm" onConfirm={() => showScreen("standby")}>{overlay === "standby" ? "● Standby on" : "Show Standby"}</ConfirmButton>
-              <ConfirmButton data-testid="show-end" holdMs={3000} className={`${pillClass()} col-span-2 min-h-12 whitespace-nowrap`} onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
-              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 min-h-12 text-[16px] whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)"}</ConfirmButton>
+              <ConfirmButton data-testid="back-to-countdown" data-on={previewScreen === "countdown" ? "1" : undefined} className={`${pillClass(previewScreen === "countdown" ? "solid" : "outline")} col-span-2 whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>{busyLabel("countdown", previewScreen === "countdown" ? "● Countdown on" : "Back to countdown")}</ConfirmButton>
+              <p data-testid="cards-desk-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#175cd3] uppercase">Desk</p>
+              {DESK_CARDS.map(([id, name]) => <ConfirmButton key={id} data-testid={`show-${id}`} data-group="desk" data-on={overlay === id ? "1" : undefined} className={`${pillClass(overlay === id ? "deskOn" : "desk")} whitespace-nowrap`} confirmLabel={`Show ${name.toLowerCase()} · confirm`} onConfirm={() => showScreen(id)}>{busyLabel(id, overlay === id ? `● ${name} card on` : `Show ${name.toLowerCase()} card`)}</ConfirmButton>)}
+              <p data-testid="cards-visuals-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#6927da] uppercase">Visuals</p>
+              {[...SCENE_IDS.filter((id) => id.startsWith("hold")), "showreel" as const, "standby" as const].map((id) => {
+                const name = SCENE_DESK_LABEL[id]
+                return <ConfirmButton key={id} data-testid={`show-${id}`} data-group="visuals" data-on={overlay === id ? "1" : undefined} className={`${pillClass(overlay === id ? "visualsOn" : "visuals")} whitespace-nowrap`} confirmLabel={`Show ${name} · confirm`} onConfirm={() => showScreen(id)}>{busyLabel(id, overlay === id ? `● ${name} on` : `Show ${name}`)}</ConfirmButton>
+              })}
+              <ConfirmButton data-testid="show-end" holdMs={3000} data-on={previewScreen === "end" ? "1" : undefined} className={`${pillClass(previewScreen === "end" ? "solid" : "outline")} col-span-2 min-h-12 whitespace-nowrap`} onConfirm={() => showScreen("end")}>{busyLabel("end", previewScreen === "end" ? "● End card on" : "Show end card now")}</ConfirmButton>
+              <ConfirmButton data-testid="show-program" className={`${pillClass(program ? "solid" : "outline")} col-span-2 min-h-12 text-[16px] whitespace-nowrap`} confirmLabel="Show OBS program · confirm" title="Full-frame OBS feed (relay /program) on /stream. Break/hold/welcome cards still go on top." onConfirm={() => showScreen("program")}>{busyLabel("program", program ? (overlay !== "none" ? "● Program (under card)" : "● Program (OBS) on") : "Show program (OBS)")}</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass()} col-span-2 no-underline`}>Open end card</a>
             </div>
             <div data-testid="transport-danger" className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
@@ -1063,9 +1116,9 @@ export function OperatorConsole() {
               <ConfirmButton ref={resetRef} aria-keyshortcuts="R" disabled={liveMode} className={pillClass("danger")} onConfirm={() => runTransport({ type: "reset" })}>Reset clock</ConfirmButton>
               <button type="button" data-testid="open-feed-lost" className={`${pillClass("outline")} col-span-2`} onClick={() => { setSectionOpen("feed-lost", true); requestAnimationFrame(() => document.getElementById("section-feed-lost")?.scrollIntoView({ behavior: "smooth", block: "center" })) }}>Open feed-lost card</button>
             </div>
-              <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
+              <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} pending={switchingTo} onBlocked={setToast} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
                 <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
-            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can&apos;t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
+            {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can{"'"}t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
             <p className="font-mono text-[12px] leading-5 text-black/70">
               Pause, play, go live, restore and the break/hold/welcome/end card buttons go to the live /stream straight away. On /stream a break, hold or welcome card beats the end card, which beats the countdown. Restore 4 Nov clears the test and puts 4 November 09:30 back in the date fields.
@@ -1230,7 +1283,7 @@ export function OperatorConsole() {
               })}
               <RelayCard />
               <VerticalCard pillClass={pillClass} />
-              <AudioCard routing={streamAudio} onRouting={(patch) => void saveStreamAudio(patch)} />
+              <AudioCard routing={streamAudio} onRouting={onStreamAudio} />
             </div>
             <Field label="Saved destinations" htmlFor="rtmp">
               <div className="space-y-2">
@@ -1315,7 +1368,7 @@ export function OperatorConsole() {
               <div role="alert" data-testid="rtmp-multiple" className="flex flex-wrap items-center gap-2 rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">
                 <span>More than one stream process is running ({rtmpOwnCount} desk supervisor{rtmpOwnCount === 1 ? "" : "s"}, {strayPids.length} other ffmpeg). Viewers may see the wrong picture.</span>
                 <ConfirmButton data-testid="rtmp-stop-all" className={pillClass("danger")} confirmLabel="Stop ALL streams? · confirm" onConfirm={async () => {
-                  const response = await fetch("/api/encoder?target=rtmp-all", { method: "DELETE" })
+                  const response = await fetchT("/api/encoder?target=rtmp-all", { method: "DELETE" }, 30_000)
                   if (handleUnauthorized(response)) return
                   const body = (await response.json().catch(() => null)) as { note?: string } | null
                   setRtmpNote(body?.note ?? "Stopped all.")
@@ -1475,8 +1528,8 @@ export function OperatorConsole() {
             <Field label="End card adjustment" htmlFor="end-offset"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Minutes from the planned end (Event › End time {endTime} on {date}). −2 = finish 2 min early, +10 = 10 min later. Can't go before the doors. An adjusted end cuts over Program when due; tap Program or Countdown to stay on past it.</p><div className="flex flex-wrap items-center gap-1">{END_STEPS.map((m) => <button key={m} type="button" data-testid={`end-offset-${m < 0 ? `minus${-m}` : m}`} onClick={() => stepEndOffset(m)} className="h-8 min-w-11 rounded-full border border-black/20 bg-white px-2 font-mono text-[13px] font-bold tabular-nums hover:bg-black/5">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span>{endOffsetMin ? <Pill size="sm" tone="outline" onClick={() => stepEndOffset(null)}>Clear</Pill> : null}</div><p id="end-offset" data-testid="end-offset-result" className="mt-1.5 font-mono text-[14px] font-bold">Planned {endTime} · {endsLabel(date, time, endTime, timeZone, endOffsetMin)}</p></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
             <div className="flex flex-wrap gap-2">
-              <ConfirmButton data-testid="show-end" holdMs={3000} className={`${pillClass()} min-h-12 whitespace-nowrap`} onConfirm={() => showScreen("end")}>Show end card now</ConfirmButton>
-              <ConfirmButton data-testid="back-to-countdown" className={`${pillClass("outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>Back to countdown</ConfirmButton>
+              <ConfirmButton data-testid="show-end" holdMs={3000} data-on={previewScreen === "end" ? "1" : undefined} className={`${pillClass(previewScreen === "end" ? "solid" : "outline")} min-h-12 whitespace-nowrap`} onConfirm={() => showScreen("end")}>{busyLabel("end", previewScreen === "end" ? "● End card on" : "Show end card now")}</ConfirmButton>
+              <ConfirmButton data-testid="back-to-countdown" data-on={previewScreen === "countdown" ? "1" : undefined} className={`${pillClass(previewScreen === "countdown" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>{busyLabel("countdown", previewScreen === "countdown" ? "● Countdown on" : "Back to countdown")}</ConfirmButton>
               <a href="/end" target="_blank" rel="noreferrer" className={`${pillClass("outline")} no-underline`}>Open end card</a>
             </div>
           </Panel>
@@ -1622,10 +1675,18 @@ export function OperatorConsole() {
 }
 
 
-function pillClass(tone: "solid" | "outline" | "danger" | "live" = "solid", size: "sm" | "md" = "md") {
-  const tones = {
+type PillTone = "solid" | "outline" | "danger" | "live" | "desk" | "deskOn" | "visuals" | "visualsOn" | "paused"
+function pillClass(tone: PillTone = "solid", size: "sm" | "md" = "md") {
+  const tones: Record<PillTone, string> = {
     solid: "bg-black text-white hover:-translate-y-px hover:bg-[#222] hover:shadow-[0_4px_12px_rgba(0,0,0,0.15)]",
-    outline: "border border-black bg-white text-black hover:-translate-y-px hover:bg-black hover:text-white",
+    // Hover only tints: a hovered button must never look like the one that is on.
+    outline: "border border-black bg-white text-black hover:-translate-y-px hover:bg-black/5",
+    // Desk cards (Welcome / Break / Hold) blue, Visuals scenes (HOLD 05–09, Standby, Showreel) purple.
+    desk: "border-2 border-[#175cd3] bg-white text-[#175cd3] hover:-translate-y-px hover:bg-[#175cd3]/10",
+    deskOn: "border-2 border-[#175cd3] bg-[#175cd3] text-white ring-2 ring-[#175cd3] ring-offset-2",
+    visuals: "border-2 border-[#6927da] bg-white text-[#6927da] hover:-translate-y-px hover:bg-[#6927da]/10",
+    visualsOn: "border-2 border-[#6927da] bg-[#6927da] text-white ring-2 ring-[#6927da] ring-offset-2",
+    paused: "bg-[#f79009] text-black hover:-translate-y-px",
     // Go-live / primary action: deep orange, 4.77:1 with white text (brand #ff3c00 stays on /stream only).
     live: "bg-[#d93200] text-white hover:-translate-y-px hover:bg-[#bf2c00] hover:shadow-[0_4px_12px_rgba(217,50,0,0.3)]",
     // Destructive: outlined red with a warning glyph so it never looks like Go live.
@@ -1643,7 +1704,7 @@ function Pill({
   size = "md",
   className = "",
   ...props
-}: React.ComponentProps<"button"> & { tone?: "solid" | "outline" | "danger" | "live"; size?: "sm" | "md" }) {
+}: React.ComponentProps<"button"> & { tone?: PillTone; size?: "sm" | "md" }) {
   return <button type="button" className={`${pillClass(tone, size)} ${className}`} {...props} />
 }
 
@@ -1944,11 +2005,11 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
     busyRef.current = "starting"
     setBusy("starting")
     setMessage({ tone: "info", text: "Connecting to the ingest server…" })
-    void fetch("/api/encoder", {
+    void fetchT("/api/encoder", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "rtmp", source: channel, destinationId: selected.id, captureSize, captureBitrate, captureEncoder, eventName: pubLine.name, dateLine: pubLine.dateLine, targetUnix: pubLine.targetUnix, refreshSeconds: 0 }),
-    })
+    }, 60_000)
       .then(async (response) => {
         if (handleUnauthorized(response)) return
         const body = (await response.json().catch(() => null)) as { error?: string; note?: string | null; rtmpChannels?: Record<RtmpChannelId, RtmpChannelView> } | null
@@ -1965,7 +2026,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
     busyRef.current = "stopping"
     setBusy("stopping")
     setMessage({ tone: "info", text: "Stopping…" })
-    void fetch(`/api/encoder?target=rtmp&source=${channel}`, { method: "DELETE" })
+    void fetchT(`/api/encoder?target=rtmp&source=${channel}`, { method: "DELETE" }, 30_000)
       .then(async (response) => {
         if (handleUnauthorized(response)) return
         const body = (await response.json().catch(() => null)) as { error?: string; note?: string | null } | null
@@ -2048,7 +2109,7 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
         <ConfirmButton data-testid={tid("stop")} className={pillClass("danger")} disabled={busy !== null || !live} confirmLabel={`Stop ${label.toLowerCase()}? · confirm`} onConfirm={stop}>{busy === "stopping" ? "Stopping…" : "Stop"}</ConfirmButton>
       </div>
       {status.connectError && live && phase !== "connected" ? <p role="alert" data-testid={tid("connect-error")} className="rounded-xl border border-[#b45309]/40 bg-[#b45309]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#7a3b06]">{status.connectError}{status.restarts > 0 ? ` · retrying (${status.restarts})` : ""}. Not live yet.</p> : null}
-      {phase === "stalled" && live ? <p role="alert" data-testid={tid("stalled")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">ffmpeg is running but hasn&apos;t reported sending video recently. Check the ingest dashboard; Stop and Start again if it&apos;s not live.</p> : null}
+      {phase === "stalled" && live ? <p role="alert" data-testid={tid("stalled")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold text-[#8a1c13]">ffmpeg is running but hasn{"'"}t reported sending video recently. Check the ingest dashboard; Stop and Start again if it{"'"}s not live.</p> : null}
       {status.adopted && live ? <p data-testid={tid("adopted")} className="font-mono text-[13px] text-black/70">Found this stream already running (started before the server restarted). Stop works on it.</p> : null}
       {status.failure && !live ? <p role="alert" data-testid={tid("failure")} className="rounded-xl border border-[#b42318]/40 bg-[#b42318]/10 px-3 py-2 font-mono text-[13px] font-bold break-words text-[#8a1c13]">Failed: {status.failure.split("\n").filter(Boolean).slice(-3).join(" · ").slice(0, 400)}</p> : null}
       {message ? <p role="status" data-testid={tid("message")} className={`font-mono text-[13px] ${message.tone === "error" ? "font-bold text-[#b42318]" : "text-black/70"}`}>{message.text}</p> : null}
@@ -2058,8 +2119,10 @@ function RtmpChannelCard({ channel, status, dests, selectedId, otherSelectedId, 
 
 type RelayForwardView = { destId: string; name: string; host: string; state: "blocked" | "off" | "waiting" | "connecting" | "forwarding" | "retrying" | "stalled"; restarts: number; reconnects: number; error: string | null; adopted: boolean; health: HealthStats }
 type RelayPathView = { name: RtmpChannelId; ready: boolean; publisher: string | null; tracks: string[]; readers: number; forwards: RelayForwardView[]; source: SourceHealth | HealthStats | null; outKbps: number; diagnosis: { level: Level; text: string } }
-type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }
-type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: { on: boolean; passphraseSet: boolean; port: number }; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
+type ProgramView = { armed: boolean; ready: boolean; tracks: string[]; kbps: number | null; readers: number; since: string | null; fps?: number | null; video?: string | null; audio?: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null; srt?: SrtView }
+type SrtView = { on: boolean; passphraseSet: boolean; port: number; latencyMs?: number }
+type CaptureOutView = { on: boolean; passphraseSet: boolean; port: number; latencyMs: number; lan: boolean }
+type RelayView = { webrtc?: { on: boolean; icePort: number; iceHost: string }; captureOut?: CaptureOutView; ingest?: { resyncs?: number; listen: string | null; lan: boolean; lanUrl: string | null; mdnsUrl?: string | null; mdns?: { state: string; name: string; host: string | null; ip: string | null; backend: string | null; conflictWith: string | null; error: string | null }; lastReject: { at: string; from?: string; text: string } | null; logFile: string }; backup?: { srt?: SrtView; lanIngest?: boolean; ready: boolean; kbps: number | null; dataAgeMs: number | null; pullFrom: string | null; audioTrack?: { codec: string; channels: number | null; sampleRate: number | null } | null }; program?: ProgramView; totalOutKbps: number; installed: boolean; bin: string | null; version: string | null; enabled: boolean; running: boolean; apiUp: boolean; adopted: boolean; restarts: number; error: string | null; paths: Record<RtmpChannelId, RelayPathView> }
 
 
 /** MediaMTX relay: on/off, per-path publisher, per-destination forward toggles with status, and a preview of what the relay receives. */
@@ -2076,7 +2139,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
     return () => window.clearTimeout(id)
   }, [obs])
   async function reveal() {
-    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-program" }) }).catch(() => null)
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-program" }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
     const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null; mdnsServer?: string | null } | null
     if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null, mdnsServer: body.mdnsServer ?? null })
@@ -2107,7 +2170,7 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
           Browser capture: {captureProgramAudio.mixing ? `mixing program audio · peak ${captureProgramAudio.peakDb === null || captureProgramAudio.peakDb === undefined ? "silent" : `${captureProgramAudio.peakDb.toFixed(0)} dBFS`}` : captureProgramAudio.on ? "program on, audio not flowing yet" : "not mixing program audio (screen isn’t program)"}
         </p>
       ) : null}
-      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can&apos;t show it.</p>
+      <p className="font-mono text-[12px] text-black/70">Arm, then point OBS (on this Mac) at the URL below. Transport › Show program (OBS) puts it full-frame on /stream; cards still go on top. Browser capture carries its sound; the Slate (ffmpeg text) can{"'"}t show it.</p>
       <div className="flex flex-wrap gap-2">
         {program?.armed ? (
           <ConfirmButton data-testid="program-disarm" className={pillClass("danger", "sm")} disabled={busy} confirmLabel="Disarm BOTH? Main and Backup get disconnected · confirm" onConfirm={() => void act({ action: "disarm-program", feed: "both" }, "Disarmed.")}>Disarm both</ConfirmButton>
@@ -2130,10 +2193,11 @@ function ProgramSection({ relay, busy, act }: { relay: RelayView | null; busy: b
         <span>Accept program ingest from LAN (second laptop). RTMP port 19350 opens on this network; OBS keys are still required and only /program and /program-backup can be published. Reads, previews and the API stay on this Mac. Toggling briefly reconnects OBS. macOS may ask once to allow incoming connections for mediamtx: click Allow.</span>
       </label>
       {relay?.backup?.lanIngest ? <MdnsRow relay={relay} busy={busy} act={act} /> : null}
+      <SrtFeed feed="main" srt={program?.srt} busy={busy} act={act} />
       {relay?.webrtc ? (
         <label className="flex items-start gap-2 font-mono text-[12px] text-black/70">
           <input type="checkbox" data-testid="webrtc-preview" className="mt-0.5 size-4 shrink-0" checked={relay.webrtc.on} disabled={busy} onChange={(e) => void act({ action: "webrtc-preview", on: e.target.checked }, e.target.checked ? "Fast previews (WebRTC) on." : "Previews use HLS (~3s).")} />
-          <span>Fast previews (WebRTC): desk and deck previews play in under a second (badge LIVE &lt;1s), muted; turning sound on, or any failure, falls back to HLS (~3s). Read-only: nothing can publish over WebRTC. Phones need UDP/TCP {relay.webrtc.icePort} to this Mac{relay.webrtc.iceHost === "127.0.0.1" ? " (now this Mac only: start with BIND_HOST=0.0.0.0)" : ""}; allow mediamtx in the macOS firewall.</span>
+          <span>Fast previews (WebRTC): desk and deck previews play in under a second (badge LIVE {"<"}1s), muted; turning sound on, or any failure, falls back to HLS (~3s). Read-only: nothing can publish over WebRTC. Phones need UDP/TCP {relay.webrtc.icePort} to this Mac{relay.webrtc.iceHost === "127.0.0.1" ? " (now this Mac only: start with BIND_HOST=0.0.0.0)" : ""}; allow mediamtx in the macOS firewall.</span>
         </label>
       ) : null}
       {obs ? (
@@ -2163,44 +2227,100 @@ function CredRow({ label, value, copyLabel, testid }: { label: string; value: st
 }
 
 /** /program-backup: a second publisher (own key) or a URL MediaMTX pulls. Switch/failover is in Transport. */
-/** Optional SRT ingest for the Backup computer (UDP): additive, RTMP keeps working. */
-function SrtBackup({ relay, busy, act }: { relay: RelayView | null; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
-  const srt = relay?.backup?.srt
-  const [srtUrl, setSrtUrl] = useState<{ url: string | null; lan: boolean; port: number; note: string } | null>(null)
+const SRT_FEED = {
+  backup: { action: "srt-backup", reveal: "reveal-backup-srt", tid: "backup-srt", label: "Backup", who: "OBS 2", hint: "for OBS 2 on Wi-Fi" },
+  main: { action: "srt-main", reveal: "reveal-program-srt", tid: "main-srt", label: "Main", who: "the Main encoder", hint: "for OBS / an ATEM with SRT" },
+} as const
+
+/** Optional SRT ingest for Main or Backup (UDP, one shared port, own toggle/passphrase each): additive, RTMP keeps working. */
+function SrtFeed({ feed, srt, busy, act }: { feed: keyof typeof SRT_FEED; srt: SrtView | undefined; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const f = SRT_FEED[feed]
+  const [srtUrl, setSrtUrl] = useState<{ url: string | null; lan: boolean; port: number; latencyMs?: number; note: string } | null>(null)
   const [pp, setPp] = useState("")
   useEffect(() => {
     if (!srtUrl) return
     const id = window.setTimeout(() => setSrtUrl(null), 30_000)
     return () => window.clearTimeout(id)
   }, [srtUrl])
-  if (!srt || relay?.backup?.pullFrom) return null
+  if (!srt) return null
   async function reveal() {
-    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup-srt" }) }).catch(() => null)
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: f.reveal }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
     setSrtUrl((await response.json().catch(() => null)) as typeof srtUrl)
   }
   const ppError = pp.trim() && (pp.trim().length < 10 || pp.trim().length > 79) ? "10 to 79 characters" : null
   return (
-    <div data-testid="backup-srt" className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
+    <div data-testid={f.tid} className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
       <label className="flex items-start gap-2">
-        <input type="checkbox" data-testid="backup-srt-on" className="mt-0.5 size-4 shrink-0" checked={srt.on} disabled={busy} onChange={(e) => void act({ action: "srt-backup", on: e.target.checked }, e.target.checked ? `Backup also accepts SRT on UDP ${srt.port}.` : "SRT for Backup is off.")} />
-        <span>Also accept Backup over SRT (UDP {srt.port}) · for OBS 2 on Wi-Fi. RTMP keeps working.</span>
+        <input type="checkbox" data-testid={`${f.tid}-on`} className="mt-0.5 size-4 shrink-0" checked={srt.on} disabled={busy} onChange={(e) => void act({ action: f.action, on: e.target.checked }, e.target.checked ? `${f.label} also accepts SRT on UDP ${srt.port}.` : `SRT for ${f.label} is off.`)} />
+        <span>Also accept {f.label} over SRT (UDP {srt.port}) · {f.hint}. RTMP keeps working.</span>
       </label>
       {srt.on ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <Input data-testid="backup-srt-passphrase" type="password" autoComplete="off" placeholder={srt.passphraseSet ? "passphrase set (hidden) · type a new one" : "SRT passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
-            <Pill size="sm" data-testid="backup-srt-passphrase-save" disabled={busy || !pp.trim() || Boolean(ppError)} onClick={() => { void act({ action: "srt-backup", passphrase: pp.trim() }, "SRT passphrase saved: update OBS 2."); setPp(""); setSrtUrl(null) }}>Set</Pill>
-            {srt.passphraseSet ? <Pill size="sm" tone="outline" data-testid="backup-srt-passphrase-clear" disabled={busy} onClick={() => { void act({ action: "srt-backup", passphrase: "" }, "SRT passphrase removed."); setSrtUrl(null) }}>No passphrase</Pill> : null}
+            <Input data-testid={`${f.tid}-passphrase`} type="password" autoComplete="off" placeholder={srt.passphraseSet ? "passphrase set (hidden) · type a new one" : "SRT passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
+            <Pill size="sm" data-testid={`${f.tid}-passphrase-save`} disabled={busy || !pp.trim() || Boolean(ppError)} onClick={() => { void act({ action: f.action, passphrase: pp.trim() }, `SRT passphrase saved: update ${f.who}.`); setPp(""); setSrtUrl(null) }}>Set</Pill>
+            {srt.passphraseSet ? <Pill size="sm" tone="outline" data-testid={`${f.tid}-passphrase-clear`} disabled={busy} onClick={() => { void act({ action: f.action, passphrase: "" }, "SRT passphrase removed."); setSrtUrl(null) }}>No passphrase</Pill> : null}
           </div>
           {ppError ? <p className="text-[#b42318]">Passphrase: {ppError}</p> : null}
-          <Pill size="sm" tone="outline" data-testid="backup-srt-reveal" onClick={() => (srtUrl ? setSrtUrl(null) : void reveal())}>{srtUrl ? "Hide SRT URL" : "SRT URL for OBS 2"}</Pill>
+          <Pill size="sm" tone="outline" data-testid={`${f.tid}-reveal`} onClick={() => (srtUrl ? setSrtUrl(null) : void reveal())}>{srtUrl ? "Hide SRT URL" : `SRT URL for ${f.who}`}</Pill>
           {srtUrl?.url ? (
-            <div data-testid="backup-srt-obs" className="space-y-1 rounded-lg bg-black/5 p-2">
-              <CredRow label="SRT" value={srtUrl.url} copyLabel="SRT URL for OBS 2" testid="backup-srt-url" />
-              <p className={srtUrl.lan ? "text-black/70" : "text-[#b45309]"}>{srtUrl.note} latency=300000 is 300 ms (µs in OBS); raise to 500000 on bad Wi-Fi. macOS: allow incoming UDP {srtUrl.port} for mediamtx (System Settings › Network › Firewall). Hides in 30s.</p>
+            <div data-testid={`${f.tid}-obs`} className="space-y-1 rounded-lg bg-black/5 p-2">
+              <CredRow label="SRT" value={srtUrl.url} copyLabel={`SRT URL for ${f.who}`} testid={`${f.tid}-url`} />
+              <p className={srtUrl.lan ? "text-black/70" : "text-[#b45309]"}>{srtUrl.note} {srtLatencyNote(srtUrl.latencyMs ?? srt.latencyMs)}. Open UDP {srtUrl.port} in the firewall (macOS: allow incoming connections for mediamtx). Hides in 30s.</p>
             </div>
           ) : srtUrl ? <p className="text-black/70">{srtUrl.note}</p> : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+/** Outside clients READ /capture over SRT (own read-only login). Any change rewrites MediaMTX's config, so every change is two taps. */
+function CaptureSrtOut({ out, busy, act }: { out: CaptureOutView | undefined; busy: boolean; act: (payload: Record<string, unknown>, okText?: string) => Promise<void> }) {
+  const [view, setView] = useState<{ url: string | null; server: string | null; streamid: string | null; passphrase: string | null; lan: boolean; port: number; latencyMs: number; note: string } | null>(null)
+  const [pp, setPp] = useState("")
+  useEffect(() => {
+    if (!view) return
+    const id = window.setTimeout(() => setView(null), 30_000)
+    return () => window.clearTimeout(id)
+  }, [view])
+  if (!out) return null
+  async function reveal() {
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-capture-srt" }) }).catch(() => null)
+    if (!response || handleUnauthorized(response) || !response.ok) return
+    setView((await response.json().catch(() => null)) as typeof view)
+  }
+  const restart = "Restarts MediaMTX: drops publishers and pushes"
+  const ppError = pp.trim() && (pp.trim().length < 10 || pp.trim().length > 79) ? "10 to 79 characters" : null
+  return (
+    <div data-testid="capture-srt-out" className="space-y-1.5 rounded-lg border border-black/10 p-2 font-mono text-[12px]">
+      <ConfirmButton role="checkbox" aria-checked={out.on} data-testid="capture-srt-out-on" className="flex w-full items-start gap-2 rounded text-left" disabled={busy} confirmLabel={`${restart} · tap again to ${out.on ? "turn off" : "turn on"}`} onConfirm={() => { setView(null); void act({ action: "srt-capture-out", on: !out.on }, out.on ? "SRT read-out of /capture is off." : `/capture can be read over SRT on UDP ${out.port}.`) }}>
+        <span aria-hidden className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border border-black/50 text-[11px] leading-none ${out.on ? "bg-black text-white" : "bg-white"}`}>{out.on ? "✓" : ""}</span>
+        <span>Allow reading the output (/capture) over SRT (UDP {out.port}), with its own read-only login.</span>
+      </ConfirmButton>
+      <p className="text-[#b45309]">Changing this (or its passphrase) restarts MediaMTX and drops current publishers and pushes. Set it before the show.</p>
+      {out.on ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input data-testid="capture-srt-out-passphrase" type="password" autoComplete="off" placeholder={out.passphraseSet ? "passphrase set (hidden) · type a new one" : "read passphrase (optional, 10–79 chars)"} value={pp} onChange={(e) => setPp(e.target.value)} className="min-w-0 flex-1" />
+            <ConfirmButton data-testid="capture-srt-out-passphrase-save" className={pillClass("solid", "sm")} disabled={busy || !pp.trim() || Boolean(ppError)} confirmLabel={`${restart} · confirm`} onConfirm={() => { void act({ action: "srt-capture-out", passphrase: pp.trim() }, "Read passphrase saved: update the readers."); setPp(""); setView(null) }}>Set</ConfirmButton>
+            {out.passphraseSet ? <ConfirmButton data-testid="capture-srt-out-passphrase-clear" className={pillClass("outline", "sm")} disabled={busy} confirmLabel={`${restart} · confirm`} onConfirm={() => { void act({ action: "srt-capture-out", passphrase: "" }, "Read passphrase removed."); setView(null) }}>No passphrase</ConfirmButton> : null}
+          </div>
+          {ppError ? <p className="text-[#b42318]">Passphrase: {ppError}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Pill size="sm" tone="outline" data-testid="capture-srt-out-reveal" onClick={() => (view ? setView(null) : void reveal())}>{view ? "Hide read URL" : "Reveal read URL"}</Pill>
+            <ConfirmButton data-testid="capture-srt-out-rotate" className={pillClass("outline", "sm")} disabled={busy} confirmLabel="New login? Current SRT readers are cut off · confirm" onConfirm={() => { setView(null); void act({ action: "rotate-capture-read" }, "New /capture read login. Reveal it and update the readers.") }}>Regenerate login</ConfirmButton>
+          </div>
+          {view?.url && view.server && view.streamid ? (
+            <div data-testid="capture-srt-out-urls" className="space-y-1 rounded-lg bg-black/5 p-2">
+              <CredRow label="URL" value={view.url} copyLabel="SRT read URL" testid="capture-srt-out-url" />
+              <CredRow label="Server" value={view.server} copyLabel="SRT server" testid="capture-srt-out-server" />
+              <CredRow label="Stream" value={view.streamid} copyLabel="SRT streamid" testid="capture-srt-out-streamid" />
+              {view.passphrase ? <CredRow label="Pass" value={view.passphrase} copyLabel="SRT passphrase" testid="capture-srt-out-pass" /> : null}
+              <p className={view.lan ? "text-black/70" : "text-[#b45309]"}>{view.note} Latency {view.latencyMs} ms ({view.latencyMs * 1000} µs in the URL). Hides in 30s.</p>
+            </div>
+          ) : view ? <p className="text-black/70">{view.note}</p> : null}
         </>
       ) : null}
     </div>
@@ -2218,7 +2338,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
     return () => window.clearTimeout(id)
   }, [obs])
   async function reveal() {
-    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup" }) }).catch(() => null)
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reveal-backup" }) }).catch(() => null)
     if (!response || handleUnauthorized(response) || !response.ok) return
     const body = (await response.json().catch(() => null)) as { server?: string; streamKey?: string; lanServer?: string | null; mdnsServer?: string | null } | null
     if (body?.server && body.streamKey) setObs({ server: body.server, streamKey: body.streamKey, lanServer: body.lanServer ?? null, mdnsServer: body.mdnsServer ?? null })
@@ -2245,7 +2365,7 @@ function BackupSection({ relay, busy, act }: { relay: RelayView | null; busy: bo
           <CredRow label="Key" value={obs.streamKey} copyLabel="Backup stream key" testid="backup-obs-key" />
         </div>
       ) : null}
-      <SrtBackup relay={relay} busy={busy} act={act} />
+      {relay?.backup?.pullFrom ? null : <SrtFeed feed="backup" srt={relay?.backup?.srt} busy={busy} act={act} />}
       <SrtOptions />
       <div className="flex flex-wrap items-center gap-2">
         <Input data-testid="backup-pull-url" placeholder={backup?.pullFrom ? "pull URL set (hidden) · type a new one" : "Pull from URL (optional): rtmp://… or https://…/index.m3u8"} value={pull} onChange={(e) => setPull(e.target.value)} className="min-w-0 flex-1" />
@@ -2279,25 +2399,22 @@ function MdnsRow({ relay, busy, act }: { relay: RelayView | null; busy: boolean;
   )
 }
 
-function RelayCard() {
+const RelayCard = memo(RelayCardInner)
+function RelayCardInner() {
   const [relay, setRelay] = useState<RelayView | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [preview, setPreview] = useState<RtmpChannelId | null>(null)
   const load = useCallback(async () => {
-    const response = await fetch("/api/relay", { cache: "no-store" }).catch(() => null)
-    if (!response || !response.ok) return
+    const response = await fetchT("/api/relay", { cache: "no-store" }).catch(() => null)
+    if (!response || !response.ok) return false
     const body = (await response.json().catch(() => null)) as RelayView | null
-    if (body?.paths) setRelay(body)
+    if (body?.paths) setRelay((cur) => keepIfSame(cur, body))
   }, [])
-  useEffect(() => {
-    const first = window.setTimeout(() => void load(), 0)
-    const id = window.setInterval(() => void load(), 2000)
-    return () => { window.clearTimeout(first); window.clearInterval(id) }
-  }, [load])
+  usePoll(() => load(), 2000)
   async function act(payload: Record<string, unknown>, okText?: string) {
     setBusy(true)
-    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 30_000).catch(() => null)
     setBusy(false)
     if (!response) return setMessage({ tone: "error", text: "Could not reach the server." })
     if (handleUnauthorized(response)) return
@@ -2338,6 +2455,7 @@ function RelayCard() {
               <span data-testid={`relay-source-${name}`} data-ready={info?.ready ? "yes" : "no"} className={info?.ready ? "text-[#128a3e]" : "text-black/60"}>{info?.ready ? `● receiving ${info.tracks.join(" + ")}` : `no publisher (set ${name === "slate" ? "Slate" : "Browser capture"} → Relay)`}</span>
             </div>
             <p className="font-mono text-[12px] text-black/60">Forwards: tick per destination in Saved destinations (right column).</p>
+            {name === "capture" ? <CaptureSrtOut out={relay?.captureOut} busy={busy} act={act} /> : null}
             {info && (info.forwards.length > 0 || info.source) && info.ready ? <DiagnosisLine testid={`relay-diagnosis-${name}`} value={info.diagnosis} /> : null}
             <Pill size="sm" tone="outline" data-testid={`relay-preview-${name}`} aria-pressed={preview === name} disabled={!info?.ready} onClick={() => setPreview(preview === name ? null : name)}>{preview === name ? "Hide preview" : "Preview what the relay receives"}</Pill>
             {preview === name && info?.ready ? (
@@ -2417,7 +2535,8 @@ function fmtDuration(sec: number) {
 }
 
 /** Per-channel stream audio (silence / test tone / looped audio bed) with a shared library. Saved on the server (rev-synced), edited as a draft. */
-function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: boolean }; onRouting: (patch: { program?: boolean; bed?: boolean }) => void }) {
+const AudioCard = memo(AudioCardInner)
+function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; bed: boolean }; onRouting: (patch: { program?: boolean; bed?: boolean }) => void }) {
   const [saved, setSaved] = useState<AudioSettingsView | null>(null)
   const [files, setFiles] = useState<AudioFileView[]>([])
   const [draft, setDraft] = useState<AudioSettingsView["channels"] | null>(null)
@@ -2426,18 +2545,15 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   const [playing, setPlaying] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const apply = useCallback((body: { settings?: AudioSettingsView; files?: AudioFileView[] } | null) => {
-    if (body?.settings) setSaved(body.settings)
-    if (body?.files) setFiles(body.files)
+    if (body?.settings) setSaved((cur) => keepIfSame(cur, body.settings!))
+    if (body?.files) setFiles((cur) => keepIfSame(cur, body.files!))
   }, [])
   const load = useCallback(async () => {
-    const response = await fetch("/api/audio", { cache: "no-store" }).catch(() => null)
-    if (response?.ok) apply(await response.json().catch(() => null))
+    const response = await fetchT("/api/audio", { cache: "no-store" }).catch(() => null)
+    if (!response?.ok) return false
+    apply(await response.json().catch(() => null))
   }, [apply])
-  useEffect(() => {
-    const first = window.setTimeout(() => void load(), 0)
-    const id = window.setInterval(() => void load(), 2000)
-    return () => { window.clearTimeout(first); window.clearInterval(id) }
-  }, [load])
+  usePoll(() => load(), 2000)
   const view = draft ?? saved?.channels ?? null
   const dirty = draft !== null && saved !== null && JSON.stringify(draft) !== JSON.stringify(saved.channels)
   function edit(ch: RtmpChannelId, patch: Partial<AudioConfigView>) {
@@ -2446,7 +2562,7 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   }
   async function post(url: string, init: RequestInit) {
     setBusy(true)
-    const response = await fetch(url, init).catch(() => null)
+    const response = await fetchT(url, init, 180_000).catch(() => null)
     setBusy(false)
     if (!response) { setMessage({ tone: "error", text: "Could not reach the server." }); return null }
     if (handleUnauthorized(response)) return null
@@ -2591,6 +2707,8 @@ function AudioCard({ routing, onRouting }: { routing: { program: boolean; bed: b
   )
 }
 
+/** The original desk cards (blue on the desk, Transport › Desk). */
+const DESK_CARDS = [["welcome", "Welcome"], ["break", "Break"], ["hold", "Hold"]] as const
 const SCENE_DESK_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby", showreel: "Showreel" }
 const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>

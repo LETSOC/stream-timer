@@ -4,6 +4,8 @@ import { AudioBar, usePreviewAudio } from "@/components/preview-audio"
 import { isViewerMuted, programWantsSound, resetViewerChoice, viewerHasChosen } from "@/components/stream-audio-overlay"
 import { stallBackoffMs, useResumeGeneration } from "@/lib/use-resume"
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { fetchT } from "@/lib/fetch-timeout"
+import { usePoll } from "@/lib/use-poll"
 import type Hls from "hls.js"
 import { PreviewBadge } from "@/components/preview-badge"
 import { OverlayCard } from "@/components/overlay-card"
@@ -613,17 +615,13 @@ function useHoldUntil(ms: number | undefined, now: number): number | null {
 /** Desk previews have no deck socket: ask the (operator-readable) public state whether OBS is sending (and whether a re-arm is in progress). */
 function usePolledReady(enabled: boolean) {
   const [state, setState] = useState<{ ready: boolean; rearmHoldMs: number }>({ ready: false, rearmHoldMs: 0 })
-  useEffect(() => {
-    if (!enabled) return
-    let stop = false
-    const poll = () => fetch("/api/public/state", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((body: { programReady?: unknown; rearmHoldMs?: unknown } | null) => {
-      if (stop) return
-      const next = { ready: body?.programReady === true, rearmHoldMs: typeof body?.rearmHoldMs === "number" ? body.rearmHoldMs : 0 }
-      setState((cur) => (cur.ready === next.ready && cur.rearmHoldMs === next.rearmHoldMs ? cur : next))
-    }).catch(() => undefined)
-    void poll()
-    const id = window.setInterval(poll, 1500)
-    return () => { stop = true; window.clearInterval(id) }
-  }, [enabled])
+  // One request at a time, paused while the tab is hidden (lib/poll).
+  usePoll(async () => {
+    const r = await fetchT("/api/public/state", { cache: "no-store" })
+    const body = (r.ok ? await r.json() : null) as { programReady?: unknown; rearmHoldMs?: unknown } | null
+    if (!body) return false
+    const next = { ready: body.programReady === true, rearmHoldMs: typeof body.rearmHoldMs === "number" ? body.rearmHoldMs : 0 }
+    setState((cur) => (cur.ready === next.ready && cur.rearmHoldMs === next.rearmHoldMs ? cur : next))
+  }, 1500, enabled)
   return state
 }
