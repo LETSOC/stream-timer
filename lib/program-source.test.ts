@@ -40,7 +40,7 @@ test("autoReturn off: stays on backup; manual backup is not auto-returned", () =
 })
 test("parseFailover clamps and defaults", () => {
   assert.deepEqual(parseFailover(null), DEFAULT_FAILOVER)
-  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true })
+  assert.deepEqual(parseFailover({ auto: true, stallSec: 0.2, returnSec: 9999, autoReturn: false }), { auto: true, stallSec: 1, returnSec: 600, autoReturn: false, switchBufferMs: 1000, returnMode: "auto", flapCount: 3, flapWindowSec: 300, flapStableSec: 60, autoRearm: true, crossfadeMs: 0 })
 })
 
 test("backup dies while on air and main is fine: back to main (auto on), not with auto off", () => {
@@ -124,4 +124,30 @@ test("a Main that never started isn't counted as a failure", () => {
   let mem: FailoverMemory = FRESH_MEMORY, t = 0
   for (let i = 0; i < 20; i++) { t += 500; mem = failoverStep({ active: "main", main: { ready: false, kbps: null, dataAgeMs: null }, backup: good, settings: s, memory: mem, now: t }).memory }
   assert.equal(mem.mainFails?.length, 0)
+})
+
+test("after a Mac sleep the stall timers restart: no 'Backup stalled 4927s' switch on wake", async () => {
+  const { failoverMemoryAfterSleep, failoverStep, DEFAULT_FAILOVER, FRESH_MEMORY } = await import("./program-source")
+  const settings = { ...DEFAULT_FAILOVER, auto: true }
+  const ok = { ready: true, kbps: 3000, dataAgeMs: 100 }
+  const dead = { ready: true, kbps: 0, dataAgeMs: 4_927_000 }
+  const before = { ...FRESH_MEMORY, mainSeenOk: true, backupBadSince: 1000, mainGoodSince: 1000 }
+  const wake = 4_928_000
+  // Without the reset this tick would switch to Main
+  assert.equal(failoverStep({ active: "backup", main: ok, backup: dead, settings, memory: before, now: wake }).switchTo, "main")
+  const memory = failoverMemoryAfterSleep(before, wake)
+  assert.equal(memory.backupBadSince, wake)
+  assert.equal(memory.mainGoodSince, wake)
+  assert.equal(memory.mainBadSince, null)
+  assert.equal(failoverStep({ active: "backup", main: ok, backup: dead, settings, memory, now: wake }).switchTo, null)
+  // A real stall after waking is still caught once stallSec passes
+  assert.equal(failoverStep({ active: "backup", main: ok, backup: dead, settings, memory, now: wake + 3000 }).switchTo, "main")
+})
+
+test("sleep reset keeps flap history and who switched", async () => {
+  const { failoverMemoryAfterSleep, FRESH_MEMORY } = await import("./program-source")
+  const m = failoverMemoryAfterSleep({ ...FRESH_MEMORY, failedOver: true, mainFails: [5, 6], mainBadSince: 10 }, 99)
+  assert.deepEqual(m.mainFails, [5, 6])
+  assert.equal(m.failedOver, true)
+  assert.equal(m.mainBadSince, 99)
 })

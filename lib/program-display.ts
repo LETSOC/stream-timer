@@ -130,6 +130,25 @@ export function diagPrefix(i: { touch: boolean; capturePage: boolean; obs: boole
 }
 
 /** Phone muted preview mounts only the on-air input (and the hand-over target). Desktop/OBS/capture prewarm both. */
+/**
+ * Any muted operator preview of /stream (?mute=1: deck, builder Live / multiview iframes) on any device,
+ * never Browser capture or OBS (they never pass ?mute=1). Lighter players: only the on-air input (plus a
+ * hand-over target) is mounted, and its HLS is capped to the frame size with a short buffer.
+ */
+export function previewLight(i: { mute: boolean; capturePage: boolean }): boolean {
+  return i.mute && !i.capturePage
+}
+
+/** hls.js extras for a light preview (merged over the normal tuning); none for the real output. */
+export function previewHlsCaps(light: boolean): Record<string, number | boolean> {
+  return light ? { capLevelToPlayerSize: true, maxBufferLength: 4, maxMaxBufferLength: 6, backBufferLength: 2 } : {}
+}
+
+/** Mount a preview iframe only while its box is on screen and the tab is visible. */
+export function previewFrameShown(i: { intersecting: boolean; docVisible: boolean }): boolean {
+  return i.intersecting && i.docVisible
+}
+
 export function previewMountSource(i: { gentle: boolean; live: boolean }): boolean {
   return !i.gentle || i.live
 }

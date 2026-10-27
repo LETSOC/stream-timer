@@ -1,4 +1,7 @@
 "use client"
+import { useShown } from "@/lib/use-shown"
+import { useLoadAlert } from "@/lib/use-load-alert"
+import { LoadPaused } from "@/components/load-paused"
 
 /**
  * Desktop Visuals builder (/visuals/builder, operator only): Library · Preview · Inspector.
@@ -271,7 +274,7 @@ export function VisualsBuilder() {
                 hide={cdHide} className="absolute inset-0 h-full w-full" />
             ) : programBg === "live" ? (
               // Real /stream (same as Live tab top): true overlay timing. Muted.
-              <iframe data-testid="vb-program-stream" title="/stream (program background)" src="/stream?mute=1" className="pointer-events-none absolute inset-0 h-full w-full border-0" />
+              <ShownFrame testId="vb-program-stream" title="/stream (program background)" src="/stream?mute=1" className="pointer-events-none absolute inset-0 h-full w-full border-0" />
             ) : programBg === "relay" && feed.path ? (
               // Relay player behind the overlays: follows Main/Backup, delayed reference, muted by default.
               <div data-testid="vb-program-live" data-source={feed.source} className="absolute inset-0 bg-black"><StreamPlayer key={feed.path} src={`/api/relay/hls/${feed.path}/index.m3u8`} scope="builder-program" /></div>
@@ -516,6 +519,8 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
   const [gen, setGen] = useState(0)
   const [touch] = useState(() => typeof window !== "undefined" && muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }))
   const [showMv, setShowMv] = useState(!touch)
+  const liveShown = useShown(box) // hidden tab / scrolled away: unmount the /stream iframe (stops its players)
+  const loadGate = useLoadAlert() // Mac overloaded: live frame and multiview hidden (manual "show anyway")
   useEffect(() => {
     const node = box.current
     if (!node) return
@@ -534,7 +539,7 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div ref={box} data-testid="vb-live" className="relative min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#2a2a2a] bg-black max-xl:min-h-[46dvh]">
-        <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1&diag=1" className="pointer-events-none absolute top-1/2 left-1/2 origin-center border-0" style={{ width: 1920, height: 1080, transform: `translate(-50%, -50%) scale(${scale})` }} />
+        {loadGate.paused ? <LoadPaused reason={loadGate.alert?.reason ?? ""} onShow={loadGate.showAnyway} className="absolute inset-0" /> : liveShown ? <iframe key={gen} data-testid="vb-live-frame" data-gen={gen} title="/stream (on air)" src="/stream?mute=1&diag=1" className="pointer-events-none absolute top-1/2 left-1/2 origin-center border-0" style={{ width: 1920, height: 1080, transform: `translate(-50%, -50%) scale(${scale})` }} /> : null}
         <span data-testid="vb-live-onair" className="absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full bg-[#d93200] px-2.5 py-1 font-mono text-[10px] font-bold tracking-[0.15em] text-white uppercase"><span className="size-1.5 rounded-full bg-white" />On air</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -543,7 +548,7 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
       </div>
 
       {/* Main | Backup multiview — hidden on touch until tapped (two extra decodes). Desktop shows it. */}
-      {showMv ? (
+      {showMv && !loadGate.paused ? (
       <div data-testid="vb-multiview" className="grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-2">
         {([
           { id: "main", label: "Main", path: "program", ready: mainReady },
@@ -558,10 +563,19 @@ function LiveMonitor({ state }: { state: { programSource?: "main" | "backup"; pr
           </div>
         ))}
       </div>
-      ) : (
+      ) : showMv ? null : (
         <button type="button" data-testid="vb-multiview-show" onClick={() => setShowMv(true)} className="self-start rounded-full border border-white/20 px-3 py-1 font-mono text-[11px] text-white hover:bg-white/10">Show Main | Backup</button>
       )}
       <p className="font-mono text-[10px] text-white/40">{showMv ? "Main and Backup, muted (WebRTC). Unmute one only if you need to hear it." : "Multiview hidden on this device. Tap to load Main and Backup."}</p>
     </div>
   )
+}
+
+/** A /stream preview iframe mounted only while on screen and the tab is visible. */
+function ShownFrame({ testId, title, src, className }: { testId: string; title: string; src: string; className: string }) {
+  const box = useRef<HTMLDivElement>(null)
+  const shown = useShown(box)
+  const loadGate = useLoadAlert()
+  if (loadGate.paused) return <LoadPaused reason={loadGate.alert?.reason ?? ""} onShow={loadGate.showAnyway} className="absolute inset-0" />
+  return <div ref={box} className="absolute inset-0">{shown ? <iframe data-testid={testId} title={title} src={src} className={className} /> : null}</div>
 }

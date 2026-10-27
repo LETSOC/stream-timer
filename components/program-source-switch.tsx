@@ -6,7 +6,7 @@ import { rttLabel } from "@/lib/rtt"
 import { useEffect, useRef, useState } from "react"
 import { PROGRAM_SOURCES, SOURCE_LABEL, type FailoverEvent, type FailoverSettings, type ProgramSource, type SourceHealth, hasSignal } from "@/lib/program-source"
 import type { ProgramSourcesView } from "@/lib/transport"
-import { disarmPlan, FEED_LABEL, other, type ArmScope, type Feed } from "@/lib/program-arm"
+import { disarmPlan, FEED_LABEL, feedDisarmedInView, other, type ArmScope, type Feed } from "@/lib/program-arm"
 
 /** "publishing · 3.2 Mb/s · 0.2s" / "stalled 4s" / "not publishing" for one input. */
 export function sourceStatus(h: SourceHealth | undefined): { tone: "ok" | "warn" | "off"; text: string } {
@@ -89,6 +89,7 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
   const [stall, setStall] = useState<string | null>(null)
   const [ret, setRet] = useState<string | null>(null)
   const [buf, setBuf] = useState<string | null>(null)
+  const [xf, setXf] = useState<string | null>(null)
   // Manual switch = two taps (like the other risky buttons): the first arms "Tap again…" for 3s.
   // Auto-failover and "Return now" don't go through this.
   const [armed, setArmed] = useState<ProgramSource | null>(null)
@@ -110,9 +111,11 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
           const dead = !!view && !on && !hasSignal(h)
           const state = h?.state
           const notReady = !!view && hasSignal(h) && h?.readyOk === false
+          // Disarmed (per feed, or the whole relay when view is null): shown on the button, Arm is below.
+          const off = feedDisarmedInView(view, source)
           const stateCls = state === "healthy" ? "bg-[#067647] text-white" : state === "suspect" ? "bg-[#f79009] text-black" : "bg-[#b42318] text-white"
           return (
-            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || dead} data-no-signal={dead || undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} data-armed={armedFor === source ? "1" : undefined} onClick={() => {
+            <button key={source} type="button" role="radio" aria-checked={on} data-testid={`program-source-${source}`} data-state={st.tone} disabled={disabled || dead} data-no-signal={dead || undefined} title={dead ? `${SOURCE_LABEL[source]}: no signal` : undefined} data-armed={armedFor === source ? "1" : undefined} data-disarmed={off || undefined} onClick={() => {
                 if (on) { onSwitch(source); return }
                 if (armedFor !== source) { setArmed(source); return }
                 setArmed(null)
@@ -124,10 +127,11 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
               <span className="flex min-w-0 items-center gap-1.5">
                 {view && h?.ready ? <span data-testid={`program-source-${source}-ready`} data-ready={h.readyOk ? "yes" : "no"} title={h.readyOk ? "READY: video + audio, fps stable, data fresh, 48 kHz" : `Not ready: ${h.issues?.join(", ")}`} aria-label={h.readyOk ? "READY" : "not ready"} className={`size-2.5 shrink-0 rounded-full ${h.readyOk ? "bg-[#12b76a]" : "border-2 border-[#f79009]"}`} /> : null}
                 <span className="min-w-0 truncate text-[15px] font-black">{on ? "● " : ""}{SOURCE_LABEL[source]}{source === "backup" && view?.backup.pull ? " (pull)" : ""}</span>
-                {view && state ? <span data-testid={`program-source-${source}-state`} data-input-state={state} title={h?.stateReason ?? undefined} className={`ml-auto shrink-0 rounded px-1 py-px font-mono text-[9px] font-bold leading-tight ${stateCls}`}>{STATE_LABEL[state]}</span> : null}
+                {off ? <span data-testid={`program-source-${source}-disarmed`} className="ml-auto shrink-0 rounded border border-current px-1 py-px font-mono text-[9px] font-bold leading-tight text-[#f79009]">DISARMED</span> : null}
+                {view && state && !off ? <span data-testid={`program-source-${source}-state`} data-input-state={state} title={h?.stateReason ?? undefined} className={`ml-auto shrink-0 rounded px-1 py-px font-mono text-[9px] font-bold leading-tight ${stateCls}`}>{STATE_LABEL[state]}</span> : null}
               </span>
               {armedFor === source ? <span data-testid={`program-source-${source}-confirm`} className={`block font-mono text-[11px] font-bold ${dark ? "text-[#fdb022]" : "text-[#b42318]"}`}>Tap again to switch to {SOURCE_LABEL[source]}</span> : null}
-              <span data-testid={`program-source-${source}-status`} className={`block truncate font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view ? (dead ? `no signal · ${st.text}` : h?.ready ? (h.readyOk ? "READY" : `not ready: ${h.issues?.join(", ")}`) : st.text) : "relay not armed"}</span>
+              <span data-testid={`program-source-${source}-status`} className={`block truncate font-mono text-[11px] ${on ? "" : tones[st.tone]}`}>{view && off ? "DISARMED · OBS can't publish · Arm below" : view ? (dead ? `no signal · ${st.text}` : h?.ready ? (h.readyOk ? "READY" : `not ready: ${h.issues?.join(", ")}`) : st.text) : "DISARMED · two-tap Arm below"}</span>
               {view && h?.ready ? (
                 <span data-testid={`program-source-${source}-readout`} className="mt-1 grid grid-cols-1 gap-x-1.5 font-mono text-[10px] leading-snug opacity-80 min-[520px]:grid-cols-2">
                   {readoutRows(h).map(([k, v]) => (
@@ -176,13 +180,24 @@ export function ProgramSourceSwitch({ view, active, onSwitch, onFailover, onMark
             after
             <input type="number" min={2} max={600} data-testid="failover-return-sec" disabled={disabled || !f.autoReturn} value={ret ?? String(f.returnSec)} onChange={(e) => setRet(e.target.value)} onBlur={() => { if (ret !== null && Number(ret) > 0) onFailover({ returnSec: Number(ret) }); setRet(null) }} className={`w-14 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s healthy
           </label>
-          <label className="flex items-center gap-1" title="Flapping guard (Automatic): more than N Main failures in the window → hold Backup until Main is stable this long">flapping: &gt;
+          <label className="flex items-center gap-1" title="Flapping guard (Automatic): more than N Main failures in the window → hold Backup until Main is stable this long">flapping: {">"}
             <input type="number" min={1} max={20} data-testid="failover-flap-count" disabled={disabled} defaultValue={f.flapCount} key={`fc${f.flapCount}`} onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v !== f.flapCount) onFailover({ flapCount: v }) }} className={`w-10 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />fails in
             <input type="number" min={1} max={60} data-testid="failover-flap-window" disabled={disabled} defaultValue={f.flapWindowSec / 60} key={`fw${f.flapWindowSec}`} onBlur={(e) => { const v = Math.round(Number(e.target.value) * 60); if (v > 0 && v !== f.flapWindowSec) onFailover({ flapWindowSec: v }) }} className={`w-10 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />min → hold until stable
             <input type="number" min={5} max={1800} data-testid="failover-flap-stable" disabled={disabled} defaultValue={f.flapStableSec} key={`fs${f.flapStableSec}`} onBlur={(e) => { const v = Number(e.target.value); if (v > 0 && v !== f.flapStableSec) onFailover({ flapStableSec: v }) }} className={`w-14 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s
           </label>
           <label className="flex items-center gap-1">switch buffer
             <input type="number" min={0} max={5} step={0.5} data-testid="failover-switch-buffer" disabled={disabled} value={buf ?? String(f.switchBufferMs / 1000)} onChange={(e) => setBuf(e.target.value)} onBlur={() => { if (buf !== null && Number(buf) >= 0) onFailover({ switchBufferMs: Math.round(Number(buf) * 1000) }); setBuf(null) }} className={`w-12 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />s
+          </label>
+          <label className="flex items-center gap-1" title="Main↔Backup audio, manual and auto-failover. Crossfade blends the two inputs (equal-power) when both have audio; a dead input always cuts. The picture always cuts.">switch audio
+            <select data-testid="failover-switch-audio" disabled={disabled} value={f.crossfadeMs > 0 ? "fade" : "cut"} onChange={(e) => onFailover({ crossfadeMs: e.target.value === "fade" ? 250 : 0 })} className={`rounded border px-1 ${dark ? "border-white/20 bg-black" : "border-black/20"}`}>
+              <option value="cut">Hard cut</option>
+              <option value="fade">Crossfade</option>
+            </select>
+            {f.crossfadeMs > 0 ? (
+              <>
+                <input type="number" min={100} max={1000} step={50} data-testid="failover-crossfade-ms" disabled={disabled} value={xf ?? String(f.crossfadeMs)} onChange={(e) => setXf(e.target.value)} onBlur={() => { const v = Number(xf); if (xf !== null && Number.isFinite(v)) onFailover({ crossfadeMs: Math.min(1000, Math.max(100, Math.round(v))) }); setXf(null) }} className={`w-14 rounded border px-1 ${dark ? "border-white/20 bg-transparent" : "border-black/20"}`} />ms
+              </>
+            ) : null}
           </label>
         </div>
       ) : null}

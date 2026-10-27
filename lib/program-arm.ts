@@ -19,6 +19,14 @@ export function parseDisarmed(raw: unknown): FeedDisarmed {
 /** Is this feed's OBS login on? */
 export const feedArmed = (s: ArmState, f: Feed) => s.programArmed && !s.disarmed[f]
 
+/**
+ * Pure, for the desk + deck: is this feed disarmed as the switch sees it? `armed` is the view's
+ * per-feed flags; a null view means the relay isn't armed at all (both feeds disarmed).
+ */
+export function feedDisarmedInView(view: { armed?: Partial<Record<Feed, boolean>> } | null | undefined, f: Feed): boolean {
+  return !view || view.armed?.[f] === false
+}
+
 /** Pure: the arm state after an arm/disarm of `scope`. Both feeds off = fully disarmed (programArmed false, as before). */
 export function nextArmState(cur: ArmState, op: "arm" | "disarm", scope: ArmScope): ArmState {
   const on: FeedDisarmed = { main: feedArmed(cur, "main"), backup: feedArmed(cur, "backup") }

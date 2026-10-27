@@ -21,13 +21,18 @@ import { SAFE_X_PX, SAFE_Y_PX } from "@/lib/visuals"
 import { VisualsLayer } from "@/components/visuals-layer"
 import { StreamBed, type StreamBedPlan } from "@/components/stream-bed"
 import { ProgramFeed } from "@/components/program-feed"
-import { captureStartReady, handoverDone, previewGentle, previewMountSource, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
+import { captureStartReady, handoverDone, previewGentle, previewLight, previewMountSource, SWITCH_BUFFER_MS, type ProgramDisplay } from "@/lib/program-display"
 import { muteOnlyAudio } from "@/lib/preview-audio"
+import { crossfadeMsOf, pageShouldFade, programAudioRouted } from "@/lib/switch-crossfade"
 import { endCardAt } from "@/lib/transport"
 import { asEventConfig, resolveEvent } from "@/lib/event-storage"
 import { SyncTestOverlay } from "@/components/sync-test-overlay"
 import { TC_BADGE_W, TC_GAP, TimecodeBadge } from "@/components/timecode-badge"
 import { parseFps } from "@/lib/av-diagnostics"
+import { countAudioContexts, startMemLog } from "@/lib/page-health"
+
+// Capture page: count AudioContexts from the start (for the [mem] dropout line).
+if (typeof window !== "undefined" && isCapturePage()) countAudioContexts()
 
 const OVERRIDE_KEYS = ["name", "date", "time", "end", "tz", "venue", "rsvp", "badge", "rsvpLabel", "scan", "join", "link", "linkText", "x", "fb", "li", "ig", "yt"]
 
@@ -63,6 +68,8 @@ function useCaptureHeartbeat() {
     const w = window as unknown as { __hb?: number }
     w.__hb = 0
     const id = window.setInterval(() => { w.__hb = (w.__hb ?? 0) + 1 }, 1000)
+    // Once a minute: page memory + live players/elements/contexts, to spot a slow build-up over a long run.
+    startMemLog((line) => playerDiag("·", line))
     return () => window.clearInterval(id)
   }, [])
 }
@@ -84,6 +91,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
     touch: muteOnlyAudio({ ua: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints ?? 0, coarsePointer: window.matchMedia?.("(pointer: coarse)").matches ?? false, deck: false }),
     capturePage: isCapturePage(),
   }))
+  // Any muted operator preview (desk too, not only touch): skip the standby input (one player, not two).
+  const [lightPreview] = useState(() => typeof window !== "undefined" && previewLight({ mute: new URLSearchParams(window.location.search).get("mute") === "1", capturePage: isCapturePage() }))
   const hasOverrides = OVERRIDE_KEYS.some((key) => params.get(key))
   const viewKey = params.get("k") ?? ""
   const [blocked, setBlocked] = useState(false)
@@ -124,6 +133,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [bed, setBed] = useState<StreamBedPlan>(null)
   const [programReady, setProgramReady] = useState(false)
   const [switchBufferMs, setSwitchBufferMs] = useState(SWITCH_BUFFER_MS)
+  const [crossfadeMs, setCrossfadeMs] = useState(0)
   /** local time until which a disarm/arm cycle holds the last frame (server sends ms left) */
   const [rearmHoldUntil, setRearmHoldUntil] = useState<number | null>(null)
   const [sourceReady, setSourceReady] = useState<{ main: boolean; backup: boolean }>({ main: false, backup: false })
@@ -140,7 +150,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           if (!cancelled) setBlocked(false)
           return response.json()
         })
-        .then((body: { bed?: unknown; switchBufferMs?: unknown; rearmHoldMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
+        .then((body: { bed?: unknown; switchBufferMs?: unknown; crossfadeMs?: unknown; rearmHoldMs?: unknown; programReady?: unknown; mainReady?: unknown; backupReady?: unknown; build?: unknown; event?: unknown; testUntil?: unknown; pausedAt?: unknown; stage?: Partial<Record<keyof StageOptions, unknown>> }) => {
           const next = asEventConfig(body.event)
           if (cancelled) return
           if (reloadIfRebuilt(body.build)) return
@@ -149,6 +159,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           setPausedAt(typeof body.pausedAt === "number" ? body.pausedAt : null)
           setProgramReady(body.programReady === true)
           if (typeof body.switchBufferMs === "number") setSwitchBufferMs(body.switchBufferMs)
+          setCrossfadeMs(crossfadeMsOf(body.crossfadeMs))
           setRearmHoldUntil(typeof body.rearmHoldMs === "number" && body.rearmHoldMs > 0 ? Date.now() + body.rearmHoldMs : null)
           setSourceReady((cur) => (cur.main === (body.mainReady === true) && cur.backup === (body.backupReady === true) ? cur : { main: body.mainReady === true, backup: body.backupReady === true }))
           const nextBed = (body.bed && typeof body.bed === "object" ? body.bed : null) as StreamBedPlan
@@ -253,6 +264,24 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
     if (handing) playerDiag("·", `hand-over ${air.source === "main" ? "Main" : "Backup"} → ${wanted === "main" ? "Main" : "Backup"} started (${airAlive ? `old input healthy: stays on air until the new one has played ${switchBufferMs}ms` : "old input frozen/gone: cut at the new one's first frame"})`)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- log once per hand-over start
   }, [handing, air.source, wanted, switchBufferMs])
+  // Audio crossfade (page side: OBS Browser Source, viewer tabs). The picture has already cut; the old
+  // input's sound fades out while the new one fades in, only if the old one was healthy (had audio).
+  const [fade, setFade] = useState<{ out: "main" | "backup"; in: "main" | "backup" } | null>(null)
+  const prevAir = useRef(air.source)
+  useEffect(() => {
+    const from = prevAir.current
+    prevAir.current = air.source
+    if (from === air.source) return
+    const go = !capturePage && pageShouldFade({ ms: crossfadeMs, outAlive: alive[from] && sourceReady[from], outRouted: programAudioRouted(from), inRouted: programAudioRouted(air.source) })
+    // Capture page: its sound is the capture script's program-audio mix, which does the crossfade itself
+    // (its own "[capture] [switch] crossfade …" line), so this page never fades and says so.
+    playerDiag("·", `[switch] ${capturePage ? "page picture cut (audio crossfade done by the capture mix)" : go ? `page crossfade ${crossfadeMs}ms` : crossfadeMs > 0 ? "page hard cut (crossfade skipped: old input had no audio or WebAudio not running)" : "page hard cut"} → ${air.source === "main" ? "Main" : "Backup"}`)
+    if (!go) { setFade(null); return }
+    setFade({ out: from, in: air.source })
+    const id = window.setTimeout(() => setFade(null), crossfadeMs + 50) // UI state only; the gain runs on the audio clock
+    return () => window.clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on a switch only
+  }, [air.source])
   const handStart = useRef<number | null>(null)
   useEffect(() => {
     if (handing) { handStart.current ??= Date.now(); return }
@@ -281,9 +310,9 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
       {(["main", "backup"] as const).map((source) => {
         const isAir = source === air.source
         const live = isAir || (handing && source === wanted)
-        if (!previewMountSource({ gentle: gentlePreview, live })) return null
+        if (!previewMountSource({ gentle: gentlePreview || lightPreview, live })) return null
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || !isAir} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || (!isAir && fade?.out !== source)} crossfadeMs={crossfadeMs} tail={fade?.out === source} fadeIn={fade?.in === source} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} />
       })}
       <StreamAudioOverlay />
       {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} hold={isScene(shownScreen) && Boolean(stage.scenes[shownScreen]?.video) && stage.scenes[shownScreen]?.pauseBed === true} viewKey={viewKey} /> : null}

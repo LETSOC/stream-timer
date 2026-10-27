@@ -26,5 +26,5 @@ export async function GET(request: Request) {
   // In-page bed for /stream (only when routed): the capture channel's bed settings, file ids only.
   const cap = state.stage.streamBedAudio ? readAudioSettings().channels.capture : null
   const bed = cap ? { mode: cap.mode, files: cap.files, shuffle: cap.order === "shuffle", volumeDb: cap.volumeDb, toneHz: cap.toneHz, toneDb: cap.toneDb, fadeInSec: cap.fadeInSec } : null
-  return Response.json({ ...publicState(state), bed, programReady: programReadyNow, mainReady, backupReady, switchBufferMs: readSettings().failover.switchBufferMs, rearmHoldMs: rearmHoldLeftMs(), build: process.env.APP_BUILD ?? null }, { headers })
+  return Response.json({ ...publicState(state), bed, programReady: programReadyNow, mainReady, backupReady, switchBufferMs: readSettings().failover.switchBufferMs, crossfadeMs: readSettings().failover.crossfadeMs, rearmHoldMs: rearmHoldLeftMs(), build: process.env.APP_BUILD ?? null }, { headers })
 }
