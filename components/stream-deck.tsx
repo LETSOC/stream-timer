@@ -21,6 +21,9 @@ import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { CARD_OVERLAYS } from "@/lib/stage"
+import { isScene } from "@/lib/visuals-assets"
+import { fetchT } from "@/lib/fetch-timeout"
+import { usePoll } from "@/lib/use-poll"
 import { deckScreen, effectiveNow, endCardAt, END_STEPS, endsLabel, formatOffset, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
@@ -91,20 +94,13 @@ export function StreamDeck() {
     const id = window.setTimeout(() => setToast(null), toast.undo ? TOAST_UNDO_MS : TOAST_MS)
     return () => window.clearTimeout(id)
   }, [toast])
-  useEffect(() => {
-    if (preview === "off" || preview === "stream") return
-    let cancelled = false
-    const load = async () => {
-      const body = (await (await fetch("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: Record<string, { ready?: boolean }> } | null
-      if (!cancelled && body?.paths) setRelayReady({ slate: body.paths.slate?.ready === true, capture: body.paths.capture?.ready === true, vertical: body.paths.vertical?.ready === true })
-    }
-    void load()
-    const id = window.setInterval(() => void load(), 2000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [preview])
+  // One request at a time, with a deadline, paused while hidden (lib/poll).
+  usePoll(async () => {
+    const body = (await (await fetchT("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: Record<string, { ready?: boolean }> } | null
+    if (!body?.paths) return false
+    const next = { slate: body.paths.slate?.ready === true, capture: body.paths.capture?.ready === true, vertical: body.paths.vertical?.ready === true }
+    setRelayReady((cur) => (cur && cur.slate === next.slate && cur.capture === next.capture && cur.vertical === next.vertical ? cur : next))
+  }, 2000, preview !== "off" && preview !== "stream")
 
   useFailoverEvents(state?.programSources?.last, (e) => {
     const alarm = e.auto && e.from !== e.to // a re-arm/note is informational, a switch is an alarm
@@ -112,7 +108,7 @@ export function StreamDeck() {
     if (alarm && navigator.vibrate) navigator.vibrate([60, 60, 60])
   })
   async function saveFailover(patch: Partial<FailoverSettings>) {
-    const response = await fetch("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
+    const response = await fetchT("/api/relay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "failover", failover: patch }) }).catch(() => null)
     if (!response?.ok) setToast({ tone: "error", text: "Could not save the failover setting." })
   }
 
@@ -149,7 +145,7 @@ export function StreamDeck() {
     }
   }
 
-  const button = (key: string, action: TransportAction, label: ReactNode, tone: "live" | "danger" | "solid" | "outline" | "on" = "solid", extra = "") => {
+  const button = (key: string, action: TransportAction, label: ReactNode, tone: "live" | "danger" | "solid" | "outline" | "on" | "desk" | "deskOn" | "visuals" | "visualsOn" = "solid", extra = "") => {
     const disabled = !state || (live && lockedInLive(action)) || (busy !== null && busy !== key)
     const isArmed = armed === key
     const tones = {
@@ -158,6 +154,11 @@ export function StreamDeck() {
       solid: "bg-white/10 text-white active:bg-white/20",
       outline: "border border-white/30 bg-transparent text-white active:bg-white/10",
       on: "bg-[#D9FF43] text-black",
+      // Desk cards (Welcome / Break / Hold) blue, Visuals scenes (HOLD 05–09, Standby, Showreel) purple.
+      desk: "border border-[#53b1fd] bg-[#53b1fd]/10 text-[#b2ddff] active:bg-[#53b1fd]/25",
+      deskOn: "bg-[#53b1fd] text-black",
+      visuals: "border border-[#9b8afb] bg-[#9b8afb]/10 text-[#d9d6fe] active:bg-[#9b8afb]/25",
+      visualsOn: "bg-[#9b8afb] text-black",
     }
     return (
       <button
@@ -273,14 +274,18 @@ export function StreamDeck() {
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Screen</h2>
       <div className="grid grid-cols-2 gap-2">
-        {(["countdown", ...CARD_OVERLAYS] as const).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "on" : "solid"))}
+        {button("screen-countdown", { type: "screen", screen: "countdown" }, screen === "countdown" ? `● ${SCREEN_LABEL.countdown}` : SCREEN_LABEL.countdown, screen === "countdown" ? "on" : "solid", "col-span-2")}
+        <p data-testid="deck-cards-desk-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#84caff] uppercase">Desk</p>
+        {CARD_OVERLAYS.filter((name) => !isScene(name)).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "deskOn" : "desk"))}
+        <p data-testid="deck-cards-visuals-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#bdb4fe] uppercase">Visuals</p>
+        {CARD_OVERLAYS.filter((name) => isScene(name)).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "visualsOn" : "visuals"))}
         {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : screen === "end" ? "Program · end card over it (tap to stay on)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
         {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn{"'"}t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
         {/* Always shown (like the desk): disarmed feeds stay visible with a two-tap Arm, even with both off. */}
         {state ? (
           <div className="col-span-2 mt-1">
             <h2 className="mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Program source</h2>
-            <ProgramSourceSwitch dark view={state.programSources ?? null} active={state.programSource} disabled={busy !== null} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => setToast({ tone: r.ok ? "ok" : "error", text: r.text })) }} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
+            <ProgramSourceSwitch dark view={state.programSources ?? null} active={state.programSource} disabled={busy !== null} pending={busy?.startsWith("source-") ? (busy.slice(7) as "main" | "backup") : null} onBlocked={(text) => setToast({ tone: "error", text })} onSwitch={(source) => void act(`source-${source}`, { type: "programSource", source })} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => setToast({ tone: r.ok ? "ok" : "error", text: r.text })) }} onMark={(type, note) => { void markDropout(typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches ? "phone" : "deck", type, note).then((r) => setToast(r.ok ? { tone: "ok", text: markToast(r) } : { tone: "error", text: r.error })) }} />
           </div>
         ) : null}
         {state?.programSources ? <LanIngestInfo /> : null}
