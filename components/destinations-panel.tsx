@@ -15,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ConfirmButton } from "@/components/confirm-button"
 import { joinRtmpServerAndKey, splitRtmpUrl } from "@/lib/rtmp-join"
 import { handleUnauthorized } from "@/lib/use-operator"
+import { fetchT, keepIfSame } from "@/lib/fetch-timeout"
+import { usePoll } from "@/lib/use-poll"
 
 export type PanelDest = { id: string; name: string; host: string; masked: string; display?: string; createdAt: number; activateAt?: number | null; timerPath?: "slate" | "capture" | "vertical" | null }
 type Tone = "solid" | "outline" | "danger" | "live"
@@ -103,7 +105,8 @@ export function timerTag(at: number | null | undefined, path: PanelDest["timerPa
 }
 
 async function post(url: string, payload: Record<string, unknown>): Promise<{ ok: boolean; body: Record<string, unknown> | null; status: number }> {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null)
+  // Generous deadline: saving a destination can re-arm a live forward on the server.
+  const response = await fetchT(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 30_000).catch(() => null)
   if (!response) return { ok: false, body: { error: "Could not reach the server." }, status: 0 }
   if (handleUnauthorized(response)) return { ok: false, body: null, status: response.status }
   const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
@@ -125,14 +128,11 @@ export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChang
   const note = (tone: "ok" | "error", text: string) => { setStatus({ tone, text }); onNote(tone, text) }
   const formRef = useRef<HTMLFormElement | null>(null)
   const loadPaths = useCallback(async () => {
-    const body = (await (await fetch("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: Paths } | null
-    if (body?.paths) setPaths(body.paths)
+    const body = (await (await fetchT("/api/relay", { cache: "no-store" }).catch(() => null))?.json().catch(() => null)) as { paths?: Paths } | null
+    if (!body?.paths) return false
+    setPaths((cur) => keepIfSame(cur, body.paths!))
   }, [])
-  useEffect(() => {
-    const first = window.setTimeout(() => void loadPaths(), 0)
-    const id = window.setInterval(() => void loadPaths(), 3000)
-    return () => { window.clearTimeout(first); window.clearInterval(id) }
-  }, [loadPaths])
+  usePoll(loadPaths, 3000)
   useEffect(() => {
     if (!revealed) return
     const id = window.setTimeout(() => setRevealed(null), 30_000)
