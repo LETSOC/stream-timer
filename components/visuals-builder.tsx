@@ -10,6 +10,7 @@ import { LoadPaused } from "@/components/load-paused"
  * deck socket and are marked "applies live". The preview is the real VisualsLayer at 1920x1080, scaled.
  */
 import Link from "next/link"
+import { LinkPill } from "@/components/link-pill"
 import { AppNav } from "@/components/app-nav"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
@@ -19,7 +20,7 @@ import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_LABEL, sanitiz
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { parseStage, socialLook } from "@/lib/stage"
 import { endCardAt, type TransportAction } from "@/lib/transport"
-import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
+import { useDeckSocket } from "@/lib/use-deck-socket"
 import { CORNER_LABEL, CORNERS, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
 import { addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
@@ -37,7 +38,6 @@ function LibGroup({ title, children }: { title: string; children: ReactNode }) {
     </div>
   )
 }
-const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling", offline: "Offline" }
 const COMPONENT_LABEL: Record<LayoutPart | "ticker", string> = { ...LAYOUT_PART_LABEL, ticker: "Ticker bar" }
 
 const panel = "rounded-[14px] border border-[#2a2a2a] bg-[#141414]"
@@ -209,7 +209,6 @@ export function VisualsBuilder() {
           <h1 className="font-sans text-xl font-black tracking-tight uppercase">Visuals builder</h1>
         </div>
         <AppNav page="builder" />
-        <span className="font-mono text-[11px] text-white/45">{LINK_LABEL[link]}</span>
         <div className="ml-6 flex gap-1" role="group" aria-label="Screen">
           {(["countdown", "program"] as const).map((s) => <button key={s} type="button" data-testid={`vb-screen-${s}`} aria-pressed={!liveView && screen === s} onClick={() => { setScreen(s); setLiveView(false) }} className={chip(!liveView && screen === s)}>{s === "countdown" ? "Countdown" : "Program"}</button>)}
           <button type="button" data-testid="vb-screen-live" aria-pressed={liveView} title="The real /stream page, muted: what goes on air" onClick={() => setLiveView(true)} className={chip(liveView)}>Live</button>
@@ -221,6 +220,7 @@ export function VisualsBuilder() {
           {dirty ? <span className="font-mono text-[11px] text-[#FF6A00]">Unsaved changes</span> : null}
           <button type="button" data-testid="vb-revert" disabled={!dirty || saving} onClick={() => setDraft(draftFrom(savedStage))} className={btn}>Revert</button>
           <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className="rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold text-[#0a0a0a] disabled:opacity-35">{saving ? "Saving…" : "Save"}</button>
+          <LinkPill link={link} testId="vb-link-state" />
 
         </div>
       </header>
@@ -432,7 +432,7 @@ export function VisualsBuilder() {
                       <select data-testid="vb-motion" className={field} value={live?.strapMotion ?? "slide-left"} onChange={(e) => void act({ type: "strap", motion: e.target.value as StrapMotion })}>{STRAP_MOTIONS.map((m) => <option key={m} value={m}>{STRAP_MOTION_LABEL[m]}</option>)}</select></label>
                     <label className="grid gap-1"><Label live>Style override</Label>
                       <select data-testid="vb-style-override" className={field} value={live?.strapStyle ?? ""} onChange={(e) => void act({ type: "strap", style: e.target.value as StrapStyle | "" })}>
-                        <option value="">Each preset&apos;s own style</option>
+                        <option value="">Each preset's own style</option>
                         {STRAP_STYLES.map((m) => <option key={m} value={m}>{STRAP_STYLE_LABEL[m]}</option>)}
                       </select></label>
                   </>
