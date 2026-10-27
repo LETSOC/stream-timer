@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { DeckState, TransportAction } from "@/lib/transport"
 import { handleUnauthorized, hardNavigate } from "@/lib/use-operator"
+import { fetchT } from "@/lib/fetch-timeout"
+import { usePoll } from "@/lib/use-poll"
 
 export type DeckLink = "connecting" | "live" | "polling" | "offline"
 export type DeckResult = { ok: boolean; status: number; error?: string; state?: DeckState; via: "ws" | "http" }
@@ -12,6 +14,12 @@ export function backoffMs(attempt: number, random = Math.random()): number {
   const base = Math.min(10_000, 500 * 2 ** Math.max(0, attempt))
   return Math.round(base * (0.8 + 0.4 * random))
 }
+
+/** Heartbeat: every HEARTBEAT_MS the client says "hello"; no message back within HEARTBEAT_REPLY_MS = dead link. */
+export const HEARTBEAT_MS = 10_000
+export const HEARTBEAT_REPLY_MS = 5_000
+/** How long an action over the socket waits for its result before the link is treated as dead. */
+export const ACTION_REPLY_MS = 5_000
 
 /**
  * Live transport state over the deck WebSocket (same port as the app), with HTTP fallback:
@@ -23,6 +31,8 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
   const wsRef = useRef<WebSocket | null>(null)
   const pending = useRef(new Map<number, (result: DeckResult) => void>())
   const seq = useRef(0)
+  // Drops the current socket (half-open: open on this side, dead on the other) and reconnects.
+  const dropRef = useRef<(reason: string) => void>(() => undefined)
   const onStateRef = useRef(onState)
   useEffect(() => {
     onStateRef.current = onState
@@ -37,15 +47,53 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
     let stopped = false
     let attempt = 0
     let retry: number | null = null
+    let beat: number | null = null
+    let beatReply: number | null = null
+    const stopBeat = () => {
+      if (beat !== null) window.clearInterval(beat)
+      if (beatReply !== null) window.clearTimeout(beatReply)
+      beat = null
+      beatReply = null
+    }
+    const failPending = (error: string) => {
+      for (const resolve of pending.current.values()) resolve({ ok: false, status: 0, error, via: "ws" })
+      pending.current.clear()
+    }
+    const drop = (reason: string) => {
+      const old = wsRef.current
+      if (!old || stopped) return
+      wsRef.current = null
+      stopBeat()
+      old.onclose = null
+      old.onmessage = null
+      try { old.close() } catch { /* already closing */ }
+      failPending(reason)
+      setLink(poll ? "polling" : "offline")
+      if (retry !== null) window.clearTimeout(retry)
+      retry = window.setTimeout(connect, backoffMs(attempt++))
+    }
+    dropRef.current = drop
     const connect = () => {
       if (stopped) return
+      retry = null
       const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/deck/ws`)
       wsRef.current = ws
       ws.onopen = () => {
         attempt = 0
         setLink("live")
+        stopBeat()
+        // The server answers "hello" with the current state. Any message counts as the reply.
+        beat = window.setInterval(() => {
+          if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN || document.visibilityState === "hidden" || beatReply !== null) return
+          try { ws.send(JSON.stringify({ type: "hello" })) } catch { return drop("Connection dropped; check the state.") }
+          beatReply = window.setTimeout(() => {
+            beatReply = null
+            if (wsRef.current === ws) drop("Connection dropped; check the state.")
+          }, HEARTBEAT_REPLY_MS)
+        }, HEARTBEAT_MS)
       }
       ws.onmessage = (event) => {
+        if (beatReply !== null) { window.clearTimeout(beatReply); beatReply = null }
         let message: { type?: string; id?: number; state?: DeckState; ok?: boolean; status?: number; error?: string }
         try {
           message = JSON.parse(String(event.data))
@@ -60,9 +108,10 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
         }
       }
       ws.onclose = (event) => {
-        if (wsRef.current === ws) wsRef.current = null
-        for (const resolve of pending.current.values()) resolve({ ok: false, status: 0, error: "Connection dropped; check the state.", via: "ws" })
-        pending.current.clear()
+        if (wsRef.current !== ws) return
+        wsRef.current = null
+        stopBeat()
+        failPending("Connection dropped; check the state.")
         if (stopped) return
         if (event.code === 4401) {
           hardNavigate(`/login?next=${encodeURIComponent(window.location.pathname)}`)
@@ -81,9 +130,10 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
       if (document.visibilityState !== "visible") { hiddenAt ??= Date.now(); return }
       const away = hiddenAt !== null && Date.now() - hiddenAt > 3000
       hiddenAt = null
-      if (wsRef.current && away) { const old = wsRef.current; wsRef.current = null; old.onclose = null; old.close(); for (const resolve of pending.current.values()) resolve({ ok: false, status: 0, error: "Reconnected; check the state.", via: "ws" }); pending.current.clear() }
+      if (wsRef.current && away) { const old = wsRef.current; wsRef.current = null; stopBeat(); old.onclose = null; old.onmessage = null; old.close(); failPending("Reconnected; check the state.") }
       if (wsRef.current) return
       if (retry !== null) window.clearTimeout(retry)
+      retry = null
       attempt = 0
       connect()
     }
@@ -93,6 +143,8 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
     return () => {
       window.removeEventListener("pageshow", wake)
       stopped = true
+      stopBeat()
+      dropRef.current = () => undefined
       if (retry !== null) window.clearTimeout(retry)
       document.removeEventListener("visibilitychange", wake)
       window.removeEventListener("online", wake)
@@ -101,25 +153,18 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
   }, [accept, poll])
 
   // Fallback poll while the socket is down (and once at start, so the page fills in fast).
-  useEffect(() => {
-    if (!poll || link === "live") return
-    let cancelled = false
-    const load = async () => {
-      const response = await fetch("/api/deck/state", { cache: "no-store" }).catch(() => null)
-      if (cancelled) return
-      if (!response) return setLink((current) => (current === "live" ? current : "offline"))
-      if (handleUnauthorized(response)) return
-      if (!response.ok) return
-      setLink((current) => (current === "live" ? current : "polling"))
-      accept((await response.json().catch(() => null)) ?? undefined)
+  // One request at a time, with a deadline, paused while hidden (lib/poll).
+  usePoll(async () => {
+    const response = await fetchT("/api/deck/state", { cache: "no-store" }).catch(() => null)
+    if (!response) {
+      setLink((current) => (current === "live" ? current : "offline"))
+      return false
     }
-    void load()
-    const id = window.setInterval(() => void load(), 2000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [poll, link, accept])
+    if (handleUnauthorized(response)) return false
+    if (!response.ok) return false
+    setLink((current) => (current === "live" ? current : "polling"))
+    accept((await response.json().catch(() => null)) ?? undefined)
+  }, 2000, poll && link !== "live")
 
   const run = useCallback(async (action: TransportAction, rev: number | undefined): Promise<DeckResult> => {
     const ws = wsRef.current
@@ -132,10 +177,12 @@ export function useDeckSocket({ poll = true, onState }: { poll?: boolean; onStat
           if (!pending.current.has(id)) return
           pending.current.delete(id)
           resolve({ ok: false, status: 0, error: "No reply; check the state.", via: "ws" })
-        }, 5000)
+          // No reply on an open socket = half-open link: drop it and reconnect now (next tap goes over HTTP meanwhile).
+          if (wsRef.current === ws) dropRef.current("Connection dropped; check the state.")
+        }, ACTION_REPLY_MS)
       })
     }
-    const response = await fetch("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, rev }) }).catch(() => null)
+    const response = await fetchT("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, rev }) }).catch(() => null)
     if (!response) return { ok: false, status: 0, error: "Could not reach the server.", via: "http" }
     if (handleUnauthorized(response)) return { ok: false, status: 401, via: "http" }
     const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; state?: DeckState } | null
