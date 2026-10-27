@@ -288,14 +288,17 @@ export function createDelayLine({ fadeMs = 0 } = {}) {
   const fadeLen = Math.max(0, Math.round((fadeMs * RATE) / 1000))
   const spare = fadeLen > 0 ? Math.round(0.25 * RATE) : 0 // extra history so a longer delay has audio to read (not silence)
   let fade = null // { from: frames, pos: frames done }
+  let pending = null // delay asked for during a fade, applied when it ends
   return {
     setDelayMs(ms) {
       const d = Math.max(0, Math.round((ms * RATE) / 1000))
+      // Mid-fade: restarting would jump from the blend to the old read (a click); finish first, then move.
+      if (fade) { pending = d === delay ? null : d; return }
       if (d === delay) return
       if (fadeLen > 0 && buf.length > 0) fade = { from: delay, pos: 0 }
       delay = d
     },
-    delayMs() { return (delay * 1000) / RATE },
+    delayMs() { return ((pending ?? delay) * 1000) / RATE },
     process(input) {
       const n = input.length / 2
       if (delay === 0 && buf.length === 0 && !fade && spare === 0) return input
@@ -309,7 +312,10 @@ export function createDelayLine({ fadeMs = 0 } = {}) {
         if (fade) {
           const g = (fade.pos + 0.5) / fadeLen
           for (let c = 0; c < 2; c++) out[i * 2 + c] = read(fade.from, i, c) * (1 - g) + read(delay, i, c) * g
-          if (++fade.pos >= fadeLen) fade = null
+          if (++fade.pos >= fadeLen) {
+            fade = null
+            if (pending !== null) { fade = { from: delay, pos: 0 }; delay = pending; pending = null }
+          }
         } else {
           out[i * 2] = read(delay, i, 0); out[i * 2 + 1] = read(delay, i, 1)
         }
