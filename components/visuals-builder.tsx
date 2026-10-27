@@ -20,9 +20,9 @@ import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { parseStage, socialLook } from "@/lib/stage"
 import { endCardAt, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
-import { CORNER_LABEL, CORNERS, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
+import { CORNER_LABEL, CORNERS, STRAP_ACCENT_LABEL, STYLE_ACCENTS, TEXT_SCALE_RANGE, strapAccentOn, type StrapDesign, type TextScalePart, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
-import { addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
+import { toggleDraftAccent, addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 import { StreamPlayer } from "@/components/stream-player"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { muteOnlyAudio } from "@/lib/preview-audio"
@@ -83,6 +83,32 @@ function LiveText({ label, value, onApply, testId, multiline }: { label: string;
   )
 }
 
+/**
+ * One strap design's values: name and subline text size and its accents (✓ = shown). Off accents are
+ * not drawn, so the strap box shrinks to fit. Applies on Save, for every preset using this design.
+ */
+function DesignValues({ style, design, onSize, onAccent }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void }) {
+  return (
+    <div data-testid="vb-design-values" data-style={style} className="grid gap-3 rounded-[10px] border border-[#2a2a2a] p-2">
+      <Slider label="Name text size" testId="vb-name-size" unit="%" value={design.nameSize} range={TEXT_SCALE_RANGE} onChange={(n) => onSize({ nameSize: n })} />
+      <Slider label="Subline text size" testId="vb-sub-size" unit="%" value={design.subSize} range={TEXT_SCALE_RANGE} onChange={(n) => onSize({ subSize: n })} />
+      <div className="grid gap-1"><Label>Accents (tap to show or hide)</Label>
+        <div className="flex flex-wrap gap-1">
+          {STYLE_ACCENTS[style].map((a) => {
+            const shown = strapAccentOn(design, a)
+            return <button key={a} type="button" data-testid={`vb-accent-${a}`} aria-pressed={shown} className={chip(shown)} onClick={() => onAccent(a)}>{shown ? "✓ " : ""}{STRAP_ACCENT_LABEL[a]}</button>
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Text size % slider (Save path) for the pills and the ticker. */
+function TextSize({ label = "Text size", value, onChange, testId }: { label?: string; value: number; onChange: (n: number) => void; testId: string }) {
+  return <Slider label={label} testId={testId} unit="%" value={value} range={TEXT_SCALE_RANGE} onChange={onChange} />
+}
+
 export function VisualsBuilder() {
   const { link, state, run } = useDeckSocket()
   const [loaded, setLoaded] = useState<LoadedEvent | null>(null)
@@ -96,6 +122,8 @@ export function VisualsBuilder() {
   const [programBg, setProgramBg] = useState<"relay" | "live" | "placeholder">("relay")
   // Live: the real /stream page in an iframe (only mounted while selected).
   const [liveView, setLiveView] = useState(false)
+  /** Builder › Name strap: which design the inspector edits (also drawn in the preview while selected). */
+  const [designEdit, setDesignEdit] = useState<StrapStyle | null>(null)
   const [cdHide, setCdHide] = useState<Partial<Record<CountdownPart, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null)
@@ -120,7 +148,9 @@ export function VisualsBuilder() {
   const feed = builderProgramFeed(state, screen === "program" && programBg === "relay")
   const liveFields = useMemo(() => (live ? Object.fromEntries(Object.entries(live).filter(([k]) => k !== "straps" && k !== "tickerCount")) : undefined), [live])
   const event = (loaded?.event ?? DEFAULT_EVENT) as EventConfig
-  const stage = useMemo(() => (loaded && draft ? previewStage(loaded.stage, liveFields, draft, { showAll, strapId: sel.kind === "strap" ? sel.id : undefined, now, logo: sel.kind === "part" && (LOGO_IDS as readonly string[]).includes(sel.part) ? (sel.part as LogoId) : undefined }) : null), [loaded, draft, liveFields, showAll, sel, now])
+  const stageBase = useMemo(() => (loaded && draft ? previewStage(loaded.stage, liveFields, draft, { showAll, strapId: sel.kind === "strap" ? sel.id : undefined, now, logo: sel.kind === "part" && (LOGO_IDS as readonly string[]).includes(sel.part) ? (sel.part as LogoId) : undefined }) : null), [loaded, draft, liveFields, showAll, sel, now])
+  const editingDesign = sel.kind === "part" && sel.part === "strap" && designEdit !== null
+  const stage = useMemo(() => (stageBase && editingDesign && designEdit ? { ...stageBase, strapStyle: designEdit } : stageBase), [stageBase, editingDesign, designEdit])
   const dirty = Boolean(savedStage && draft && draftDirty(savedStage, draft))
 
   useEffect(() => {
@@ -167,6 +197,9 @@ export function VisualsBuilder() {
   const straps = draft.straps
   const setStraps = (next: StrapPreset[]) => setDraft({ ...draft, straps: next })
   const patchStrap = (id: string, p: Partial<StrapPreset>) => setStraps(straps.map((s) => (s.id === id ? { ...s, ...p } : s)))
+  const setDesign = (style: StrapStyle, p: Partial<StrapDesign>) => setDraft({ ...draft, strapDesigns: { ...draft.strapDesigns, [style]: { ...draft.strapDesigns[style], ...p } } })
+  const setTextScale = (k: TextScalePart, n: number) => setDraft({ ...draft, textScale: { ...draft.textScale, [k]: n } })
+  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} />
   const on: Record<LayoutPart | "ticker", boolean> = {
     ...(Object.fromEntries(LOGO_IDS.map((id) => [id, (live?.logosOn ?? []).includes(id)])) as Record<LogoId, boolean>),
     qr: live?.qrOn === true,
@@ -330,6 +363,8 @@ export function VisualsBuilder() {
                   <select data-testid="vb-strap-platform" className={field} value={s.platform} onChange={(e) => patchStrap(s.id, { platform: e.target.value as Platform })}>{PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}</select></label>
                 <label className="grid gap-1"><Label>Style</Label>
                   <select data-testid="vb-strap-style" className={field} value={s.style} onChange={(e) => patchStrap(s.id, { style: e.target.value as StrapStyle })}>{STRAP_STYLES.map((p) => <option key={p} value={p}>{STRAP_STYLE_LABEL[p]}</option>)}</select></label>
+                <Label>{STRAP_STYLE_LABEL[s.style]} design (shared by every preset in this style)</Label>
+                {designValues(s.style)}
                 <p className="font-mono text-[10px] text-white/45">Applies on Save. A preset needs a name or a title.</p>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" data-testid="vb-strap-dup" disabled={straps.length >= STRAP_MAX} className={btn} onClick={() => setStraps(duplicateStrap(straps, s.id))}>Duplicate</button>
@@ -392,7 +427,8 @@ export function VisualsBuilder() {
                 <div className="flex gap-1">{TICKER_TYPES.map((t) => <button key={t} type="button" data-testid={`vb-ticker-${t}`} className={chip(stage.tickerType === t)} onClick={() => void visual({ target: "ticker", tickerType: t as TickerType })}>{t}</button>)}</div>
               </div>
               <LiveText key={stage.tickerType} label={`${stage.tickerType === "social" ? "Social" : "Planner"} items (one per line)`} testId="vb-ticker-items" multiline value={(stage.tickerType === "social" ? live?.tickerSocialItems : live?.tickerPlannerItems) ?.join("\n") ?? ""} onApply={(v) => void visual({ target: "ticker", items: sanitizeTickerItems(v), list: stage.tickerType })} />
-              <p className="font-mono text-[10px] text-white/45">The bar runs full width at the bottom; bottom parts lift above it while it shows. Show/Hide is on the deck.</p>
+              <TextSize testId="vb-ticker-size" value={draft.textScale.ticker} onChange={(n) => setTextScale("ticker", n)} />
+              <p className="font-mono text-[10px] text-white/45">Text size applies on Save; the bar grows with it. The bar runs full width at the bottom; bottom parts lift above it while it shows. Show/Hide is on the deck.</p>
             </div>
           ) : (() => {
             const part = sel.part
@@ -403,6 +439,18 @@ export function VisualsBuilder() {
             return (
               <div className="grid gap-3">
                 <h2 className="text-[15px] font-semibold">{LAYOUT_PART_LABEL[part]} <span className="font-mono text-[11px] font-normal text-white/45">· {screen}</span></h2>
+                {part === "strap" ? (() => {
+                  const style = designEdit ?? (live?.strapStyle || straps.find((x) => x.id === stage.strapId)?.style || "house")
+                  return (
+                    <div data-testid="vb-strap-design" className="grid gap-3">
+                      <label className="grid gap-1"><Label>Design</Label>
+                        <select data-testid="vb-design" className={field} value={style} onChange={(e) => setDesignEdit(e.target.value as StrapStyle)}>{STRAP_STYLES.map((m) => <option key={m} value={m}>{STRAP_STYLE_LABEL[m]}</option>)}</select></label>
+                      {designValues(style)}
+                      <p className="font-mono text-[10px] text-white/45">The preview shows the design you pick here. Sizes and accents apply on Save, to every preset in this design. Which design goes on air is the Style override below (live) or each preset{"'"}s own style.</p>
+                      <hr className="border-[#2a2a2a]" />
+                    </div>
+                  )
+                })() : null}
                 {part === "socials" && screen === "countdown" ? <p className="font-mono text-[10px] text-[#FF6A00]">The countdown screen has its own social icons, so the overlay circles only draw on program and OBS.</p> : null}
                 <div className="grid gap-1">
                   <Label live={deckCorner}>Corner{deckCorner ? " (deck buttons)" : ""}</Label>
@@ -432,17 +480,10 @@ export function VisualsBuilder() {
                       <select data-testid="vb-motion" className={field} value={live?.strapMotion ?? "slide-left"} onChange={(e) => void act({ type: "strap", motion: e.target.value as StrapMotion })}>{STRAP_MOTIONS.map((m) => <option key={m} value={m}>{STRAP_MOTION_LABEL[m]}</option>)}</select></label>
                     <label className="grid gap-1"><Label live>Style override</Label>
                       <select data-testid="vb-style-override" className={field} value={live?.strapStyle ?? ""} onChange={(e) => void act({ type: "strap", style: e.target.value as StrapStyle | "" })}>
-                        <option value="">Each preset&apos;s own style</option>
+                        <option value="">Each preset{"'"}s own style</option>
                         {STRAP_STYLES.map((m) => <option key={m} value={m}>{STRAP_STYLE_LABEL[m]}</option>)}
                       </select></label>
                   </>
-                ) : null}
-                {part === "strap" ? (
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" data-testid="vb-accent-circle" aria-pressed={draft.strapAccentCircle} className={chip(draft.strapAccentCircle)} onClick={() => setDraft({ ...draft, strapAccentCircle: !draft.strapAccentCircle })}>Accent circle</button>
-                    <button type="button" data-testid="vb-arrow" aria-pressed={draft.strapArrow} className={chip(draft.strapArrow)} onClick={() => setDraft({ ...draft, strapArrow: !draft.strapArrow })}>Arrow ↗</button>
-                    <span className="font-mono text-[10px] text-white/45">House style only · Save</span>
-                  </div>
                 ) : null}
                 {(LOGO_IDS as readonly string[]).includes(part) ? (() => {
                   const id = part as LogoId
@@ -492,11 +533,13 @@ export function VisualsBuilder() {
                   <>
                     <LiveText label="Talk prefix (Session)" testId="vb-talk-prefix" value={live?.talkPrefix ?? stage.talkPrefix} onApply={(v) => void visual({ target: "talk", talkPrefix: v })} />
                     <LiveText label="Festival prefix" testId="vb-festival-prefix" value={live?.festivalPrefix ?? stage.festivalPrefix} onApply={(v) => void visual({ target: "talk", festivalPrefix: v })} />
-                    <p className="font-mono text-[10px] text-white/45">Mode now: {live?.talkMode ?? "session"}. Start, ±1 min and Talk/Festival are on the deck.</p>
+                    <TextSize label="Talk ends text size" testId="vb-talk-size" value={draft.textScale.talk} onChange={(n) => setTextScale("talk", n)} />
+                    <TextSize label="Festival ends text size" testId="vb-festival-size" value={draft.textScale.festival} onChange={(n) => setTextScale("festival", n)} />
+                    <p className="font-mono text-[10px] text-white/45">Text sizes apply on Save; the pill grows with the text. Mode now: {live?.talkMode ?? "session"}. Start, ±1 min and Talk/Festival are on the deck.</p>
                   </>
                 ) : null}
-                {part === "qa" ? <LiveText label="Q&A text" testId="vb-qa-text" value={live?.qaText ?? stage.qaText} onApply={(v) => void visual({ target: "qa", text: v })} /> : null}
-                {part === "sponsor" ? <LiveText label="Sponsored text" testId="vb-sponsor-text" value={live?.sponsorText ?? stage.sponsorText} onApply={(v) => void visual({ target: "sponsor", text: v })} /> : null}
+                {part === "qa" ? <><LiveText label="Q&A text" testId="vb-qa-text" value={live?.qaText ?? stage.qaText} onApply={(v) => void visual({ target: "qa", text: v })} /><TextSize testId="vb-qa-size" value={draft.textScale.qa} onChange={(n) => setTextScale("qa", n)} /></> : null}
+                {part === "sponsor" ? <><LiveText label="Sponsored text" testId="vb-sponsor-text" value={live?.sponsorText ?? stage.sponsorText} onApply={(v) => void visual({ target: "sponsor", text: v })} /><TextSize testId="vb-sponsor-size" value={draft.textScale.sponsor} onChange={(n) => setTextScale("sponsor", n)} /></> : null}
               </div>
             )
           })()}
