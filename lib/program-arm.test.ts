@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { disarmPlan, nextArmState, parseDisarmed } from "./program-arm"
+import { disarmPlan, feedDisarmedInView, nextArmState, parseDisarmed } from "./program-arm"
 
 const ARMED = { programArmed: true, disarmed: { main: false, backup: false } }
 const OFF = { programArmed: false, disarmed: { main: false, backup: false } }
@@ -29,4 +29,19 @@ test("disarm plan: standby no effect; on-air hands over if the other is healthy,
 test("parseDisarmed defaults to none", () => {
   assert.deepEqual(parseDisarmed(undefined), { main: false, backup: false })
   assert.deepEqual(parseDisarmed({ backup: true }), { main: false, backup: true })
+})
+
+test("feedDisarmedInView: null view (relay not armed) = both disarmed; per-feed flags otherwise", () => {
+  assert.equal(feedDisarmedInView(null, "main"), true)
+  assert.equal(feedDisarmedInView(undefined, "backup"), true)
+  assert.equal(feedDisarmedInView({ armed: { main: true, backup: false } }, "main"), false)
+  assert.equal(feedDisarmedInView({ armed: { main: true, backup: false } }, "backup"), true)
+  assert.equal(feedDisarmedInView({}, "main"), false)
+})
+
+test("disarming the last armed feed turns the relay off; arming one feed from there arms just that one", () => {
+  const backupOnly = { programArmed: true, disarmed: { main: true, backup: false } }
+  const off = nextArmState(backupOnly, "disarm", "backup")
+  assert.equal(off.programArmed, false)
+  assert.deepEqual(nextArmState(off, "arm", "main"), { programArmed: true, disarmed: { main: false, backup: true } })
 })
