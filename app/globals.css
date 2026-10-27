@@ -513,3 +513,9 @@ html:has([data-desk-root]) body {
 .visuals-layer > [data-part^="logo"], .visuals-layer > [data-part^="qr"] { z-index: 2; }
 .visuals-layer > [data-part="talk"], .visuals-layer > [data-part="sponsor"], .visuals-layer > [data-part="qa"] { z-index: 3; }
 .visuals-layer > [data-part="strap"] { z-index: 4; }
+
+/* Builder text sizes. Name strap: the box scales with --px (name size), the subline lines with
+   --strap-sub-px (subline size). Pills and ticker: --px redefined from the layer's --vl-px0. */
+.strap-scale { display: contents; }
+.strap .strap-title, .strap .strap-social { --px: var(--strap-sub-px); }
+.strap-line.strap-no-bar .strap-body { border-left: calc(2 * var(--px)) solid #222; border-radius: calc(16 * var(--px)); padding-left: calc(32 * var(--px)); }
