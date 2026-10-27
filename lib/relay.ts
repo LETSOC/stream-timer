@@ -21,6 +21,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { destinationFingerprint, directChannelDests, readChannelStatus, killGroup, pidRunsScript, redact, relayChildEnv } from "@/lib/encoder"
 import { listDestinations, resolveDestination, setDestinationTimer } from "@/lib/rtmp-destinations"
+import { isSrtUrl } from "@/lib/srt-destination"
 import { listProcesses } from "@/lib/proc-list"
 import { diagnose, EMPTY_HEALTH, healthFromSamples, parseProgressBlocks, type HealthStats, type Level, type SourceHealth } from "@/lib/stream-health"
 
@@ -1082,10 +1083,13 @@ async function reconcileUnlocked() {
   }
 }
 
-/** Pure-ish: the forward ffmpeg. The destination URL (with its key) is an argv entry: ffmpeg has no other way to take an RTMP output URL. */
+/**
+ * Pure-ish: the forward ffmpeg. The destination URL (with its key) is an argv entry: ffmpeg has no other way to take an output URL.
+ * RTMP(S): FLV. SRT: MPEG-TS over libsrt (the URL carries streamid/latency/pkt_size/passphrase). Same stats, timeouts and loop.
+ */
 export function forwardCommand(name: RelayPath, destinationUrl: string): string[] {
   return [process.env.FFMPEG_BIN || "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "info", "-nostats", "-progress", "pipe:1", "-stats_period", "5",
-    "-rw_timeout", "10000000", "-i", relayReadUrl(name), "-map", "0", "-c", "copy", "-f", "flv", "-rw_timeout", "15000000", destinationUrl]
+    "-rw_timeout", "10000000", "-i", relayReadUrl(name), "-map", "0", "-c", "copy", "-f", isSrtUrl(destinationUrl) ? "mpegts" : "flv", "-rw_timeout", "15000000", destinationUrl]
 }
 
 let reconcileAt = 0
@@ -1129,7 +1133,11 @@ function logAgeMs(key: string): number | null {
  * path, or rtmp:// where the platform wants rtmps://.
  */
 export function friendlyForwardError(line: string, url?: string): string {
-  const scheme = url?.startsWith("rtmps:") ? "rtmps" : url?.startsWith("rtmp:") ? "rtmp" : null
+  const scheme = url?.startsWith("rtmps:") ? "rtmps" : url?.startsWith("rtmp:") ? "rtmp" : url && isSrtUrl(url) ? "srt" : null
+  if (scheme === "srt") {
+    if (/(Connection setup failure|connection rejected|rejected|Permission denied|authentication)/i.test(line)) return "SRT connection refused: check the streamid (path, user, pass) and passphrase, and that the far end accepts this path."
+    if (/(timed out|Operation timed out)/i.test(line)) return "SRT timed out: check host and port, and that UDP is open on the far end."
+  }
   if (/End of file/i.test(line)) return `Platform closed the connection — check the stream URL/key (TikTok/Instagram keys expire each session; get a fresh one)${scheme === "rtmp" ? ". If the platform gives an rtmps:// URL, use that" : ""}.`
   if (/Connection refused/i.test(line)) return "Connection refused — wrong server/port, or the ingest is down."
   if (/(Connection timed out|Operation timed out|timed out)/i.test(line)) return "Timed out reaching the ingest — check the server address and your network."
