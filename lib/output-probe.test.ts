@@ -1,6 +1,9 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { parseProbePackets, probeArgs, probeLine } from "./output-probe"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { appendJsonl, logInFull, parseProbePackets, probeArgs, probeFlagged, probeLine, summaryLine, type ProbeResult } from "./output-probe"
 
 const pkts = (opts: { fps: number; secs: number; avOffset?: number; gop?: number; vSize?: number }) => {
   const lines: string[] = []
@@ -60,4 +63,38 @@ test("probe args: short bounded read, URL last (never logged)", () => {
   assert.ok(a.includes("-read_intervals") && a.includes("-rw_timeout"))
   assert.equal(a[a.length - 1].includes("SECRET"), true)
   assert.ok(!probeLine(parseProbePackets(pkts({ fps: 30, secs: 4 }))).text.includes("SECRET"))
+})
+
+test("quiet logging: first reading, flagged readings and the first good one after are logged in full", () => {
+  const good = parseProbePackets(pkts({ fps: 25, secs: 4 }))
+  const bad = parseProbePackets(pkts({ fps: 25, secs: 4, avOffset: 0.15 }))
+  assert.equal(probeFlagged(good), false)
+  assert.equal(probeFlagged(bad), true)
+  assert.equal(logInFull(good, null), true)
+  assert.equal(logInFull(good, false), false)
+  assert.equal(logInFull(bad, false), true)
+  assert.equal(logInFull(good, true), true)
+})
+
+test("minute summary: count, gap min/median/max, flagged", () => {
+  const mk = (gapMs: number | null, audio = 100): ProbeResult => ({ fps: 25, gapMs, keyframeS: 2, kbps: 2600, video: 100, audio })
+  const line = summaryLine([mk(10), mk(30), mk(20), mk(120), mk(null, 0)])
+  assert.ok(line)
+  assert.equal(line.level, "!")
+  assert.match(line.text, /5 readings · interleave gap min\/median\/max 10\/25\/120ms · 2 flagged/)
+  assert.match(line.text, /median 25fps · 2600kbps/)
+  assert.equal(summaryLine([]), null)
+  assert.equal(summaryLine([mk(10)])?.level, "·")
+})
+
+test("JSONL: one line per reading, rotated to .1 past the size cap", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "probe-"))
+  const file = path.join(dir, "output-probe.jsonl")
+  for (let i = 0; i < 30; i++) appendJsonl(file, { i, pad: "x".repeat(40) }, 500)
+  const cur = fs.readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { i: number })
+  const old = fs.readFileSync(file.replace(/\.jsonl$/, ".1.jsonl"), "utf8").trim().split("\n")
+  assert.equal(cur[cur.length - 1].i, 29)
+  assert.ok(fs.statSync(file).size <= 500 + 100 && old.length > 0)
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["output-probe.1.jsonl", "output-probe.jsonl"])
+  fs.rmSync(dir, { recursive: true, force: true })
 })
