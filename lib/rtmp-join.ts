@@ -8,6 +8,8 @@ export function joinRtmpServerAndKey(server: string, key: string): string {
   const k = key.trim()
   if (!k) return s
   if (k.startsWith("?")) return `${s.replace(/\/+$/, "")}${k}`
+  // SRT: the "key" is the query (streamid=…&latency=…), never a path segment.
+  if (/^srt:/i.test(s)) return `${s.replace(/\/+$/, "")}?${k.replace(/^[/?]+/, "")}`
   return `${s.replace(/\/+$/, "")}/${k.replace(/^\/+/, "")}`
 }
 
