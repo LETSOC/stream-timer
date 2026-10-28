@@ -16,7 +16,7 @@ import { SocialCircles } from "@/components/social-circles"
 import { FacebookIcon, InstagramIcon, LinkedInIcon, XIcon, YouTubeIcon } from "@/components/countdown-stage"
 import type { EventConfig } from "@/lib/event"
 import { socialLook, type StageOptions } from "@/lib/stage"
-import { formatClock, parseTalkTimer, tickerLine, strapVisible, talkPillValue, TICKER_GAP_PX, TICKER_H_PX, DEFAULT_STRAP_DESIGNS, DEFAULT_TEXT_SCALE, type Corner } from "@/lib/visuals"
+import { formatClock, parseTalkTimer, tickerLine, strapVisible, talkPillValue, TICKER_GAP_PX, TICKER_H_PX, DEFAULT_STRAP_DESIGNS, DEFAULT_TEXT_SCALE, TALK_ENDING_TEXT, type Corner } from "@/lib/visuals"
 import { cornerOrigin, layoutScreen, partCorner, placeOffsets, type LayoutPart } from "@/lib/visuals-layout"
 
 export type LayerScreen = "countdown" | "program" | "break" | "hold" | "welcome" | SceneId | "end" | "overlay"
@@ -92,6 +92,7 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
   const strapAt = at("strap")
   const socialsAt = at("socials")
   const paused = stage.talkMode === "session" && stage.talkPausedMs !== null
+  const ending = stage.talkMode === "session" && talk.over
   return (
     <div aria-hidden data-testid="visuals-layer" data-screen={screen} className={`visuals-layer pointer-events-none ${className}`} style={{ "--vl-px0": "var(--px)" } as CSSProperties}>
       <div data-testid="vl-ticker" data-on={parts.ticker ? "1" : "0"} data-text-size={ts.ticker} className={`vl-ticker ${parts.ticker ? "vl-on" : "vl-off"}`} style={textScaleVars(ts.ticker)}>
@@ -128,8 +129,15 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
       })}
       <Pill show={parts.talk} kind="talk" testId="vl-talk" place={at("talk")} scale={stage.talkMode === "festival" ? ts.festival : ts.talk}>
         <span className={`vl-rec ${stage.talkMode === "festival" ? "vl-rec-festival" : ""} ${talk.over ? "vl-rec-over" : ""}`} />
-        <span className="vl-talk-prefix">{stage.talkMode === "festival" ? stage.festivalPrefix : stage.talkPrefix}</span>
-        <span data-testid="vl-talk-clock" className={`vl-talk-clock ${talk.over ? "vl-over" : ""}`}>{formatClock(talk.ms)}{paused ? " ❚❚" : ""}</span>
+        {ending ? (
+          // Session talk at 0:00: a message instead of a clock hanging on 00:00.
+          <span data-testid="vl-talk-ending" className="vl-talk-prefix vl-over">{TALK_ENDING_TEXT}</span>
+        ) : (
+          <>
+            <span className="vl-talk-prefix">{stage.talkMode === "festival" ? stage.festivalPrefix : stage.talkPrefix}</span>
+            <span data-testid="vl-talk-clock" className={`vl-talk-clock ${talk.over ? "vl-over" : ""}`}>{formatClock(talk.ms)}{paused ? " ❚❚" : ""}</span>
+          </>
+        )}
         <span className="vl-talk-accent" />
       </Pill>
       <Pill show={parts.sponsor} kind="sponsor" testId="vl-sponsor" place={at("sponsor")} scale={ts.sponsor}>{stage.sponsorText}</Pill>
