@@ -10,6 +10,7 @@ import { LoadPaused } from "@/components/load-paused"
  * deck socket and are marked "applies live". The preview is the real VisualsLayer at 1920x1080, scaled.
  */
 import Link from "next/link"
+import { LinkPill } from "@/components/link-pill"
 import { AppNav } from "@/components/app-nav"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
@@ -19,8 +20,8 @@ import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_LABEL, sanitiz
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { parseStage, socialLook } from "@/lib/stage"
 import { endCardAt, type TransportAction } from "@/lib/transport"
-import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
-import { CORNER_LABEL, CORNERS, STRAP_ACCENT_LABEL, STYLE_ACCENTS, TEXT_SCALE_RANGE, strapAccentOn, type StrapDesign, type TextScalePart, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
+import { useDeckSocket } from "@/lib/use-deck-socket"
+import { CORNER_LABEL, CORNERS, STRAP_ACCENT_LABEL, STYLE_ACCENTS, STRAP_COLOR_LABEL, STYLE_COLORS, strapColors, type StrapColorKey, TEXT_SCALE_RANGE, strapAccentOn, type StrapDesign, type TextScalePart, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
 import { toggleDraftAccent, addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 import { StreamPlayer } from "@/components/stream-player"
@@ -37,7 +38,6 @@ function LibGroup({ title, children }: { title: string; children: ReactNode }) {
     </div>
   )
 }
-const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling", offline: "Offline" }
 const COMPONENT_LABEL: Record<LayoutPart | "ticker", string> = { ...LAYOUT_PART_LABEL, ticker: "Ticker bar" }
 
 const panel = "rounded-[14px] border border-[#2a2a2a] bg-[#141414]"
@@ -87,7 +87,9 @@ function LiveText({ label, value, onApply, testId, multiline }: { label: string;
  * One strap design's values: name and subline text size and its accents (✓ = shown). Off accents are
  * not drawn, so the strap box shrinks to fit. Applies on Save, for every preset using this design.
  */
-function DesignValues({ style, design, onSize, onAccent }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void }) {
+function DesignValues({ style, design, onSize, onAccent, onColor, accent, text }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void; onColor: (colors: StrapDesign["colors"]) => void; accent: string; text: string }) {
+  const c = strapColors(style, design, accent, text)
+  const setColor = (k: StrapColorKey, v: string | null) => { const next = { ...(design.colors ?? {}) }; if (v === null) delete next[k]; else next[k] = v; onColor(Object.keys(next).length ? next : undefined) }
   return (
     <div data-testid="vb-design-values" data-style={style} className="grid gap-3 rounded-[10px] border border-[#2a2a2a] p-2">
       <Slider label="Name text size" testId="vb-name-size" unit="%" value={design.nameSize} range={TEXT_SCALE_RANGE} onChange={(n) => onSize({ nameSize: n })} />
@@ -99,6 +101,21 @@ function DesignValues({ style, design, onSize, onAccent }: { style: StrapStyle; 
             return <button key={a} type="button" data-testid={`vb-accent-${a}`} aria-pressed={shown} className={chip(shown)} onClick={() => onAccent(a)}>{shown ? "✓ " : ""}{STRAP_ACCENT_LABEL[a]}</button>
           })}
         </div>
+      </div>
+      <div className="grid gap-1"><Label>Colours (each element on its own)</Label>
+        <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+          {STYLE_COLORS[style].map((k) => {
+            const own = design.colors?.[k] !== undefined
+            return (
+              <label key={k} className="flex items-center gap-2 text-[12px]">
+                <input type="color" data-testid={`vb-color-${k}`} className="h-7 w-9 shrink-0" value={c[k] || "#888888"} onChange={(e) => setColor(k, e.target.value)} />
+                <span className="flex-1">{style === "pill" && k === "bar" ? "Border" : style === "house" && k === "bar" ? "Edge bar" : k === "icon" && !c.icon ? "Platform icon (brand)" : STRAP_COLOR_LABEL[k]}</span>
+                {own ? <button type="button" data-testid={`vb-color-${k}-reset`} title="Back to the design colour" className="font-mono text-[10px] text-white/50 underline" onClick={() => setColor(k, null)}>reset</button> : null}
+              </label>
+            )
+          })}
+        </div>
+        <span className="font-mono text-[10px] text-white/45">Unchanged colours follow the strap Accent and Text colours below.</span>
       </div>
     </div>
   )
@@ -199,7 +216,7 @@ export function VisualsBuilder() {
   const patchStrap = (id: string, p: Partial<StrapPreset>) => setStraps(straps.map((s) => (s.id === id ? { ...s, ...p } : s)))
   const setDesign = (style: StrapStyle, p: Partial<StrapDesign>) => setDraft({ ...draft, strapDesigns: { ...draft.strapDesigns, [style]: { ...draft.strapDesigns[style], ...p } } })
   const setTextScale = (k: TextScalePart, n: number) => setDraft({ ...draft, textScale: { ...draft.textScale, [k]: n } })
-  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} />
+  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} onColor={(colors) => setDesign(style, { colors })} accent={draft.strapAccent} text={draft.strapText} />
   const on: Record<LayoutPart | "ticker", boolean> = {
     ...(Object.fromEntries(LOGO_IDS.map((id) => [id, (live?.logosOn ?? []).includes(id)])) as Record<LogoId, boolean>),
     qr: live?.qrOn === true,
@@ -242,7 +259,6 @@ export function VisualsBuilder() {
           <h1 className="font-sans text-xl font-black tracking-tight uppercase">Visuals builder</h1>
         </div>
         <AppNav page="builder" />
-        <span className="font-mono text-[11px] text-white/45">{LINK_LABEL[link]}</span>
         <div className="ml-6 flex gap-1" role="group" aria-label="Screen">
           {(["countdown", "program"] as const).map((s) => <button key={s} type="button" data-testid={`vb-screen-${s}`} aria-pressed={!liveView && screen === s} onClick={() => { setScreen(s); setLiveView(false) }} className={chip(!liveView && screen === s)}>{s === "countdown" ? "Countdown" : "Program"}</button>)}
           <button type="button" data-testid="vb-screen-live" aria-pressed={liveView} title="The real /stream page, muted: what goes on air" onClick={() => setLiveView(true)} className={chip(liveView)}>Live</button>
@@ -254,6 +270,7 @@ export function VisualsBuilder() {
           {dirty ? <span className="font-mono text-[11px] text-[#FF6A00]">Unsaved changes</span> : null}
           <button type="button" data-testid="vb-revert" disabled={!dirty || saving} onClick={() => setDraft(draftFrom(savedStage))} className={btn}>Revert</button>
           <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className="rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold text-[#0a0a0a] disabled:opacity-35">{saving ? "Saving…" : "Save"}</button>
+          <LinkPill link={link} testId="vb-link-state" />
 
         </div>
       </header>
@@ -473,8 +490,8 @@ export function VisualsBuilder() {
                 {part === "strap" ? (
                   <>
                     <div className="grid grid-cols-2 gap-2">
-                      <label className="grid gap-1"><Label>Accent</Label><input type="color" data-testid="vb-accent" className="h-9 w-full" value={draft.strapAccent} onChange={(e) => setDraft({ ...draft, strapAccent: e.target.value })} /></label>
-                      <label className="grid gap-1"><Label>Text</Label><input type="color" data-testid="vb-text" className="h-9 w-full" value={draft.strapText} onChange={(e) => setDraft({ ...draft, strapText: e.target.value })} /></label>
+                      <label className="grid gap-1"><Label>Accent (default)</Label><input type="color" data-testid="vb-accent" className="h-9 w-full" value={draft.strapAccent} onChange={(e) => setDraft({ ...draft, strapAccent: e.target.value })} /></label>
+                      <label className="grid gap-1"><Label>Text (default)</Label><input type="color" data-testid="vb-text" className="h-9 w-full" value={draft.strapText} onChange={(e) => setDraft({ ...draft, strapText: e.target.value })} /></label>
                     </div>
                     <label className="grid gap-1"><Label live>Motion</Label>
                       <select data-testid="vb-motion" className={field} value={live?.strapMotion ?? "slide-left"} onChange={(e) => void act({ type: "strap", motion: e.target.value as StrapMotion })}>{STRAP_MOTIONS.map((m) => <option key={m} value={m}>{STRAP_MOTION_LABEL[m]}</option>)}</select></label>
