@@ -10,10 +10,10 @@ const BG: Record<Exclude<Platform, "none">, string> = {
 }
 
 /** Round platform badge, sized by the parent's font-size (1em = badge). */
-export function PlatformIcon({ platform, className }: { platform: Platform; className?: string }) {
+export function PlatformIcon({ platform, className, bg }: { platform: Platform; className?: string; /** badge colour override (default: the platform colour) */ bg?: string }) {
   if (platform === "none") return null
   return (
-    <span className={className} data-platform={platform} style={{ display: "inline-flex", width: "1em", height: "1em", flex: "none", alignItems: "center", justifyContent: "center", borderRadius: "9999px", background: BG[platform] }}>
+    <span className={className} data-platform={platform} style={{ display: "inline-flex", width: "1em", height: "1em", flex: "none", alignItems: "center", justifyContent: "center", borderRadius: "9999px", background: bg || BG[platform] }}>
       <svg viewBox="0 0 24 24" style={{ width: "0.56em", height: "0.56em" }} aria-hidden fill={platform === "instagram" || platform === "web" ? "none" : "white"} stroke={platform === "instagram" || platform === "web" ? "white" : "none"} strokeWidth="1.8">
         {platform === "x" ? <path d="M14.7 10.3 21.4 3h-1.6l-5.8 6.4L9.2 3H3.4l7 10-7 7.6h1.6l6.1-6.8 4.9 6.8h5.8l-7.1-9.3Zm-2.2 2.4-.7-1L5.6 4.2h2.4l4.5 6.2.7 1 5.9 8.1h-2.4l-4.8-6.8Z" /> : null}
         {platform === "linkedin" ? <path d="M6.7 9.2H4V20h2.7V9.2ZM5.3 4C4.4 4 3.7 4.7 3.7 5.6s.7 1.6 1.6 1.6 1.6-.7 1.6-1.6S6.2 4 5.3 4ZM20 20h-2.7v-5.6c0-1.6-.6-2.6-1.9-2.6-1 0-1.5.7-1.8 1.3-.1.2-.1.6-.1.9V20H11V9.2h2.6v1.5c.4-.7 1.3-1.8 3.2-1.8 2.3 0 4.2 1.5 4.2 4.8V20Z" /> : null}
