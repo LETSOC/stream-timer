@@ -22,9 +22,14 @@ export function SceneHandoff({ id, scenes, qr, now, className }: { id: string; s
   return (
     <div data-testid="scene-handoff" data-leaving={leaving ?? ""} className={`relative ${className}`}>
       {/* Keyed siblings under one parent: the outgoing scene keeps its own video element (no remount,
-          no restart) while it covers; dropping the cover just unmounts it. */}
+          no restart) while it covers; dropping the cover just unmounts it. Each scene sits in its own
+          absolutely placed wrapper: a position class on SceneCardView itself loses to its built-in
+          "relative", which pushed the cover below the frame (the incoming card's text and background
+          then showed until its video painted). */}
       {[cur, ...(leaving !== null && leaving !== cur && scenes[leaving] ? [leaving] : [])].map((sid) => (
-        <SceneCardView key={sid} id={sid} card={scenes[sid]} qr={qr} now={now} onAir onReady={sid === cur ? () => setS((p) => handoffReady(p, sid)) : undefined} className={sid === cur ? "h-full w-full" : "absolute inset-0 z-20 h-full w-full"} />
+        <div key={sid} data-testid={sid === cur ? `scene-in-${sid}` : `scene-cover-${sid}`} className="absolute inset-0" style={{ zIndex: sid === cur ? 0 : 20 }}>
+          <SceneCardView id={sid} card={scenes[sid]} qr={qr} now={now} onAir onReady={sid === cur ? () => setS((p) => handoffReady(p, sid)) : undefined} className="h-full w-full" />
+        </div>
       ))}
     </div>
   )
