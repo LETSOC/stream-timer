@@ -17,8 +17,21 @@ test("destination tags: HD forwards, Vertical forwards and direct channels stay 
   const { destinationUses } = await import("@/components/destinations-panel")
   const paths = { capture: { forwards: [{ destId: "a", state: "forwarding" }] }, slate: { forwards: [] }, vertical: { forwards: [{ destId: "b", state: "waiting" }] } }
   assert.deepEqual(destinationUses("a", paths, { slate: null, capture: null }).map((u) => [u.kind, u.label, u.state]), [["hd", "HD /capture forward", "forwarding"]])
-  assert.deepEqual(destinationUses("b", paths, { slate: "b", capture: null }).map((u) => u.kind), ["vertical", "channel"])
+  assert.deepEqual(destinationUses("b", paths, { slate: "b", capture: null, slateLive: true }).map((u) => u.kind), ["vertical", "channel"])
   assert.deepEqual(destinationUses("c", null, { slate: null, capture: null }), [])
+})
+
+test("destination tags follow the real route: a stale Slate-channel pick does not tag a /capture forward", async () => {
+  const { destinationUses } = await import("@/components/destinations-panel")
+  const capture = { capture: { forwards: [{ destId: "yt", state: "forwarding" }] }, slate: { forwards: [] }, vertical: { forwards: [] } }
+  // The bug: saved selectedId = "yt" (Slate channel stopped) added "Slate channel" next to "HD /capture forward".
+  assert.deepEqual(destinationUses("yt", capture, { slate: "yt", capture: null, slateLive: false, captureLive: false }).map((u) => u.label), ["HD /capture forward"])
+  const slate = { capture: { forwards: [] }, slate: { forwards: [{ destId: "yt", state: "forwarding" }] }, vertical: { forwards: [] } }
+  assert.deepEqual(destinationUses("yt", slate, { slate: null, capture: null }).map((u) => u.label), ["HD /slate forward"])
+  const both = { capture: { forwards: [{ destId: "yt", state: "forwarding" }] }, slate: { forwards: [{ destId: "yt", state: "waiting" }] }, vertical: { forwards: [] } }
+  assert.deepEqual(destinationUses("yt", both, { slate: null, capture: null }).map((u) => u.label), ["HD /capture forward", "HD /slate forward"])
+  // A channel that is really streaming to it still shows.
+  assert.deepEqual(destinationUses("yt", capture, { slate: "yt", capture: "yt", slateLive: true, captureLive: true }).map((u) => u.label), ["HD /capture forward", "Browser capture channel", "Slate channel"])
 })
 
 test("dropout log never carries a stream key from a forward error line", async () => {

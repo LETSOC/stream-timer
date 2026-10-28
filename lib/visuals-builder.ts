@@ -8,7 +8,7 @@
  */
 import { parseStage, type StageOptions } from "@/lib/stage"
 import { LOGO_IDS, parseLogos, parseQr, parseScenes, type LogoId, type Logos, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
-import { newStrapId, STRAP_MAX, type StrapPreset } from "@/lib/visuals"
+import { newStrapId, parseStrapDesigns, parseTextScale, STRAP_MAX, toggleStrapAccent, type StrapAccent, type StrapDesigns, type StrapPreset, type StrapStyle, type TextScale } from "@/lib/visuals"
 import { parseVisualsLayout, type LayoutPart, type LayoutScreen, type PartPlace, type VisualsLayout } from "@/lib/visuals-layout"
 
 export type BuilderDraft = {
@@ -17,12 +17,14 @@ export type BuilderDraft = {
   strapText: string
   strapAccentCircle: boolean
   strapArrow: boolean
+  strapDesigns: StrapDesigns
+  textScale: TextScale
   visualsLayout: VisualsLayout
   logos: Logos
   qr: QrConfig
   scenes: Record<SceneId, SceneCard>
 }
-export const DRAFT_KEYS = ["straps", "strapAccent", "strapText", "strapAccentCircle", "strapArrow", "visualsLayout", "logos", "qr", "scenes"] as const satisfies readonly (keyof StageOptions)[]
+export const DRAFT_KEYS = ["straps", "strapAccent", "strapText", "strapAccentCircle", "strapArrow", "strapDesigns", "textScale", "visualsLayout", "logos", "qr", "scenes"] as const satisfies readonly (keyof StageOptions)[]
 
 export function draftFrom(stage: StageOptions): BuilderDraft {
   return {
@@ -31,6 +33,8 @@ export function draftFrom(stage: StageOptions): BuilderDraft {
     strapText: stage.strapText,
     strapAccentCircle: stage.strapAccentCircle,
     strapArrow: stage.strapArrow,
+    strapDesigns: parseStrapDesigns(stage.strapDesigns),
+    textScale: parseTextScale(stage.textScale),
     visualsLayout: parseVisualsLayout(stage.visualsLayout),
     logos: parseLogos(stage.logos),
     qr: parseQr(stage.qr),
@@ -56,6 +60,13 @@ export function saveBody(loaded: LoadedEvent, draft: BuilderDraft) {
     testUntil: loaded.testUntil,
     pausedAt: loaded.pausedAt,
   }
+}
+
+/** Toggle a design accent; the house circle/arrow also update the old strapAccentCircle/strapArrow fields. */
+export function toggleDraftAccent(draft: BuilderDraft, style: StrapStyle, accent: StrapAccent): BuilderDraft {
+  const strapDesigns = toggleStrapAccent(draft.strapDesigns, style, accent)
+  const off = strapDesigns.house.off
+  return { ...draft, strapDesigns, strapAccentCircle: !off.includes("dot"), strapArrow: !off.includes("arrow") }
 }
 
 export function setPlace(layout: VisualsLayout, screen: LayoutScreen, part: LayoutPart, patch: Partial<PartPlace>): VisualsLayout {

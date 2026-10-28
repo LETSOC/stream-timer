@@ -14,14 +14,14 @@ export type SectionId = "event" | "cta" | "look" | "socials" | "endCard" | "spea
 export const SECTIONS: Record<SectionId, { label: string; event?: (keyof EventConfig)[]; stage?: (keyof StageOptions)[] }> = {
   event: { label: "Event", event: ["name", "date", "time", "endTime", "timeZone", "venue"] },
   cta: { label: "Links & call to action", event: ["rsvpUrl", "badge", "rsvpLabel", "scanLabel", "joinLabel", "eventLink", "eventLinkLabel"] },
-  look: { label: "Look", stage: ["checker", "showMeta", "showLink", "transparent", "lineSpacing", "blockGap", "clockScale", "clockText", "logoUrl", "countdownStrokePx", "countdownStrokeColor"] },
+  look: { label: "Look", stage: ["checker", "showMeta", "showLink", "transparent", "lineSpacing", "blockGap", "clockScale", "clockText", "logoUrl", "countdownStrokePx", "countdownStrokeColor", "slateLook", "countdownBg"] },
   socials: { label: "Socials", event: ["xUrl", "facebookUrl", "linkedinUrl", "instagramUrl", "youtubeUrl"], stage: ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle"] },
-  endCard: { label: "End card", stage: ["endTitle", "endSubtitle", "endDate", "endBody", "endQrUrl", "endButton", "endOffsetMin"] },
+  endCard: { label: "End card", stage: ["endTitle", "endSubtitle", "endDate", "endBody", "endQrUrl", "endButton", "endOffsetMin", "endBg"] },
   speakers: { label: "Speakers", stage: ["speakers", "gallerySeconds", "galleryPause", "galleryOffset", "galleryScale"] },
-  breakCard: { label: "Break card", stage: ["breakTitle", "breakMessage", "breakImage", "breakFit"] },
-  holdCard: { label: "Hold card", stage: ["holdTitle", "holdMessage", "holdImage", "holdFit"] },
-  feedLost: { label: "Feed-lost card", stage: ["standbyTitle", "standbyMessage"] },
-  welcomeCard: { label: "Welcome back card", stage: ["welcomeTitle", "welcomeMessage", "welcomeImage", "welcomeFit"] },
+  breakCard: { label: "Break card", stage: ["breakTitle", "breakMessage", "breakImage", "breakFit", "breakBg"] },
+  holdCard: { label: "Hold card", stage: ["holdTitle", "holdMessage", "holdImage", "holdFit", "holdBg"] },
+  feedLost: { label: "Feed-lost card", stage: ["standbyTitle", "standbyMessage", "standbyBg"] },
+  welcomeCard: { label: "Welcome back card", stage: ["welcomeTitle", "welcomeMessage", "welcomeImage", "welcomeFit", "welcomeBg"] },
   visuals: { label: "Visuals", stage: ["straps", "strapAccent", "strapText"] },
 }
 

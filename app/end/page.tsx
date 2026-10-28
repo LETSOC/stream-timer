@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type CSSProperties } from "react"
+import { bgColor, stageBgStyle } from "@/lib/stage"
 import { DEFAULT_EVENT, asEventConfig, type EventConfig } from "@/lib/event"
 import { safeUrl } from "@/lib/event"
 import { brandUrl } from "@/lib/brand-asset"
@@ -30,6 +31,7 @@ const DEFAULT_CARD: EndCard = {
 
 export default function EndPage() {
   const [card, setCard] = useState<EndCard>(DEFAULT_CARD)
+  const [bg, setBg] = useState("")
   useEffect(() => {
     const key = new URLSearchParams(window.location.search).get("k")
     void fetch(key ? `/api/public/state?k=${encodeURIComponent(key)}` : "/api/public/state", { cache: "no-store" })
@@ -40,6 +42,7 @@ export default function EndPage() {
       .then((body: { event?: unknown; stage?: Record<string, unknown> }) => {
         const event = asEventConfig(body.event) ?? DEFAULT_EVENT
         const stage = body.stage ?? {}
+        setBg(bgColor(stage.endBg))
         setCard({
           title: text(stage.endTitle, DEFAULT_CARD.title),
           subtitle: text(stage.endSubtitle, DEFAULT_CARD.subtitle),
@@ -55,16 +58,16 @@ export default function EndPage() {
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-black">
-      <EndStreamPage card={card} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
+      <EndStreamPage card={card} bg={bg} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
     </main>
   )
 }
 
-export function EndStreamPage({ card, className, social }: { card: EndCard; className?: string; social?: SocialLook }) {
+export function EndStreamPage({ card, className, social, bg }: { card: EndCard; className?: string; social?: SocialLook; /** background colour, "" = the default blue */ bg?: string }) {
   // Text waits for the built-in QR picture when no QR url is set (the generated QR is instant).
   const imagesUp = useImagesReady(card.qrUrl.trim() ? [] : [brandUrl("/brand/end-qr.png")])
   return (
-    <div data-images-ready={imagesUp ? "1" : "0"} className={`countdown-stage stage-bg relative flex aspect-video w-full flex-col items-center justify-center overflow-hidden text-center text-white ${className ?? ""}`}>
+    <div data-images-ready={imagesUp ? "1" : "0"} className={`countdown-stage stage-bg relative flex aspect-video w-full flex-col items-center justify-center overflow-hidden text-center text-white ${className ?? ""}`} style={stageBgStyle(bg) as CSSProperties | undefined}>
       <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: "repeating-linear-gradient(125deg, transparent 0 2px, rgba(255,255,255,0.08) 2px 4px)" }} />
       <div className="relative box-border flex size-full flex-col items-center justify-center" style={{ padding: "var(--inset) var(--inset) var(--safe)", ...(imagesUp ? {} : { visibility: "hidden" as const }) }}>
       <div className="relative mb-[2cqi] rounded-full border border-white/20 px-[1.4cqi] py-[0.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.8cqi] tracking-[0.18em] uppercase">End of stream</div>

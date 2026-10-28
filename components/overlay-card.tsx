@@ -2,9 +2,13 @@
 
 /* eslint-disable @next/next/no-img-element -- OBS output: plain <img> so uploads and data: URLs render without the optimiser */
 import type { ImageFit } from "@/lib/stage"
+import type { CSSProperties } from "react"
+import { stageBgStyle } from "@/lib/stage"
 import { useImagesReady } from "@/lib/image-preload"
 
 export type OverlayCardProps = {
+  /** Card background colour; "" = the default blue. */
+  bg?: string
   kind: "break" | "hold" | "welcome" | "standby"
   title: string
   message?: string
@@ -24,7 +28,7 @@ function elapsed(since: number, now: number) {
 }
 
 /** Full-frame 16:9 break / hold card, same type and background as the end card. */
-export function OverlayCard({ kind, title, message, image, fit = "cover", since, clock, className }: OverlayCardProps) {
+export function OverlayCard({ kind, title, message, image, fit = "cover", since, clock, className, bg }: OverlayCardProps) {
   const cover = Boolean(image) && fit === "cover"
   const contain = Boolean(image) && fit === "contain"
   // The card's text waits for its picture (decoded, max ~2s): never text over an empty frame.
@@ -38,6 +42,7 @@ export function OverlayCard({ kind, title, message, image, fit = "cover", since,
       data-testid={`overlay-${kind}`}
       data-images-ready={imagesUp ? "1" : "0"}
       className={`countdown-stage stage-bg relative isolate aspect-video w-full overflow-hidden text-center text-white ${className ?? ""}`}
+      style={stageBgStyle(bg) as CSSProperties | undefined}
     >
       {cover ? (
         <div data-testid="overlay-image-box" className="absolute inset-0 overflow-hidden" style={gate}>

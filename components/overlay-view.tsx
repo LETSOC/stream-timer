@@ -88,7 +88,7 @@ function StrapInner({ initial }: { initial: OverlayInitial }) {
     <Frame checker={checker} guides={guides} blocked={blocked}>
       {preset ? (
         <div className="overlay-anchor" style={anchorStyle(where, inset)} data-corner={where}>
-          <NameStrap key={preset.id} preset={preset} visible={visible} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText }} />
+          <NameStrap key={preset.id} preset={preset} visible={visible} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText, design: stage.strapDesigns?.[stage.strapStyle || preset.style] }} />
         </div>
       ) : null}
     </Frame>

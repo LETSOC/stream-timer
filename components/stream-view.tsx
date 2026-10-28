@@ -312,7 +312,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         const live = isAir || (handing && source === wanted)
         if (!previewMountSource({ gentle: gentlePreview || lightPreview, live })) return null
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || (!isAir && fade?.out !== source)} crossfadeMs={crossfadeMs} tail={fade?.out === source} fadeIn={fade?.in === source} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} />
+        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || (!isAir && fade?.out !== source)} crossfadeMs={crossfadeMs} tail={fade?.out === source} fadeIn={fade?.in === source} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} standbyBg={stage.standbyBg} />
       })}
       <StreamAudioOverlay />
       {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} hold={isScene(shownScreen) && Boolean(stage.scenes[shownScreen]?.video) && stage.scenes[shownScreen]?.pauseBed === true} viewKey={viewKey} /> : null}
@@ -324,6 +324,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           message={shownScreen === "break" ? stage.breakMessage : shownScreen === "welcome" ? stage.welcomeMessage : stage.holdMessage}
           image={shownScreen === "break" ? stage.breakImage : shownScreen === "welcome" ? stage.welcomeImage : stage.holdImage}
           fit={shownScreen === "break" ? stage.breakFit : shownScreen === "welcome" ? stage.welcomeFit : stage.holdFit}
+          bg={shownScreen === "break" ? stage.breakBg : shownScreen === "welcome" ? stage.welcomeBg : stage.holdBg}
           since={stage.overlayAt}
           clock={now}
           className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
@@ -331,7 +332,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
       ) : isScene(shownScreen) ? (
         <SceneCardView id={shownScreen} key={shownScreen} card={stage.scenes[shownScreen]} qr={stage.qr} now={now ? now.getTime() : null} onAir className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
       ) : ended ? (
-        <EndStreamPage className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
+        <EndStreamPage bg={stage.endBg} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
           subtitle: stage.endSubtitle,
           date: stage.endDate,
@@ -348,6 +349,8 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         }} social={socialLook(stage)} />
       ) : (
       <CountdownStage
+        slateLook={stage.slateLook}
+        bg={stage.countdownBg}
         event={event}
         checker={checker}
         showMeta={showMeta}
@@ -385,6 +388,8 @@ function StreamFallback({ initial }: { initial: StreamInitial | null }) {
   return (
     <main className={`flex min-h-dvh items-center justify-center ${stage.transparent ? "bg-transparent" : "bg-black"}`}>
       <CountdownStage
+        slateLook={stage.slateLook}
+        bg={stage.countdownBg}
         event={initial?.event ?? DEFAULT_EVENT}
         checker={stage.checker}
         showMeta={stage.showMeta}
