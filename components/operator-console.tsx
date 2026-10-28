@@ -47,7 +47,7 @@ import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
-import { DEFAULT_STAGE, END_OFFSET_MAX, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
+import { DEFAULT_STAGE, DEFAULT_SLATE_LOOK, FONT_WEIGHTS, SLATE_SIZE_RANGE, type FontWeight, type SlateLook, END_OFFSET_MAX, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
 import { OVERLAY_INSET_RANGE, SAFE_ZONE_PCT } from "@/lib/visuals"
 import { IMMEDIATE_STAGE, pickSection, planRemoteSync, previewSkew, savePayloadStage, SECTIONS, withSection, type DeskSnapshot, type SectionId, type SectionValues } from "@/lib/desk-sections"
 import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/section-drafts"
@@ -1187,10 +1187,15 @@ export function OperatorConsole() {
               <input type="checkbox" className="size-4 accent-black" checked={showMeta} onChange={(event) => setShowMeta(event.target.checked)} />
               Show date and timezone
             </label>
+            <SlateTextLook testid="look-meta" label="Date and timezone line" look={visuals.slateLook} size="metaSize" weight="metaWeight" opacity="metaOpacity" onChange={(v) => setVisual("slateLook", v)} />
+            <SlateTextLook testid="look-badge" label="Badge pill (Live Countdown)" look={visuals.slateLook} size="badgeSize" weight="badgeWeight" onChange={(v) => setVisual("slateLook", v)} />
             <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={showLink} onChange={(event) => setShowLink(event.target.checked)} />
               Show event link
             </label>
+            <SlateTextLook testid="look-link" label="Event link text" look={visuals.slateLook} size="linkSize" weight="linkWeight" opacity="linkOpacity" onChange={(v) => setVisual("slateLook", v)} />
+            <Field label="Countdown page background" htmlFor="countdown-bg"><BgColorField id="countdown-bg" value={visuals.countdownBg} onChange={(v) => setVisual("countdownBg", v)} />
+</Field>
             <label className="flex items-center gap-2 font-mono text-[13px] tracking-[0.08em] text-black/70 uppercase">
               <input type="checkbox" className="size-4 accent-black" checked={transparent} onChange={(event) => setTransparent(event.target.checked)} />
               Transparent background
@@ -1460,6 +1465,7 @@ export function OperatorConsole() {
                 message={previewScreen === "break" ? breakMessage : previewScreen === "welcome" ? welcomeMessage : holdMessage}
                 image={previewScreen === "break" ? breakImage : previewScreen === "welcome" ? welcomeImage : holdImage}
                 fit={previewScreen === "break" ? breakFit : previewScreen === "welcome" ? welcomeFit : holdFit}
+                bg={previewScreen === "break" ? visuals.breakBg : previewScreen === "welcome" ? visuals.welcomeBg : visuals.holdBg}
                 since={overlayAt}
                 clock={now}
               />
@@ -1481,9 +1487,9 @@ export function OperatorConsole() {
                   { label: "Instagram", href: instagramUrl, icon: null },
                   { label: "YouTube", href: youtubeUrl, icon: null },
                 ],
-              }} social={socialLook(draftStage)} />
+              }} bg={visuals.endBg} social={socialLook(draftStage)} />
             ) : (
-            <CountdownStage event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} social={socialLook(draftStage)} countdownStrokePx={visuals.countdownStrokePx} countdownStrokeColor={visuals.countdownStrokeColor} />
+            <CountdownStage slateLook={visuals.slateLook} bg={visuals.countdownBg} event={event} checker={checker} showMeta={showMeta} showLink={showLink} transparent={transparent} lineSpacing={lineSpacing} blockGap={blockGap} clockScale={clockScale} clockText={clockText} logoUrl={logoUrl} speakers={speakers} gallerySeconds={gallerySeconds} galleryPause={galleryPause} galleryOffset={galleryOffset} galleryScale={galleryScale} clock={previewNow} social={socialLook(draftStage)} countdownStrokePx={visuals.countdownStrokePx} countdownStrokeColor={visuals.countdownStrokeColor} />
             )}
             {/* OBS program feed (operator HLS, muted by default); the countdown stays underneath until its first frame. */}
             {previewScreen === "program" ? <ProgramPlayer scope="desk" src={programOperatorSrc(programSource === "backup" ? "program-backup" : "program")} className="z-10" /> : null}
@@ -1527,6 +1533,8 @@ export function OperatorConsole() {
             <Field label="QR link" htmlFor="end-qr"><GrowingText id="end-qr" value={endQrUrl} onChange={setEndQrUrl} /></Field>
             <Field label="End card adjustment" htmlFor="end-offset"><p className="-mt-1 mb-1 font-mono text-[12px] text-black/70">Minutes from the planned end (Event › End time {endTime} on {date}). −2 = finish 2 min early, +10 = 10 min later. Can't go before the doors. An adjusted end cuts over Program when due; tap Program or Countdown to stay on past it.</p><div className="flex flex-wrap items-center gap-1">{END_STEPS.map((m) => <button key={m} type="button" data-testid={`end-offset-${m < 0 ? `minus${-m}` : m}`} onClick={() => stepEndOffset(m)} className="h-8 min-w-11 rounded-full border border-black/20 bg-white px-2 font-mono text-[13px] font-bold tabular-nums hover:bg-black/5">{m < 0 ? `−${-m}` : `+${m}`}</button>)}<span className="ml-0.5 font-mono text-[12px] text-black/60">min</span>{endOffsetMin ? <Pill size="sm" tone="outline" onClick={() => stepEndOffset(null)}>Clear</Pill> : null}</div><p id="end-offset" data-testid="end-offset-result" className="mt-1.5 font-mono text-[14px] font-bold">Planned {endTime} · {endsLabel(date, time, endTime, timeZone, endOffsetMin)}</p></Field>
             <Field label="Button label" htmlFor="end-button"><GrowingText id="end-button" value={endButton} onChange={setEndButton} /></Field>
+            <Field label="Background colour" htmlFor="end-bg"><BgColorField id="end-bg" value={visuals.endBg} onChange={(v) => setVisual("endBg", v)} />
+</Field>
             <div className="flex flex-wrap gap-2">
               <ConfirmButton data-testid="show-end" holdMs={3000} data-on={previewScreen === "end" ? "1" : undefined} className={`${pillClass(previewScreen === "end" ? "solid" : "outline")} min-h-12 whitespace-nowrap`} onConfirm={() => showScreen("end")}>{busyLabel("end", previewScreen === "end" ? "● End card on" : "Show end card now")}</ConfirmButton>
               <ConfirmButton data-testid="back-to-countdown" data-on={previewScreen === "countdown" ? "1" : undefined} className={`${pillClass(previewScreen === "countdown" ? "solid" : "outline")} whitespace-nowrap`} confirmLabel="Back to countdown · confirm" onConfirm={() => showScreen("countdown")}>{busyLabel("countdown", previewScreen === "countdown" ? "● Countdown on" : "Back to countdown")}</ConfirmButton>
@@ -1538,6 +1546,8 @@ export function OperatorConsole() {
             <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show break card. Edits here are a draft until you Save.</p>
             <Field label="Title" htmlFor="break-title"><GrowingText id="break-title" value={breakTitle} onChange={setBreakTitle} /></Field>
             <Field label="Message (optional)" htmlFor="break-message"><GrowingText id="break-message" value={breakMessage} onChange={setBreakMessage} /></Field>
+            <Field label="Background colour" htmlFor="break-bg"><BgColorField id="break-bg" value={visuals.breakBg} onChange={(v) => setVisual("breakBg", v)} />
+</Field>
             <Field label="Image (optional): URL or upload" htmlFor="break-image">
               <GrowingText id="break-image" value={breakImage} onChange={setBreakImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1558,6 +1568,8 @@ export function OperatorConsole() {
             <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show hold card. Edits here are a draft until you Save.</p>
             <Field label="Title" htmlFor="hold-title"><GrowingText id="hold-title" value={holdTitle} onChange={setHoldTitle} /></Field>
             <Field label="Message (optional)" htmlFor="hold-message"><GrowingText id="hold-message" value={holdMessage} onChange={setHoldMessage} /></Field>
+            <Field label="Background colour" htmlFor="hold-bg"><BgColorField id="hold-bg" value={visuals.holdBg} onChange={(v) => setVisual("holdBg", v)} />
+</Field>
             <Field label="Image (optional): URL or upload" htmlFor="hold-image">
               <GrowingText id="hold-image" value={holdImage} onChange={setHoldImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1578,12 +1590,16 @@ export function OperatorConsole() {
             <p className="font-mono text-[12px] leading-5 text-black/70">Shown automatically on /stream and Vertical when neither Main nor Backup is sending. Not a scene and not switched from Transport. Public text: no technical words.</p>
             <Field label="Title" htmlFor="standby-title"><GrowingText id="standby-title" value={standbyTitle} onChange={setStandbyTitle} /></Field>
             <Field label="Message (optional)" htmlFor="standby-message"><GrowingText id="standby-message" value={standbyMessage} onChange={setStandbyMessage} /></Field>
+            <Field label="Background colour" htmlFor="standby-bg"><BgColorField id="standby-bg" value={visuals.standbyBg} onChange={(v) => setVisual("standbyBg", v)} />
+</Field>
           </Panel>
           <Panel id="welcome-card" title="Welcome back card" defaultOpen={false} dirty={drafts.isDirty("welcomeCard")} pill={overlay === "welcome" ? "On air" : undefined}>
             {draftBar("welcomeCard")}
             <p className="font-mono text-[12px] leading-5 text-black/70">Shown full-frame on /stream with Transport › Show welcome card. Edits here are a draft until you Save.</p>
             <Field label="Title" htmlFor="welcome-title"><GrowingText id="welcome-title" value={welcomeTitle} onChange={setWelcomeTitle} /></Field>
             <Field label="Message (optional)" htmlFor="welcome-message"><GrowingText id="welcome-message" value={welcomeMessage} onChange={setWelcomeMessage} /></Field>
+            <Field label="Background colour" htmlFor="welcome-bg"><BgColorField id="welcome-bg" value={visuals.welcomeBg} onChange={(v) => setVisual("welcomeBg", v)} />
+</Field>
             <Field label="Image (optional): URL or upload" htmlFor="welcome-image">
               <GrowingText id="welcome-image" value={welcomeImage} onChange={setWelcomeImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1633,7 +1649,7 @@ export function OperatorConsole() {
 
           </Panel>
           <Panel id="destinations" title="Saved destinations" pill={`${dests.items.length} saved`}>
-            <DestinationsPanel dests={dests.items} selected={{ slate: dests.selectedId, capture: dests.selectedCaptureId }}
+            <DestinationsPanel dests={dests.items} selected={{ slate: dests.selectedId, capture: dests.selectedCaptureId, slateLive: rtmpChannels.slate.running, captureLive: rtmpChannels.capture.running }}
               liveIds={[rtmpChannels.slate.running ? dests.selectedId : null, rtmpChannels.capture.running ? dests.selectedCaptureId : null].filter((x): x is string => Boolean(x))}
               pillClass={pillClass} onChanged={() => void loadDests()} onNote={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text.split(/(?<=\.) /)[0])} />
             <PathPanels dests={dests.items} onEdit={openDestEdit} onDestsChanged={() => void loadDests()} />
@@ -2710,7 +2726,7 @@ function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; b
 /** The original desk cards (blue on the desk, Transport › Desk). */
 const DESK_CARDS = [["welcome", "Welcome"], ["break", "Break"], ["hold", "Hold"]] as const
 const SCENE_DESK_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby", showreel: "Showreel" }
-const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "strapDesigns", "textScale", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes"] as const
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "strapDesigns", "textScale", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes", "slateLook", "countdownBg", "endBg", "breakBg", "holdBg", "standbyBg", "welcomeBg"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
   return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals
@@ -2735,3 +2751,46 @@ function ColorField({ id, label, value, onChange }: { id: string; label: string;
   )
 }
 
+
+/** Size (% of the old size), weight and (optional) brightness for one countdown-slate text. */
+function SlateTextLook({ testid, label, look, size, weight, opacity, onChange }: { testid: string; label: string; look: SlateLook; size: "metaSize" | "badgeSize" | "linkSize"; weight: "metaWeight" | "badgeWeight" | "linkWeight"; opacity?: "metaOpacity" | "linkOpacity"; onChange: (v: SlateLook) => void }) {
+  const set = (patch: Partial<SlateLook>) => onChange({ ...look, ...patch })
+  const changed = look[size] !== DEFAULT_SLATE_LOOK[size] || look[weight] !== DEFAULT_SLATE_LOOK[weight] || (opacity ? look[opacity] !== DEFAULT_SLATE_LOOK[opacity] : false)
+  return (
+    <div data-testid={testid} className="grid gap-1.5 rounded-lg border border-black/10 p-2.5">
+      <div className="flex items-center justify-between font-mono text-[12px] tracking-[0.08em] text-black/70 uppercase">
+        <span>{label}</span>
+        {changed ? <button type="button" data-testid={`${testid}-reset`} className="text-[11px] normal-case underline" onClick={() => set({ [size]: DEFAULT_SLATE_LOOK[size], [weight]: DEFAULT_SLATE_LOOK[weight], ...(opacity ? { [opacity]: DEFAULT_SLATE_LOOK[opacity] } : {}) })}>Reset</button> : null}
+      </div>
+      <label className="flex items-center gap-2 font-mono text-[12px] text-black/70">
+        <span className="w-16 shrink-0">Size</span>
+        <input data-testid={`${testid}-size`} type="range" min={SLATE_SIZE_RANGE.min} max={SLATE_SIZE_RANGE.max} step="5" value={look[size]} onChange={(e) => set({ [size]: Number(e.target.value) })} className="w-full accent-black" />
+        <span className="w-11 shrink-0 text-right tabular-nums">{look[size]}%</span>
+      </label>
+      <label className="flex items-center gap-2 font-mono text-[12px] text-black/70">
+        <span className="w-16 shrink-0">Weight</span>
+        <select data-testid={`${testid}-weight`} value={look[weight]} onChange={(e) => set({ [weight]: Number(e.target.value) as FontWeight })} className="h-8 flex-1 border px-2 font-mono text-[13px]">
+          {FONT_WEIGHTS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+        </select>
+      </label>
+      {opacity ? (
+        <label className="flex items-center gap-2 font-mono text-[12px] text-black/70">
+          <span className="w-16 shrink-0">Brightness</span>
+          <input data-testid={`${testid}-opacity`} type="range" min="10" max="100" step="5" value={look[opacity]} onChange={(e) => set({ [opacity]: Number(e.target.value) })} className="w-full accent-black" />
+          <span className="w-11 shrink-0 text-right tabular-nums">{look[opacity]}%</span>
+        </label>
+      ) : null}
+    </div>
+  )
+}
+
+/** Background colour picker; "" = the default blue (with its slow pulse). */
+function BgColorField({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <input id={id} data-testid={id} type="color" value={value || "#0000a2"} onChange={(e) => onChange(e.target.value)} className="h-9 w-14 border" />
+      <span className="font-mono text-[12px] text-black/70">{value ? value : "Default blue"}</span>
+      {value ? <button type="button" data-testid={`${id}-reset`} className="font-mono text-[12px] underline" onClick={() => onChange("")}>Default blue</button> : null}
+    </div>
+  )
+}
