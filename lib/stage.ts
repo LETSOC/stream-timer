@@ -22,6 +22,15 @@ export type StageOptions = {
   /** Countdown unit boxes: stroke px @1080p and colour */
   countdownStrokePx: number
   countdownStrokeColor: string
+  /** Countdown slate text options (date/timezone line, badge pill, event link). Defaults = the old look. */
+  slateLook: SlateLook
+  /** Background colours, "" = the default blue. */
+  countdownBg: string
+  endBg: string
+  breakBg: string
+  holdBg: string
+  standbyBg: string
+  welcomeBg: string
   /** Visuals overlays. Saved (desk › Visuals): presets + colours. */
   straps: StrapPreset[]
   strapAccent: string
@@ -145,6 +154,42 @@ export const OVERLAYS: readonly Overlay[] = ["none", ...CARD_OVERLAYS]
 export const isCardOverlay = (v: unknown): v is CardOverlay => (CARD_OVERLAYS as readonly unknown[]).includes(v)
 export const isOverlay = (v: unknown): v is Overlay => v === "none" || isCardOverlay(v)
 
+// ---------- slate text look + background colours ----------
+
+export type FontWeight = 400 | 700 | 900
+export const FONT_WEIGHTS: { value: FontWeight; label: string }[] = [{ value: 400, label: "Regular" }, { value: 700, label: "Bold" }, { value: 900, label: "Black" }]
+/** size = % of the old size, opacity = % (date line / link were white at 40% / 80%). */
+export type SlateLook = { metaSize: number; metaWeight: FontWeight; metaOpacity: number; badgeSize: number; badgeWeight: FontWeight; linkSize: number; linkWeight: FontWeight; linkOpacity: number }
+export const DEFAULT_SLATE_LOOK: SlateLook = { metaSize: 100, metaWeight: 400, metaOpacity: 40, badgeSize: 100, badgeWeight: 700, linkSize: 100, linkWeight: 400, linkOpacity: 80 }
+export const SLATE_SIZE_RANGE = { min: 50, max: 300 }
+
+function weight(v: unknown, f: FontWeight): FontWeight {
+  return v === 400 || v === 700 || v === 900 ? v : f
+}
+
+export function parseSlateLook(v: unknown): SlateLook {
+  const r = v && typeof v === "object" ? (v as Record<string, unknown>) : {}
+  const d = DEFAULT_SLATE_LOOK
+  const size = (x: unknown, f: number) => clamp(x, SLATE_SIZE_RANGE.min, SLATE_SIZE_RANGE.max, f, true)
+  const op = (x: unknown, f: number) => clamp(x, 10, 100, f, true)
+  return {
+    metaSize: size(r.metaSize, d.metaSize), metaWeight: weight(r.metaWeight, d.metaWeight), metaOpacity: op(r.metaOpacity, d.metaOpacity),
+    badgeSize: size(r.badgeSize, d.badgeSize), badgeWeight: weight(r.badgeWeight, d.badgeWeight),
+    linkSize: size(r.linkSize, d.linkSize), linkWeight: weight(r.linkWeight, d.linkWeight), linkOpacity: op(r.linkOpacity, d.linkOpacity),
+  }
+}
+
+/** "" (default blue) or a #rrggbb colour. */
+export function bgColor(v: unknown): string {
+  return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v.trim()) ? v.trim().toLowerCase() : ""
+}
+
+/** Style for a `.stage-bg` element: unset = the default blue pulse; a colour sets the base and a slightly lighter pulse. */
+export function stageBgStyle(color: string | undefined): Record<string, string> | undefined {
+  const c = bgColor(color)
+  return c ? { "--bg-dark": c, "--bg-light": `color-mix(in srgb, ${c} 86%, white)` } : undefined
+}
+
 export const DEFAULT_STAGE: StageOptions = {
   checker: 6,
   showMeta: true,
@@ -159,6 +204,13 @@ export const DEFAULT_STAGE: StageOptions = {
   socialShowHandle: true,
   countdownStrokePx: 2,
   countdownStrokeColor: "#ffffff",
+  slateLook: DEFAULT_SLATE_LOOK,
+  countdownBg: "",
+  endBg: "",
+  breakBg: "",
+  holdBg: "",
+  standbyBg: "",
+  welcomeBg: "",
   straps: DEFAULT_STRAPS,
   strapAccent: "#d9ff43",
   strapText: "#ffffff",
@@ -301,6 +353,13 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     socialShowHandle: pick("socialShowHandle", (v) => v !== false),
     countdownStrokePx: pick("countdownStrokePx", (v, f) => Math.round(clamp(v, 0, 12, f) * 2) / 2),
     countdownStrokeColor: pick("countdownStrokeColor", (v, f) => hexColor(v, f)),
+    slateLook: pick("slateLook", (v) => parseSlateLook(v)),
+    countdownBg: pick("countdownBg", (v) => bgColor(v)),
+    endBg: pick("endBg", (v) => bgColor(v)),
+    breakBg: pick("breakBg", (v) => bgColor(v)),
+    holdBg: pick("holdBg", (v) => bgColor(v)),
+    standbyBg: pick("standbyBg", (v) => bgColor(v)),
+    welcomeBg: pick("welcomeBg", (v) => bgColor(v)),
     straps: pick("straps", (v) => sanitizeStraps(v)),
     strapAccent: pick("strapAccent", (v, f) => hexColor(v, f)),
     strapText: pick("strapText", (v, f) => hexColor(v, f)),
