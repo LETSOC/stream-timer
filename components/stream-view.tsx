@@ -12,7 +12,7 @@ import { wallTimeInZone } from "@/lib/countdown"
 import { useNow } from "@/lib/use-now"
 import { clampChecker, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
-import { SceneCardView } from "@/components/visual-assets"
+import { SceneHandoff } from "@/components/scene-handoff"
 import { isScene } from "@/lib/visuals-assets"
 import { brandUrl } from "@/lib/brand-asset"
 import { preloadImages, stageImageUrls } from "@/lib/image-preload"
@@ -330,7 +330,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
         />
       ) : isScene(shownScreen) ? (
-        <SceneCardView id={shownScreen} key={shownScreen} card={stage.scenes[shownScreen]} qr={stage.qr} now={now ? now.getTime() : null} onAir className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
+        <SceneHandoff id={shownScreen} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} className="z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
       ) : ended ? (
         <EndStreamPage bg={stage.endBg} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
