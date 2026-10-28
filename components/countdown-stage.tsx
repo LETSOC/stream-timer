@@ -15,6 +15,7 @@ import { CLOCK_GEOMETRY, CLOCK_SCALE_RANGE, CLOCK_TEXT_RANGE, clampSize, fitCloc
 import type { EventConfig } from "@/lib/event"
 import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
+import { DEFAULT_SLATE_LOOK, stageBgStyle, type SlateLook } from "@/lib/stage"
 import { safeUrl } from "@/lib/event"
 import { brandUrl } from "@/lib/brand-asset"
 import { imageReady, useImagesReady, waitForImage } from "@/lib/image-preload"
@@ -39,6 +40,10 @@ type CountdownStageProps = {
   blockGap?: number
   clockScale?: number
   clockText?: number
+  /** Date/timezone line, badge pill and event link text options (defaults = old look). */
+  slateLook?: SlateLook
+  /** Page background colour; "" = the default blue. */
+  bg?: string
   logoUrl?: string
   speakers?: { image: string; name: string; description: string }[]
   gallerySeconds?: number
@@ -53,7 +58,8 @@ type CountdownStageProps = {
   countdownStrokeColor?: string
 }
 
-export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -86, galleryScale = 80, clock, social, countdownStrokePx = 2, countdownStrokeColor = "#ffffff", hide }: CountdownStageProps) {
+export function CountdownStage({ event, className, checker = 6, showMeta = true, showLink = true, transparent = false, lineSpacing = 1.14, blockGap = 1.2, clockScale = 1, clockText = 1, logoUrl = "", speakers = [], gallerySeconds = 4, galleryPause = 6, galleryOffset = -86, galleryScale = 80, clock, social, countdownStrokePx = 2, countdownStrokeColor = "#ffffff", hide, slateLook = DEFAULT_SLATE_LOOK, bg = "" }: CountdownStageProps) {
+  const look = slateLook
   // Builder preview only: hide distracting parts (layout kept, so overlays sit where they will on air).
   const hid = (part: CountdownPart): CSSProperties | undefined => (hide?.[part] ? { visibility: "hidden" } : undefined)
   const wrap = (part: CountdownPart, node: ReactNode) => (hide?.[part] ? <span data-cd-hidden={part} style={{ display: "contents", visibility: "hidden" }}>{node}</span> : node)
@@ -80,8 +86,9 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       style={{ aspectRatio: "16 / 9", ["--cd-stroke" as string]: countdownStrokePx, ["--cd-stroke-color" as string]: countdownStrokeColor }}
     >
       <div
+        data-testid="stage-bg"
         className={cn("pointer-events-none absolute inset-0", transparent ? "" : "stage-bg")}
-        style={transparent || hide?.background ? { background: hide?.background ? "#1a1a1a" : "transparent" } : undefined}
+        style={transparent || hide?.background ? { background: hide?.background ? "#1a1a1a" : "transparent" } : (stageBgStyle(bg) as CSSProperties | undefined)}
       />
       {live && !transparent ? <div className="live-wash pointer-events-none absolute inset-0" /> : null}
       {wrap("qr", <RollingQr divisions={divisions} second={second} label={live ? "Watch live" : joinLabel} />)}
@@ -89,11 +96,11 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
       <div data-testid="stage-content" className="relative z-10 h-full" style={{ padding: "var(--inset) var(--safe) var(--safe) var(--inset)", ...gate }}>
         <div className="flex min-w-0 max-w-[58%] flex-col justify-start">
           <div className="mb-[1.6cqi] flex items-center gap-[1.1cqi]" style={hid("badge")}>
-            <span className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] text-[0.78cqi] font-bold tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`}>
+            <span data-testid="stage-badge" className={`rounded-full px-[1.05cqi] py-[0.42cqi] font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-black uppercase ${live ? "animate-pulse bg-[#ff3c00] text-white" : "bg-white"}`} style={{ fontSize: `${0.78 * look.badgeSize / 100}cqi`, fontWeight: look.badgeWeight }}>
               {live ? "LIVE" : badge}
             </span>
             {showMeta ? (
-              <div className="flex gap-[1.4cqi] font-[Arial,Helvetica,sans-serif] text-[0.9cqi] tracking-[0.12em] text-white/40 uppercase">
+              <div data-testid="stage-meta-line" className="flex gap-[1.4cqi] font-[Arial,Helvetica,sans-serif] tracking-[0.12em] uppercase" style={{ fontSize: `${0.9 * look.metaSize / 100}cqi`, fontWeight: look.metaWeight, color: `rgb(255 255 255 / ${look.metaOpacity}%)` }}>
                 <span>{date}</span>
                 <span>{timeZone}</span>
               </div>
@@ -151,7 +158,9 @@ export function CountdownStage({ event, className, checker = 6, showMeta = true,
             href={safeUrl(eventLink, "#")}
             target="_blank"
             rel="noreferrer"
-            className="pointer-events-auto mt-[1.2cqi] max-w-full text-center font-[Arial,Helvetica,sans-serif] text-[0.85cqi] leading-tight tracking-[0.02em] break-all text-white/80 no-underline"
+            data-testid="stage-event-link"
+            className="pointer-events-auto mt-[1.2cqi] max-w-full text-center font-[Arial,Helvetica,sans-serif] leading-tight tracking-[0.02em] break-all no-underline"
+            style={{ fontSize: `${0.85 * look.linkSize / 100}cqi`, fontWeight: look.linkWeight, color: `rgb(255 255 255 / ${look.linkOpacity}%)` }}
           >
             {eventLinkLabel}
           </a>
