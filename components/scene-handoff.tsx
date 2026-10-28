@@ -1,0 +1,31 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { SceneCardView } from "@/components/visual-assets"
+import { HANDOFF_MAX_MS, handoffReady, handoffShow, handoffStart, type HandoffState } from "@/lib/scene-handoff"
+import type { QrConfig, SceneCard } from "@/lib/visuals-assets"
+
+/**
+ * /stream scene output with a seamless scene-to-scene switch: the outgoing scene (its video holding
+ * the last frame) stays on top until the incoming scene's video has painted its first frame.
+ */
+export function SceneHandoff({ id, scenes, qr, now, className }: { id: string; scenes: Record<string, SceneCard>; qr?: QrConfig; now: number | null; className: string }) {
+  const [s, setS] = useState<HandoffState>(() => handoffStart(id))
+  if (s.current !== id) setS(handoffShow(s, id))
+  const cur = s.current !== id ? id : s.current
+  const leaving = s.current !== id ? s.leaving ?? s.current : s.leaving
+  useEffect(() => {
+    if (leaving === null) return
+    const t = setTimeout(() => setS((p) => (p.leaving === null ? p : { current: p.current, leaving: null })), HANDOFF_MAX_MS)
+    return () => clearTimeout(t)
+  }, [leaving, cur])
+  return (
+    <div data-testid="scene-handoff" data-leaving={leaving ?? ""} className={`relative ${className}`}>
+      {/* Keyed siblings under one parent: the outgoing scene keeps its own video element (no remount,
+          no restart) while it covers; dropping the cover just unmounts it. */}
+      {[cur, ...(leaving !== null && leaving !== cur && scenes[leaving] ? [leaving] : [])].map((sid) => (
+        <SceneCardView key={sid} id={sid} card={scenes[sid]} qr={qr} now={now} onAir onReady={sid === cur ? () => setS((p) => handoffReady(p, sid)) : undefined} className={sid === cur ? "h-full w-full" : "absolute inset-0 z-20 h-full w-full"} />
+      ))}
+    </div>
+  )
+}
