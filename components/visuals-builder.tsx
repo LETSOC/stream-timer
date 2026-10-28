@@ -321,7 +321,7 @@ export function VisualsBuilder() {
               <CountdownStage event={event} checker={stage.checker} showMeta={stage.showMeta} showLink={stage.showLink} lineSpacing={stage.lineSpacing} blockGap={stage.blockGap}
                 clockScale={stage.clockScale} clockText={stage.clockText} logoUrl={stage.logoUrl} speakers={stage.speakers} gallerySeconds={stage.gallerySeconds} galleryPause={stage.galleryPause}
                 galleryOffset={stage.galleryOffset} galleryScale={stage.galleryScale} social={socialLook(stage)} countdownStrokePx={stage.countdownStrokePx} countdownStrokeColor={stage.countdownStrokeColor}
-                hide={cdHide} className="absolute inset-0 h-full w-full" />
+                slateLook={stage.slateLook} bg={stage.countdownBg} hide={cdHide} className="absolute inset-0 h-full w-full" />
             ) : programBg === "live" ? (
               // Real /stream (same as Live tab top): true overlay timing. Muted.
               <ShownFrame testId="vb-program-stream" title="/stream (program background)" src="/stream?mute=1" className="pointer-events-none absolute inset-0 h-full w-full border-0" />
