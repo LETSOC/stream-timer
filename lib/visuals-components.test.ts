@@ -271,5 +271,5 @@ test("scene handoff renders one keyed scene with no cover at rest (loop switch k
   assert.ok(html.includes(`data-testid="scene-${id}"`))
   assert.ok(html.includes('data-leaving=""'))
   const src = fs.readFileSync(path.join(process.cwd(), "components/scene-handoff.tsx"), "utf8")
-  assert.match(src, /<SceneCardView key=\{sid\}/)
+  assert.match(src, /<div key=\{sid\}[^>]*className="absolute inset-0"/)
 })
