@@ -115,7 +115,8 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
     const el = videoRef.current
     if (!video || !el) { readyRef.current?.(); return }
     let done = false
-    const fire = () => { if (!done) { done = true; readyRef.current?.() } }
+    // Release on the frame after the first painted video frame, so the cover never lifts a frame early.
+    const fire = () => { if (!done) { done = true; requestAnimationFrame(() => requestAnimationFrame(() => readyRef.current?.())) } }
     const rvfc = (el as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }).requestVideoFrameCallback
     if (rvfc) rvfc.call(el, fire)
     el.addEventListener("playing", fire)
