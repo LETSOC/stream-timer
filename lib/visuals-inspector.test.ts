@@ -25,10 +25,10 @@ test("old configs keep their look: defaults 100% and every accent on; old house 
 })
 
 test("designs and text sizes are junk-tolerant and clamped", () => {
-  const d = parseStrapDesigns({ house: { nameSize: 999, subSize: "x", off: ["bar", "arrow", "nope"] }, pill: null })
+  const d = parseStrapDesigns({ house: { nameSize: 999, subSize: "x", off: ["bar", "arrow", "live", "nope"] }, pill: null })
   assert.equal(d.house.nameSize, 200)
   assert.equal(d.house.subSize, 100)
-  assert.deepEqual(d.house.off, ["arrow"]) // bar is not a house accent
+  assert.deepEqual(d.house.off, ["bar", "arrow"]) // live is not a house accent
   assert.deepEqual(d.pill, DEFAULT_STRAP_DESIGNS.pill)
   assert.deepEqual(parseTextScale({ ticker: 10, qa: 150, talk: "130" }), { ...DEFAULT_TEXT_SCALE, ticker: 50, qa: 150, talk: 130 })
 })
@@ -79,4 +79,26 @@ test("layer: pill and ticker text sizes scale their box; the ticker lift follows
   assert.ok(/data-testid="vl-ticker"[^>]*style="--px:calc\(var\(--vl-px0\) \* 1.5\)"/.test(html))
   // Q&A sits bottom-right on program: lifted by 72 (48 × 1.5) + 16.
   assert.ok(html.includes("bottom:calc(142 * var(--px))"), "lift = 54 safe + 72 + 16")
+})
+
+test("strap colours: defaults equal the old look; each element has its own variable", () => {
+  const html = strap("line")
+  assert.ok(html.includes("--sc-sub:#d9ff43") && html.includes("--sc-bar:#d9ff43") && html.includes("--sc-name:#ffffff"))
+  const own = strap("line", { nameSize: 100, subSize: 100, off: [], colors: { bar: "#ff0000" } })
+  assert.ok(own.includes("--sc-bar:#ff0000") && own.includes("--sc-sub:#d9ff43") && own.includes("--sc-live:#d9ff43"), "bar alone changes")
+  const icon = strap("house", { nameSize: 100, subSize: 100, off: [], colors: { icon: "#123456" } })
+  assert.ok(icon.includes("background:#123456"))
+  const d = parseStrapDesigns({ pill: { colors: { name: "#ABCDEF", sub: "red", nope: "#fff" } } })
+  assert.deepEqual(d.pill.colors, { name: "#abcdef" })
+  assert.equal(d.house.colors, undefined)
+})
+
+test("talk pill: Talk ending soon at 0:00 (session), not 00:00", async () => {
+  const { TALK_ENDING_TEXT } = await import("@/lib/visuals")
+  const now = 1_800_000_000_000
+  const base = previewStage({}, undefined, draftFrom(DEFAULT_STAGE), { showAll: true, now })
+  const over = renderToStaticMarkup(createElement(VisualsLayer, { stage: { ...base, talkMode: "session", talkEndsAt: now - 1000, talkPausedMs: null }, event: DEFAULT_EVENT, screen: "program", now, eventEndMs: null }))
+  assert.ok(over.includes(TALK_ENDING_TEXT) && !over.includes("vl-talk-clock"))
+  const running = renderToStaticMarkup(createElement(VisualsLayer, { stage: { ...base, talkMode: "session", talkEndsAt: now + 60_000, talkPausedMs: null }, event: DEFAULT_EVENT, screen: "program", now, eventEndMs: null }))
+  assert.ok(running.includes("01:00") && !running.includes(TALK_ENDING_TEXT))
 })
