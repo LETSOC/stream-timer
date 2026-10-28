@@ -33,9 +33,46 @@ export const STRAP_ACCENTS = ["dot", "arrow", "bar", "live", "icon"] as const
 export type StrapAccent = (typeof STRAP_ACCENTS)[number]
 export const STRAP_ACCENT_LABEL: Record<StrapAccent, string> = { dot: "Accent circle", arrow: "Arrow ↗", bar: "Accent bar", live: "Live dot", icon: "Platform icon" }
 /** Which accents each design has (in the order they are drawn). */
-export const STYLE_ACCENTS: Record<StrapStyle, readonly StrapAccent[]> = { house: ["dot", "arrow", "icon"], line: ["bar", "live", "icon"], block: ["icon"], pill: ["live", "icon"], gradient: ["icon"] }
+export const STYLE_ACCENTS: Record<StrapStyle, readonly StrapAccent[]> = { house: ["bar", "dot", "arrow", "icon"], line: ["bar", "live", "icon"], block: ["icon"], pill: ["live", "icon"], gradient: ["icon"] }
 export const TEXT_SCALE_RANGE = { min: 50, max: 200 } as const
-export type StrapDesign = { nameSize: number; subSize: number; /** accents switched off (all on by default) */ off: StrapAccent[] }
+/**
+ * Per-element colours. Unset = the design's built-in colour (or the strap Accent / Text colour where the
+ * design used those), so a config saved before this looks the same.
+ */
+export const STRAP_COLOR_KEYS = ["name", "sub", "box", "box2", "bar", "dot", "arrow", "live", "icon", "grad"] as const
+export type StrapColorKey = (typeof STRAP_COLOR_KEYS)[number]
+export const STRAP_COLOR_LABEL: Record<StrapColorKey, string> = { name: "Name text", sub: "Subline text", box: "Box", box2: "Subline box", bar: "Accent bar", dot: "Accent circle", arrow: "Arrow badge", live: "Live dot", icon: "Platform icon", grad: "Gradient end" }
+/** Which colours each design has (inspector order). */
+export const STYLE_COLORS: Record<StrapStyle, readonly StrapColorKey[]> = {
+  house: ["name", "sub", "box", "bar", "dot", "arrow", "icon"],
+  line: ["name", "sub", "box", "bar", "live", "icon"],
+  block: ["name", "sub", "box", "box2", "icon"],
+  pill: ["name", "sub", "box", "bar", "live", "icon"],
+  gradient: ["name", "sub", "box", "grad", "icon"],
+}
+export type StrapColors = Partial<Record<StrapColorKey, string>>
+export type StrapDesign = { nameSize: number; subSize: number; /** accents switched off (all on by default) */ off: StrapAccent[]; /** per-element colour overrides */ colors?: StrapColors }
+
+const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i
+/** "" = no colour (use the platform's own). Built-in colours as they were before per-element colours. */
+export function strapColorDefaults(style: StrapStyle, accent: string, text: string): Record<StrapColorKey, string> {
+  const base = { name: text, sub: text, box: "#1236a0", box2: "#0000b6", bar: accent, dot: "#ffffff", arrow: "#ffffff", live: accent, icon: "", grad: accent }
+  if (style === "house") return { ...base, bar: "#ff6a00" }
+  if (style === "line") return { ...base, sub: accent, box: "#0a0a0a" }
+  if (style === "block") return { ...base, name: "#000000", sub: "#ffffff", box: accent }
+  if (style === "pill") return { ...base, name: accent, sub: accent, box: "#0a0a0a" }
+  return { ...base, box: "#0000b6" }
+}
+export function strapColors(style: StrapStyle, design: StrapDesign | undefined, accent: string, text: string): Record<StrapColorKey, string> {
+  return { ...strapColorDefaults(style, accent, text), ...(design?.colors ?? {}) }
+}
+function parseColors(value: unknown): StrapColors | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const r = value as Record<string, unknown>
+  const out: StrapColors = {}
+  for (const k of STRAP_COLOR_KEYS) if (typeof r[k] === "string" && HEX.test((r[k] as string).trim())) out[k] = (r[k] as string).trim().toLowerCase()
+  return Object.keys(out).length ? out : undefined
+}
 export type StrapDesigns = Record<StrapStyle, StrapDesign>
 export const DEFAULT_STRAP_DESIGN: StrapDesign = { nameSize: 100, subSize: 100, off: [] }
 export const DEFAULT_STRAP_DESIGNS: StrapDesigns = Object.fromEntries(STRAP_STYLES.map((s) => [s, DEFAULT_STRAP_DESIGN])) as StrapDesigns
@@ -55,7 +92,8 @@ export function parseStrapDesigns(value: unknown, legacy: { circle?: boolean; ar
     const off = d && Array.isArray(d.off)
       ? STYLE_ACCENTS[style].filter((a) => (d.off as unknown[]).includes(a))
       : style === "house" ? STYLE_ACCENTS.house.filter((a) => (a === "dot" && legacy.circle === false) || (a === "arrow" && legacy.arrow === false)) : []
-    return [style, { nameSize: clampTextScale(d?.nameSize), subSize: clampTextScale(d?.subSize), off }]
+    const colors = parseColors(d?.colors)
+    return [style, { nameSize: clampTextScale(d?.nameSize), subSize: clampTextScale(d?.subSize), off, ...(colors ? { colors } : {}) }]
   })) as StrapDesigns
 }
 
@@ -67,6 +105,9 @@ export function toggleStrapAccent(designs: StrapDesigns, style: StrapStyle, acce
   const off = d.off.includes(accent) ? d.off.filter((a) => a !== accent) : [...d.off, accent]
   return { ...designs, [style]: { ...d, off: STYLE_ACCENTS[style].filter((a) => off.includes(a)) } }
 }
+
+/** Talk pill / deck readout once a Session talk reaches 0:00 (instead of hanging on 00:00). */
+export const TALK_ENDING_TEXT = "Talk ending soon"
 
 /** Text size % for the pills and the ticker (builder inspector). 100 = the designed size. */
 export const TEXT_SCALE_PARTS = ["ticker", "talk", "festival", "qa", "sponsor"] as const
