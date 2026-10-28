@@ -519,3 +519,19 @@ html:has([data-desk-root]) body {
 .strap-scale { display: contents; }
 .strap .strap-title, .strap .strap-social { --px: var(--strap-sub-px); }
 .strap-line.strap-no-bar .strap-body { border-left: calc(2 * var(--px)) solid #222; border-radius: calc(16 * var(--px)); padding-left: calc(32 * var(--px)); }
+
+/* Name strap per-element colours (--sc-*, set by NameStrap; defaults = the built-in look). Each element
+   reads only its own variable. Specificity .strap.strap-x beats the design rules above. */
+.strap .strap-name { color: var(--sc-name); }
+.strap .strap-title, .strap .strap-social { color: var(--sc-sub); }
+.strap .strap-live-dot { background: var(--sc-live); }
+.strap.strap-house .strap-body { background: var(--sc-box); border-left-color: var(--sc-bar); }
+.strap.strap-house .strap-dot { background: var(--sc-dot); }
+.strap.strap-house .strap-arrow { background: var(--sc-arrow); }
+.strap.strap-house.strap-no-bar .strap-body { border-left-width: 0; border-radius: calc(16 * var(--px)); }
+.strap.strap-line .strap-body { background: var(--sc-box); border-left-color: var(--sc-bar); }
+.strap.strap-line.strap-no-bar .strap-body { border-left-color: #222; }
+.strap.strap-block .strap-name { background: var(--sc-box); }
+.strap.strap-block .strap-title { background: var(--sc-box2); }
+.strap.strap-pill .strap-body { background: color-mix(in srgb, var(--sc-box) 90%, transparent); border-color: var(--sc-bar); }
+.strap.strap-gradient .strap-body { background: linear-gradient(90deg, var(--sc-box) 0%, #6a5ee0 45%, var(--sc-grad) 100%); }
