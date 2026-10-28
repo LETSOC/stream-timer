@@ -70,7 +70,16 @@ export function joinedPreview(f: Pick<Form, "mode" | "server" | "key" | "showKey
   return joinRtmpServerAndKey(server, `${f.keyKind === "query" ? "?" : ""}${DOTS}${f.keyTail}`)
 }
 
-export function destinationUses(id: string, paths: Paths | null, selected: { slate: string | null; capture: string | null }): { label: string; kind: "hd" | "vertical" | "channel"; state?: string }[] {
+/** Saved channel picks plus whether each encoder channel is running right now. */
+export type DestSelection = { slate: string | null; capture: string | null; slateLive?: boolean; captureLive?: boolean }
+
+/**
+ * Pure: the tags on a destination card. Relay forwards come from the live /api/relay paths (the real
+ * source route: /capture, /slate or both). The two encoder channels each remember a saved pick
+ * (`selectedId` / `selectedCaptureId`) that stays set after the channel stops, so a channel tag is shown
+ * only while that channel is actually running; a stale pick no longer labels a /capture forward "Slate channel".
+ */
+export function destinationUses(id: string, paths: Paths | null, selected: DestSelection): { label: string; kind: "hd" | "vertical" | "channel"; state?: string }[] {
   const out: { label: string; kind: "hd" | "vertical" | "channel"; state?: string }[] = []
   for (const p of ["capture", "slate"] as const) {
     const f = paths?.[p]?.forwards.find((x) => x.destId === id)
@@ -78,8 +87,8 @@ export function destinationUses(id: string, paths: Paths | null, selected: { sla
   }
   const v = paths?.vertical?.forwards.find((x) => x.destId === id)
   if (v) out.push({ label: "Vertical /vertical forward", kind: "vertical", state: v.state })
-  if (selected.capture === id) out.push({ label: "Browser capture channel", kind: "channel" })
-  if (selected.slate === id) out.push({ label: "Slate channel", kind: "channel" })
+  if (selected.capture === id && selected.captureLive) out.push({ label: "Browser capture channel", kind: "channel" })
+  if (selected.slate === id && selected.slateLive) out.push({ label: "Slate channel", kind: "channel" })
   return out
 }
 
@@ -115,7 +124,7 @@ async function post(url: string, payload: Record<string, unknown>): Promise<{ ok
 
 export function DestinationsPanel({ dests, selected, liveIds, pillClass, onChanged, onNote }: {
   dests: PanelDest[]
-  selected: { slate: string | null; capture: string | null }
+  selected: DestSelection
   liveIds: string[]
   pillClass: PillClass
   onChanged: () => void
