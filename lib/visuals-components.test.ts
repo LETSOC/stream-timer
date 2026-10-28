@@ -251,7 +251,7 @@ test("every scene card has a renderer on /stream and in the desk preview (regres
   const classic = CARD_OVERLAYS.filter((c) => !isScene(c))
   assert.deepEqual(classic, ["break", "hold", "welcome"])
   const read = (f: string) => fs.readFileSync(path.join(process.cwd(), f), "utf8")
-  assert.match(read("components/stream-view.tsx"), /isScene\(shownScreen\) \? \(\s*<SceneCardView id=\{shownScreen\}/)
+  assert.match(read("components/stream-view.tsx"), /isScene\(shownScreen\) \? \(\s*<SceneHandoff id=\{shownScreen\}/)
   assert.match(read("components/operator-console.tsx"), /isScene\(previewScreen\) \? \([\s\S]{0,120}<SceneCardView id=\{previewScreen\}/)
   const React = await import("react")
   const { renderToStaticMarkup } = await import("react-dom/server")
@@ -260,4 +260,16 @@ test("every scene card has a renderer on /stream and in the desk preview (regres
     const html = renderToStaticMarkup(React.createElement(SceneCardView, { id, card: DEFAULT_SCENES[id], now: 0 }))
     assert.ok(html.includes(DEFAULT_SCENES[id].label) && html.includes(DEFAULT_SCENES[id].pill), id)
   }
+})
+
+test("scene handoff renders one keyed scene with no cover at rest (loop switch keeps the outgoing video on top)", async () => {
+  const React = await import("react")
+  const { renderToStaticMarkup } = await import("react-dom/server")
+  const { SceneHandoff } = await import("@/components/scene-handoff")
+  const id = SCENE_IDS[0]
+  const html = renderToStaticMarkup(React.createElement(SceneHandoff, { id, scenes: DEFAULT_SCENES, now: 0, className: "x" }))
+  assert.ok(html.includes(`data-testid="scene-${id}"`))
+  assert.ok(html.includes('data-leaving=""'))
+  const src = fs.readFileSync(path.join(process.cwd(), "components/scene-handoff.tsx"), "utf8")
+  assert.match(src, /<div key=\{sid\}[^>]*className="absolute inset-0"/)
 })

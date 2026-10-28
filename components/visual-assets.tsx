@@ -89,7 +89,7 @@ export function QrMark({ cfg, variant, show, now, testId }: { cfg: QrConfig; var
 }
 
 /** Full-screen scene card from the design (HOLD 05/06/07, STANDBY, SHOWREEL): pill + title + subline + dots. */
-export function SceneCardView({ id, card, qr, now, className = "", onAir = false }: { id: string; card: SceneCard; qr?: QrConfig; now?: number | null; className?: string; /** Real /stream output: ended + autoSwitch cuts to Program. Preview stays quiet. */ onAir?: boolean }) {
+export function SceneCardView({ id, card, qr, now, className = "", onAir = false, onReady }: { id: string; card: SceneCard; qr?: QrConfig; now?: number | null; className?: string; /** Fires once the scene video has painted its first frame (at once if there is no video). */ onReady?: () => void; /** Real /stream output: ended + autoSwitch cuts to Program. Preview stays quiet. */ onAir?: boolean }) {
   const image = card.bgMode !== "solid" && card.image ? card.image : ""
   const video = card.video || ""
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -109,6 +109,19 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
     })
   }, [video, wantSound])
   useShowreelTap(videoRef, video, card.pauseBed)
+  const readyRef = useRef(onReady)
+  useEffect(() => { readyRef.current = onReady })
+  useEffect(() => {
+    const el = videoRef.current
+    if (!video || !el) { readyRef.current?.(); return }
+    let done = false
+    // Release on the frame after the first painted video frame, so the cover never lifts a frame early.
+    const fire = () => { if (!done) { done = true; requestAnimationFrame(() => requestAnimationFrame(() => readyRef.current?.())) } }
+    const rvfc = (el as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }).requestVideoFrameCallback
+    if (rvfc) rvfc.call(el, fire)
+    el.addEventListener("playing", fire)
+    return () => { done = true; el.removeEventListener("playing", fire) }
+  }, [video])
   const onEnded = () => {
     // Browser capture only: viewers, the builder Live tab and desk previews start the video at other times and would cut early.
     if (!onAir || !card.autoSwitch || !video || !isCapturePage()) return
@@ -123,7 +136,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
   return (
     <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
       {video && !card.videoFront ? (
-        <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
+        <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} preload="auto" autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none" }}>
         {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
@@ -139,7 +152,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
         ) : null}
       </div>
       {video && card.videoFront ? (
-        <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
+        <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} preload="auto" autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
       ) : null}
     </div>
   )
