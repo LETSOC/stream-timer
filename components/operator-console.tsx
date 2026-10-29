@@ -45,6 +45,8 @@ import { useDeckSocket } from "@/lib/use-deck-socket"
 import { TIME_ZONES, DEFAULT_EVENT, eventProblems } from "@/lib/event"
 import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
+import { useUpload } from "@/lib/use-upload"
+import { UploadProgress } from "@/components/upload-progress"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
 import { DEFAULT_STAGE, DEFAULT_SLATE_LOOK, FONT_WEIGHTS, SLATE_SIZE_RANGE, type FontWeight, type SlateLook, END_OFFSET_MAX, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
@@ -669,13 +671,14 @@ export function OperatorConsole() {
   /** Tapped card waiting for the server: " …" after its label until the save is confirmed (or fails). */
   const busyLabel = (id: Screen, label: string) => (pendingScreen === id ? `${label} …` : label)
 
-  async function uploadImage(file: File, apply: (url: string) => void) {
-    const response = await fetchT("/api/upload", { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file }, 120_000)
-    if (handleUnauthorized(response)) return
-    const body = (await response.json().catch(() => null)) as { url?: string; error?: string } | null
-    if (response.ok && body?.url) apply(body.url)
-    else setToast(body?.error ?? `Upload failed (${response.status}).`)
+  const imageUploader = useUpload()
+  async function uploadImage(file: File, apply: (url: string) => void, tag: string) {
+    const res = await imageUploader.start("/api/upload", file, tag)
+    if (!res) return
+    if (handleUnauthorized(new Response(null, { status: res.status }))) return
+    if (typeof res.body?.url === "string") apply(res.body.url)
   }
+
 
   const sendSaveRef = useRef(sendSave)
   useEffect(() => {
@@ -1551,10 +1554,11 @@ export function OperatorConsole() {
             <Field label="Image (optional): URL or upload" htmlFor="break-image">
               <GrowingText id="break-image" value={breakImage} onChange={setBreakImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <label className={`${pillClass("outline", "sm")} cursor-pointer`}>
-                  Upload image
-                  <input data-testid="break-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setBreakImage); event.target.value = "" }} />
+                <label className={`${pillClass("outline", "sm")} ${imageUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
+                  {imageUploader.busy ? "Uploading…" : "Upload image"}
+                  <input data-testid="break-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={imageUploader.busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setBreakImage, "break"); event.target.value = "" }} />
                 </label>
+                <UploadProgress state={imageUploader.state} tag="break" />
                 {breakImage ? <Pill size="sm" tone="outline" onClick={() => setBreakImage("")}>Remove image</Pill> : null}
                 <select aria-label="Image fit" value={breakFit} onChange={(event) => setBreakFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
                   <option value="cover">Fill frame (cover)</option>
@@ -1573,10 +1577,11 @@ export function OperatorConsole() {
             <Field label="Image (optional): URL or upload" htmlFor="hold-image">
               <GrowingText id="hold-image" value={holdImage} onChange={setHoldImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <label className={`${pillClass("outline", "sm")} cursor-pointer`}>
-                  Upload image
-                  <input data-testid="hold-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setHoldImage); event.target.value = "" }} />
+                <label className={`${pillClass("outline", "sm")} ${imageUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
+                  {imageUploader.busy ? "Uploading…" : "Upload image"}
+                  <input data-testid="hold-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={imageUploader.busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setHoldImage, "hold"); event.target.value = "" }} />
                 </label>
+                <UploadProgress state={imageUploader.state} tag="hold" />
                 {holdImage ? <Pill size="sm" tone="outline" onClick={() => setHoldImage("")}>Remove image</Pill> : null}
                 <select aria-label="Image fit" value={holdFit} onChange={(event) => setHoldFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
                   <option value="cover">Fill frame (cover)</option>
@@ -1603,10 +1608,11 @@ export function OperatorConsole() {
             <Field label="Image (optional): URL or upload" htmlFor="welcome-image">
               <GrowingText id="welcome-image" value={welcomeImage} onChange={setWelcomeImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <label className={`${pillClass("outline", "sm")} cursor-pointer`}>
-                  Upload image
-                  <input data-testid="welcome-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setWelcomeImage); event.target.value = "" }} />
+                <label className={`${pillClass("outline", "sm")} ${imageUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
+                  {imageUploader.busy ? "Uploading…" : "Upload image"}
+                  <input data-testid="welcome-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={imageUploader.busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setWelcomeImage, "welcome"); event.target.value = "" }} />
                 </label>
+                <UploadProgress state={imageUploader.state} tag="welcome" />
                 {welcomeImage ? <Pill size="sm" tone="outline" onClick={() => setWelcomeImage("")}>Remove image</Pill> : null}
                 <select aria-label="Image fit" value={welcomeFit} onChange={(event) => setWelcomeFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
                   <option value="cover">Fill frame (cover)</option>
@@ -2419,6 +2425,7 @@ const RelayCard = memo(RelayCardInner)
 function RelayCardInner() {
   const [relay, setRelay] = useState<RelayView | null>(null)
   const [busy, setBusy] = useState(false)
+  const audioUploader = useUpload()
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [preview, setPreview] = useState<RtmpChannelId | null>(null)
   const load = useCallback(async () => {
@@ -2557,6 +2564,7 @@ function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; b
   const [files, setFiles] = useState<AudioFileView[]>([])
   const [draft, setDraft] = useState<AudioSettingsView["channels"] | null>(null)
   const [busy, setBusy] = useState(false)
+  const audioUploader = useUpload()
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null)
   const [playing, setPlaying] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -2593,9 +2601,12 @@ function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; b
     if (body) { setDraft(null); setMessage({ tone: "info", text: "Audio saved. Live channels switch to it now (crossfade, no restart)." }) }
   }
   async function upload(file: File) {
-    if (file.size > 50_000_000) return setMessage({ tone: "error", text: "Audio is over 50 MB." })
-    const body = await post(`/api/audio/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file })
-    if (body) setMessage({ tone: "info", text: `Uploaded ${file.name}. Add it to a channel’s bed below.` })
+    if (file.size > 50_000_000) return audioUploader.fail("audio", file.name, "Audio is over 50 MB.")
+    const res = await audioUploader.start(`/api/audio/upload?name=${encodeURIComponent(file.name)}`, file, "audio")
+    if (!res) return
+    if (handleUnauthorized(new Response(null, { status: res.status }))) return
+    apply(res.body as { settings?: AudioSettingsView; files?: AudioFileView[] } | null)
+    setMessage({ tone: "info", text: `Uploaded ${file.name}. Add it to a channel’s bed below.` })
   }
   function togglePlay(id: string) {
     const el = audioRef.current
@@ -2702,10 +2713,11 @@ function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; b
       <div className="space-y-1 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-bold">Library</span>
-          <label className="cursor-pointer underline">Upload mp3 / m4a / wav / aac (≤ 50 MB)
-            <input type="file" data-testid="audio-upload" accept={AUDIO_ACCEPT} hidden disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f) }} />
+          <label className={audioUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer underline"}>{audioUploader.busy ? "Uploading…" : "Upload mp3 / m4a / wav / aac (≤ 50 MB)"}
+            <input type="file" data-testid="audio-upload" accept={AUDIO_ACCEPT} hidden disabled={busy || audioUploader.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f) }} />
           </label>
         </div>
+        <UploadProgress state={audioUploader.state} tag="audio" />
         {files.length === 0 ? <p className="text-black/60">No audio uploaded yet.</p> : null}
         <ul className="space-y-1">
           {files.map((f) => (
