@@ -47,6 +47,7 @@ import { asEventConfig, useStoredEvent } from "@/lib/event-storage"
 import { handleUnauthorized, hardNavigate, useOperator } from "@/lib/use-operator"
 import { useUpload } from "@/lib/use-upload"
 import { UploadProgress } from "@/components/upload-progress"
+import { FilePicker } from "@/components/file-picker"
 import { joinRtmpServerAndKey } from "@/lib/rtmp-join"
 import { DestinationsPanel, requestDestinationEdit } from "@/components/destinations-panel"
 import { DEFAULT_STAGE, DEFAULT_SLATE_LOOK, FONT_WEIGHTS, SLATE_SIZE_RANGE, type FontWeight, type SlateLook, END_OFFSET_MAX, localClock, parseStage, serverClock, isOverlay, socialLook, stageScreen, testClockStale, type ImageFit, type Overlay, type StageOptions } from "@/lib/stage"
@@ -1554,10 +1555,7 @@ export function OperatorConsole() {
             <Field label="Image (optional): URL or upload" htmlFor="break-image">
               <GrowingText id="break-image" value={breakImage} onChange={setBreakImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <label className={`${pillClass("outline", "sm")} ${imageUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
-                  {imageUploader.busy ? "Uploading…" : "Upload image"}
-                  <input data-testid="break-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={imageUploader.busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setBreakImage, "break"); event.target.value = "" }} />
-                </label>
+                <FilePicker testId="break-upload" label="Choose image" accept="image/png,image/jpeg,image/webp,image/gif" busy={imageUploader.busy} buttonClass={pillClass("outline", "sm")} muted="text-black/55" onFile={(file) => void uploadImage(file, setBreakImage, "break")} />
                 <UploadProgress state={imageUploader.state} tag="break" />
                 {breakImage ? <Pill size="sm" tone="outline" onClick={() => setBreakImage("")}>Remove image</Pill> : null}
                 <select aria-label="Image fit" value={breakFit} onChange={(event) => setBreakFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
@@ -1577,10 +1575,7 @@ export function OperatorConsole() {
             <Field label="Image (optional): URL or upload" htmlFor="hold-image">
               <GrowingText id="hold-image" value={holdImage} onChange={setHoldImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <label className={`${pillClass("outline", "sm")} ${imageUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
-                  {imageUploader.busy ? "Uploading…" : "Upload image"}
-                  <input data-testid="hold-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={imageUploader.busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setHoldImage, "hold"); event.target.value = "" }} />
-                </label>
+                <FilePicker testId="hold-upload" label="Choose image" accept="image/png,image/jpeg,image/webp,image/gif" busy={imageUploader.busy} buttonClass={pillClass("outline", "sm")} muted="text-black/55" onFile={(file) => void uploadImage(file, setHoldImage, "hold")} />
                 <UploadProgress state={imageUploader.state} tag="hold" />
                 {holdImage ? <Pill size="sm" tone="outline" onClick={() => setHoldImage("")}>Remove image</Pill> : null}
                 <select aria-label="Image fit" value={holdFit} onChange={(event) => setHoldFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
@@ -1608,10 +1603,7 @@ export function OperatorConsole() {
             <Field label="Image (optional): URL or upload" htmlFor="welcome-image">
               <GrowingText id="welcome-image" value={welcomeImage} onChange={setWelcomeImage} />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <label className={`${pillClass("outline", "sm")} ${imageUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
-                  {imageUploader.busy ? "Uploading…" : "Upload image"}
-                  <input data-testid="welcome-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={imageUploader.busy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file, setWelcomeImage, "welcome"); event.target.value = "" }} />
-                </label>
+                <FilePicker testId="welcome-upload" label="Choose image" accept="image/png,image/jpeg,image/webp,image/gif" busy={imageUploader.busy} buttonClass={pillClass("outline", "sm")} muted="text-black/55" onFile={(file) => void uploadImage(file, setWelcomeImage, "welcome")} />
                 <UploadProgress state={imageUploader.state} tag="welcome" />
                 {welcomeImage ? <Pill size="sm" tone="outline" onClick={() => setWelcomeImage("")}>Remove image</Pill> : null}
                 <select aria-label="Image fit" value={welcomeFit} onChange={(event) => setWelcomeFit(event.target.value === "contain" ? "contain" : "cover")} className="h-8 border px-2 font-mono text-[13px]">
@@ -2713,9 +2705,7 @@ function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; b
       <div className="space-y-1 rounded-xl border border-black/10 p-2 font-mono text-[12px]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-bold">Library</span>
-          <label className={audioUploader.busy ? "pointer-events-none opacity-50" : "cursor-pointer underline"}>{audioUploader.busy ? "Uploading…" : "Upload mp3 / m4a / wav / aac (≤ 50 MB)"}
-            <input type="file" data-testid="audio-upload" accept={AUDIO_ACCEPT} hidden disabled={busy || audioUploader.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f) }} />
-          </label>
+          <FilePicker testId="audio-upload" label="Choose audio (mp3 / m4a / wav / aac, ≤ 50 MB)" accept={AUDIO_ACCEPT} disabled={busy} busy={audioUploader.busy} buttonClass={pillClass("outline", "sm")} muted="text-black/55" onFile={(f) => void upload(f)} />
         </div>
         <UploadProgress state={audioUploader.state} tag="audio" />
         {files.length === 0 ? <p className="text-black/60">No audio uploaded yet.</p> : null}
