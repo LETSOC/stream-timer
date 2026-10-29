@@ -7,6 +7,7 @@
  * (no script can run, no external fetch) and pasted SVG is also sanitised before it is stored.
  */
 import QRCode from "qrcode"
+import { clampTextScale } from "@/lib/visuals"
 
 export const LOGO_IDS = ["logo1", "logo2", "logo3", "logo4", "logo5"] as const
 export type LogoId = (typeof LOGO_IDS)[number]
@@ -203,9 +204,9 @@ export type SceneId = (typeof SCENE_IDS)[number]
 export const SCENE_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "STANDBY", showreel: "SHOWREEL" }
 export const SCENE_BG_MODES = ["solid", "image", "hero"] as const
 export type SceneBgMode = (typeof SCENE_BG_MODES)[number]
-export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | "" }
+export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | ""; /** Pill text size % (TEXT_SCALE_RANGE, 100 = design size), like the Q&A / Sponsored pills. */ pillSize: number }
 
-const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", ...extra })
+const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", pillSize: 100, ...extra })
 export const DEFAULT_SCENES: Record<SceneId, SceneCard> = {
   hold05: scene("Break", "Stretch • Refill • 15 min", "#c6ff00", "HOLD 05 • BREAK"),
   hold06: scene("Starting Soon", "Doors opening • Get comfy", "#ffd400", "HOLD 06 • STARTING SOON"),
@@ -243,6 +244,7 @@ export function parseScene(v: unknown, f: SceneCard): SceneCard {
     pauseBed: typeof r.pauseBed === "boolean" ? r.pauseBed : f.pauseBed,
     loop: typeof r.loop === "boolean" ? r.loop : f.loop,
     next: r.next === "program" || SCENE_IDS.includes(r.next as SceneId) ? (r.next as SceneId | "program") : f.next,
+    pillSize: clampTextScale(r.pillSize, f.pillSize),
   }
 }
 export function parseScenes(v: unknown, base: Record<SceneId, SceneCard> = DEFAULT_SCENES): Record<SceneId, SceneCard> {
