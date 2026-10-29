@@ -36,3 +36,16 @@ test("parseBody tolerates junk", () => {
   assert.equal(parseBody("<html>"), null)
   assert.equal(parseBody("[1]"), null)
 })
+
+test("every file input goes through the shared FilePicker", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs")
+  const dir = new URL("../components/", import.meta.url)
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".tsx") || f === "file-picker.tsx") continue
+    assert.doesNotMatch(readFileSync(new URL(f, dir), "utf8"), /type="file"/, f)
+  }
+  const picker = readFileSync(new URL("file-picker.tsx", dir), "utf8")
+  assert.match(picker, /sr-only/)
+  assert.match(picker, /htmlFor=\{id\}/)
+  assert.match(picker, /No file selected/)
+})
