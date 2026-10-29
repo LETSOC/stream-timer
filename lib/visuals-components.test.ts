@@ -67,6 +67,10 @@ test("logos/QR/scenes parse junk-tolerant; uploads only from /uploads; pasted SV
   assert.equal(parseScenes({ hold06: { pillSize: 150 } }).hold06.pillSize, 150)
   assert.equal(parseScenes({ hold07: { pillSize: 999 } }).hold07.pillSize, 200)
   assert.equal(parseScenes({ hold08: { pillSize: "big" } }).hold08.pillSize, 100)
+  // Pill placement: old saves stay on top; only "top" / "bottom" accepted.
+  for (const id of SCENE_IDS) assert.equal(sc[id].pillPlace, "top")
+  assert.equal(parseScenes({ standby: { pillPlace: "bottom" } }).standby.pillPlace, "bottom")
+  assert.equal(parseScenes({ standby: { pillPlace: "middle" } }).standby.pillPlace, "top")
   const st = parseStage({ logosOn: ["logo5", "nope", "logo1"], qrOn: true, overlay: "showreel" })
   assert.deepEqual(st.logosOn, ["logo1", "logo5"])
   assert.equal(st.qrOn, true)
