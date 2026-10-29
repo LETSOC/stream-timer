@@ -428,6 +428,13 @@ export function VisualsBuilder() {
                   {c.video ? <span className="truncate font-mono text-[10px] text-white/50">{c.video}</span> : <span className="font-mono text-[10px] text-white/40">No video</span>}
                   {c.video ? <button type="button" className={btn} onClick={() => setScene(id, { video: "" })}>Remove video</button> : null}
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-videofront" checked={c.videoFront} onChange={(e) => setScene(id, { videoFront: e.target.checked })} className="accent-[#D9FF43]" /> Video in front (above card text and QR)</label>
+                  <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-overlay" checked={c.overlayOn} disabled={c.videoFront} onChange={(e) => setScene(id, { overlayOn: e.target.checked })} className="accent-[#D9FF43]" /> Overlay on video{c.videoFront ? " (only when the video is behind)" : ""}</label>
+                  {c.overlayOn && !c.videoFront ? (
+                    <div className="grid grid-cols-2 items-end gap-2">
+                      <label className="grid gap-1"><Label>Overlay colour</Label><input type="color" data-testid="vb-scene-overlay-color" className="h-9 w-full" value={c.overlayColor} onChange={(e) => setScene(id, { overlayColor: e.target.value })} /></label>
+                      <Slider label="Overlay opacity" testId="vb-scene-overlay-opacity" unit="%" value={c.overlayOpacity} range={{ min: 0, max: 100 }} onChange={(n) => setScene(id, { overlayOpacity: n })} />
+                    </div>
+                  ) : null}
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-pausebed" checked={c.pauseBed} onChange={(e) => setScene(id, { pauseBed: e.target.checked })} className="accent-[#D9FF43]" /> Pause audio bed while the video plays</label>
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-loop" checked={c.loop} onChange={(e) => setScene(id, { loop: e.target.checked })} className="accent-[#D9FF43]" /> Loop video</label>
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-autoswitch" checked={c.autoSwitch} onChange={(e) => setScene(id, { autoSwitch: e.target.checked })} className="accent-[#D9FF43]" /> Play once, then switch</label>

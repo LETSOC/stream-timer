@@ -69,6 +69,14 @@ test("logos/QR/scenes parse junk-tolerant; uploads only from /uploads; pasted SV
   assert.equal(parseScenes({ hold08: { pillSize: "big" } }).hold08.pillSize, 100)
   // Pill placement: old saves stay on top; only "top" / "bottom" accepted.
   for (const id of SCENE_IDS) assert.equal(sc[id].pillPlace, "top")
+  // Video overlay: old saves off (black, 40%); colour checked, opacity clamped 0–100.
+  for (const id of SCENE_IDS) { assert.equal(sc[id].overlayOn, false); assert.equal(sc[id].overlayOpacity, 40) }
+  const ov = parseScenes({ showreel: { overlayOn: true, overlayColor: "#ff0000", overlayOpacity: 150 }, standby: { overlayColor: "red", overlayOpacity: -5 } })
+  assert.equal(ov.showreel.overlayOn, true)
+  assert.equal(ov.showreel.overlayColor, "#ff0000")
+  assert.equal(ov.showreel.overlayOpacity, 100)
+  assert.equal(ov.standby.overlayColor, "#000000")
+  assert.equal(ov.standby.overlayOpacity, 0)
   assert.equal(parseScenes({ standby: { pillPlace: "bottom" } }).standby.pillPlace, "bottom")
   assert.equal(parseScenes({ standby: { pillPlace: "middle" } }).standby.pillPlace, "top")
   const st = parseStage({ logosOn: ["logo5", "nope", "logo1"], qrOn: true, overlay: "showreel" })
