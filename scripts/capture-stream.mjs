@@ -633,7 +633,8 @@ const ffmpegArgs = (hw) => [
   "-thread_queue_size", "4096", "-f", "s16le", "-ar", String(RATE), "-ac", "2", "-i", "pipe:3",
   "-map", "0:v", "-map", "1:a",
   "-af", "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
-  "-vf", `scale=${width}:${height}:flags=bicubic,format=yuv420p`,
+  "-vf", `scale=${width}:${height}:flags=bicubic:in_range=pc:out_range=tv:in_color_matrix=bt601:out_color_matrix=bt709,format=yuv420p`,
+  "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
   ...videoArgs, "-r", String(fps),
   "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
   // -max_interleave_delta 0: the muxer waits for both streams instead of flushing one ahead
