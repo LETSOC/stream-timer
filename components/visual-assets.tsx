@@ -138,6 +138,10 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
       {video && !card.videoFront ? (
         <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} preload="auto" autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
+      {video && !card.videoFront && card.overlayOn ? (
+        // Colour layer over the background video only (like a Photoshop layer): bg colour / image / hero stay as they are.
+        <div aria-hidden data-testid={`scene-video-overlay-${id}`} className="absolute inset-0" style={{ pointerEvents: "none", background: card.overlayColor, opacity: card.overlayOpacity / 100 }} />
+      ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none", "--vl-px0": "var(--px)" } as CSSProperties}>
         {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
         <div className={`scene-pill${card.pillPlace === "bottom" ? " scene-pill-bottom" : ""}`} data-testid="scene-pill" data-place={card.pillPlace} data-text-size={card.pillSize} style={card.pillSize === 100 ? undefined : ({ "--px": `calc(var(--vl-px0) * ${card.pillSize / 100})` } as CSSProperties)}><span className="scene-dot" style={{ background: card.dot }} /><span>{card.pill}</span></div>
