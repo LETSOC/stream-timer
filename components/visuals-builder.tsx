@@ -402,6 +402,7 @@ export function VisualsBuilder() {
                 <label className="grid gap-1"><Label>Label</Label><input data-testid="vb-scene-label" className={field} maxLength={120} value={c.label} onChange={(e) => setScene(id, { label: e.target.value })} /></label>
                 <label className="grid gap-1"><Label>Subline</Label><input data-testid="vb-scene-sub" className={field} maxLength={120} value={c.sub} onChange={(e) => setScene(id, { sub: e.target.value })} /></label>
                 <label className="grid gap-1"><Label>Pill text</Label><input data-testid="vb-scene-pill" className={field} maxLength={120} value={c.pill} onChange={(e) => setScene(id, { pill: e.target.value })} /></label>
+                <TextSize label="Pill text size" testId="vb-scene-pill-size" value={c.pillSize} onChange={(n) => setScene(id, { pillSize: n })} />
                 <div className="grid grid-cols-2 gap-2">
                   <label className="grid gap-1"><Label>Dot colour</Label><input type="color" data-testid="vb-scene-dot" className="h-9 w-full" value={c.dot} onChange={(e) => setScene(id, { dot: e.target.value })} /></label>
                   <label className="grid gap-1"><Label>Background</Label><input type="color" data-testid="vb-scene-bg" className="h-9 w-full" value={c.bg} onChange={(e) => setScene(id, { bg: e.target.value })} /></label>
