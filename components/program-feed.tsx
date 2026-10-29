@@ -17,8 +17,8 @@ import { holdStandby, keepLoaded, previewDisplay, previewGentle, previewHlsCaps,
 import { muteOnlyAudio } from "@/lib/preview-audio"
 import { programAudioRouted, rampProgramAudio, resetProgramAudio, routeProgramAudio } from "@/lib/switch-crossfade"
 import { frameStateDue, hlsCreated, hlsDestroyed, latencyStateDue, ON_AIR_STUCK_MS, pageHung, playerRebuilt } from "@/lib/page-health"
-import { alignTick, forgetPlayer, newAlign, onAirLatency, reportPlayerLatency } from "@/lib/pair-align"
-import { liveJumpTick, liveTarget, newSettle, settleTick, type LiveJumpState } from "@/lib/live-catchup"
+import { alignTick, cappedDiff, forgetPlayer, newAlign, onAirLatency, reportPlayerLatency } from "@/lib/pair-align"
+import { liveJumpTick, liveTarget, newSettle, noteStandbyLatency, onAirJumpDue, settleOnAir, settleTick, type LiveJumpState } from "@/lib/live-catchup"
 
 /** Viewer path (/stream: view key / capture key). Operator previews use the relay's operator-only proxy. */
 export const PROGRAM_VIEW_SRC = "/api/program/hls/program/index.m3u8"
@@ -53,7 +53,7 @@ function useActiveSince(active: boolean, now: number) {
  * Loads LL-HLS into the <video> while `load`, and reports when the picture last advanced.
  * The element is the same for the player's whole life (WebAudio can attach to it once).
  */
-function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { stallEvents?: boolean; gentle?: boolean; light?: boolean; hold?: boolean; /** /stream only: report to the dropout log (lib/player-diag) */ diag?: { label: string; onAir: boolean }; /** the element is about to go blank (teardown) or is broken (decode error): show the last frame */ onTrouble?: () => void } = {}) {
+function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string, load: boolean, wantSound: () => boolean, opts: { /** desk Resync stamp: a change rebuilds the player */ rebuild?: number | null; stallEvents?: boolean; gentle?: boolean; light?: boolean; hold?: boolean; /** /stream only: report to the dropout log (lib/player-diag) */ diag?: { label: string; onAir: boolean }; /** the element is about to go blank (teardown) or is broken (decode error): show the last frame */ onTrouble?: () => void } = {}) {
   const troubleRef = useRef(opts.onTrouble)
   useEffect(() => { troubleRef.current = opts.onTrouble })
   const diagRef = useRef(opts.diag)
@@ -99,6 +99,24 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
   // Back from the background: rebuild, holding the last picture meanwhile (not "Waiting for OBS").
   const resumeGen = useResumeGeneration(1000, () => { teardownWhy.current = "page came back from the background (rebuild)"; setLastFrameAt((at) => (at === null ? null : Date.now())) })
   const [kick, setKick] = useState(0)
+  // Desk "Resync" (stage.playerResyncAt): rebuild this player, holding the last frame, and reset its catch-up memory. Not a disarm.
+  const resetMemRef = useRef(0)
+  const rebuild = opts.rebuild ?? null
+  const rebuildSeen = useRef(rebuild)
+  useEffect(() => {
+    if (rebuild === rebuildSeen.current) return
+    rebuildSeen.current = rebuild
+    if (rebuild === null || !load) return
+    // Next task, not inside the effect (no cascading render).
+    const id = window.setTimeout(() => {
+      teardownWhy.current = "desk Resync (rebuild, catch-up memory reset)"
+      resetMemRef.current += 1
+      playerRebuilt()
+      setLastFrameAt((at) => (at === null ? null : Date.now()))
+      setKick((k) => k + 1)
+    }, 0)
+    return () => window.clearTimeout(id)
+  }, [rebuild, load])
   useEffect(() => {
     const video = videoRef.current
     if (!video || !load) return
@@ -197,6 +215,9 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     const pairAlign = isCapturePage() && !gentle ? newAlign() : null
     const align = newAlign()
     let alignLogAt = 0
+    let wasOnAir = diagRef.current?.onAir ?? false
+    let checkOnAirJump = false
+    let memGen = resetMemRef.current
     const reload = (why = `watchdog: picture stuck ${stuckMs / 1000}s while OBS publishes`) => {
       teardownWhy.current = why
       firstFrameSeen = false
@@ -216,6 +237,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
     video.addEventListener("error", onVideoError)
     const id = window.setInterval(() => {
       const t = video.currentTime
+      // Desk "Resync" rebuilt the player: forget all catch-up memory (fresh like a re-arm); next first frame resyncs the capture.
+      if (memGen !== resetMemRef.current) { memGen = resetMemRef.current; firstFrameSeen = false; advancedAt = Date.now(); Object.assign(settle, newSettle()); Object.assign(align, newAlign()); if (pairAlign) Object.assign(pairAlign, newAlign()); jump.overSince = null; checkOnAirJump = false }
       const tickAt = Date.now()
       // The page itself hung (main thread blocked, this tick came late): the player didn't cause the
       // stall, so restart the stuck clock instead of rebuilding (a rebuild made the next hang worse).
@@ -244,6 +267,23 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
         const at = hlsRef.current?.playingDate?.getTime()
         const lat = at ? nowMs - at : null
         if (latencyStateDue(latSet, lat, nowMs)) { latSet = { value: lat, at: nowMs }; setLatency(lat) }
+        // Just went on air (Main↔Backup): reset catch-up; if the delay was inherited from the other input, jump to live.
+        const onAirNow = diagRef.current?.onAir ?? false
+        if (onAirNow && !wasOnAir) { settleOnAir(settle, nowMs); checkOnAirJump = true }
+        wasOnAir = onAirNow
+        if (checkOnAirJump && lat !== null) {
+          checkOnAirJump = false
+          if (!gentle && hlsRef.current && onAirJumpDue(settle, lat)) {
+            const b = video.buffered
+            const to = liveTarget(hlsRef.current.liveSyncPosition, b.length ? b.end(b.length - 1) : null, t)
+            if (to !== null) {
+              video.currentTime = to
+              jump.lastJumpAt = nowMs
+              reportRef.current("·", `on air: jumped to live (was ${(lat / 1000).toFixed(1)}s behind, own normal ${((settle.floorMs ?? 0) / 1000).toFixed(1)}s)`)
+              setResyncGen((g) => g + 1)
+            }
+          }
+        }
         // On air (/stream, LL tuning): more than 3s behind live → jump back to the live edge.
         if (diagRef.current?.onAir && !gentle && hlsRef.current && liveJumpTick(jump, lat, nowMs)) {
           const b = video.buffered
@@ -269,7 +309,8 @@ function useProgramHls(videoRef: RefObject<HTMLVideoElement | null>, src: string
           const ahead = b.length ? b.end(b.length - 1) - t : 0
           const behind = b.length ? t - b.start(0) : 0
           const ref = onAirLatency(diagRef.current.label, nowMs)
-          const diff = ref !== null && lat !== null ? lat - ref : null
+          noteStandbyLatency(settle, lat)
+          const diff = cappedDiff(ref !== null && lat !== null ? lat - ref : null, lat, settle.floorMs)
           const a = alignTick(align, diff, ahead, behind, nowMs)
           if (a.seekSec !== null) { video.currentTime = t + a.seekSec; setResyncGen((g) => g + 1) }
           if (video.playbackRate !== a.rate) video.playbackRate = a.rate
@@ -366,7 +407,7 @@ function useCaptureAudioTap(videoRef: RefObject<HTMLVideoElement | null>, source
   }, [videoRef, source])
 }
 
-export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false, rearmHoldUntil = null, standbyTitle = "We'll be right back", standbyMessage = "", standbyBg = "", crossfadeMs = 0, tail = false, fadeIn = false }: { /** this input just came on air with the old one tailing: its sound fades in */ fadeIn?: boolean; /** Main↔Backup audio crossfade (0 = Hard cut) */ crossfadeMs?: number; /** this input just left the air: its sound fades out over crossfadeMs (picture already cut) */ tail?: boolean; /** branded feed-lost card text (desk › Hold card); public, no technical words */ standbyTitle?: string; standbyMessage?: string; /** feed-lost card background colour ("" = default blue) */ standbyBg?: string; /** a disarm/arm cycle (auto re-arm / desk buttons) holds the last frame until this local time (null = none) */ rearmHoldUntil?: number | null; /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
+export function ProgramFeed({ ready, active, muted = false, programAudio = true, onDisplay, onAlive, source = "main", path = "program", onAir = true, holdFrame = 0, incoming = false, rearmHoldUntil = null, standbyTitle = "We'll be right back", standbyMessage = "", standbyBg = "", crossfadeMs = 0, tail = false, fadeIn = false, rebuild = null }: { /** desk Resync stamp (stage.playerResyncAt): a change rebuilds this player without disarming */ rebuild?: number | null; /** this input just came on air with the old one tailing: its sound fades in */ fadeIn?: boolean; /** Main↔Backup audio crossfade (0 = Hard cut) */ crossfadeMs?: number; /** this input just left the air: its sound fades out over crossfadeMs (picture already cut) */ tail?: boolean; /** branded feed-lost card text (desk › Hold card); public, no technical words */ standbyTitle?: string; standbyMessage?: string; /** feed-lost card background colour ("" = default blue) */ standbyBg?: string; /** a disarm/arm cycle (auto re-arm / desk buttons) holds the last frame until this local time (null = none) */ rearmHoldUntil?: number | null; /** picture really advancing (hand-over: a dead on-air input is cut at the new one's first frame) */ onAlive?: (alive: boolean) => void; /** a hand-over target: plays (silent, invisible) to fill its buffer; never shows its standby */ incoming?: boolean; ready: boolean; active: boolean; /** Hard mute: preview ?mute=1 or the standby input. The desk's raw-program checkbox is separate. */ muted?: boolean; /** Desk "/stream page audio" → raw program audio. Unchecked starts silent; a viewer's Unmute can still stick. Sound only: never pauses or unloads an input (Browser capture keeps both decoding either way). */ programAudio?: boolean; onDisplay?: (display: ProgramDisplay) => void; source?: "main" | "backup"; path?: string; /** the input on air (Browser capture reads its latency/source); the other one is prewarmed */ onAir?: boolean; /** extra ms to freeze on the last frame instead of "Waiting for OBS" (a Main/Backup hand-over may be coming) */ holdFrame?: number }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const now = useNow(200)
   const { notReadySince, readyAt } = useReadiness(ready, now)
@@ -420,7 +461,7 @@ export function ProgramFeed({ ready, active, muted = false, programAudio = true,
   // standby input in a plain tab, never on the capture page) does not depend on it.
   const shownRef = useRef<ProgramDisplay>("under")
   const maySound = () => programWantsSound({ active: tail || (active && shownRef.current === "video"), hardMuted: muted, programAudio, viewerChose: viewerHasChosen(), viewerMuted: isViewerMuted() })
-  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, gentle, light, diag: { label, onAir }, onTrouble: showCover })
+  const { lastFrameAt, realFrameAt, latency, resyncGen } = useProgramHls(videoRef, programViewSrc(path), load, maySound, { hold, gentle, light, rebuild, diag: { label, onAir }, onTrouble: showCover })
   // Cover off as soon as the element shows a new frame; on the capture page keep a recent snapshot so
   // a decode error (element already blank) still has a frame to hold.
   const [periodic] = useState(() => isCapturePage())
