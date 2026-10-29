@@ -206,9 +206,9 @@ export const SCENE_BG_MODES = ["solid", "image", "hero"] as const
 export type SceneBgMode = (typeof SCENE_BG_MODES)[number]
 export const SCENE_PILL_PLACES = ["top", "bottom"] as const
 export type ScenePillPlace = (typeof SCENE_PILL_PLACES)[number]
-export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | ""; /** Pill text size % (TEXT_SCALE_RANGE, 100 = design size), like the Q&A / Sponsored pills. */ pillSize: number; /** Pill on the top or bottom safe guide (grows away from it). */ pillPlace: ScenePillPlace }
+export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | ""; /** Pill text size % (TEXT_SCALE_RANGE, 100 = design size), like the Q&A / Sponsored pills. */ pillSize: number; /** Pill on the top or bottom safe guide (grows away from it). */ pillPlace: ScenePillPlace; /** Colour layer over a background video (only when the video is behind the text). */ overlayOn: boolean; overlayColor: string; /** 0–100 % */ overlayOpacity: number }
 
-const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", pillSize: 100, pillPlace: "top", ...extra })
+const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", pillSize: 100, pillPlace: "top", overlayOn: false, overlayColor: "#000000", overlayOpacity: 40, ...extra })
 export const DEFAULT_SCENES: Record<SceneId, SceneCard> = {
   hold05: scene("Break", "Stretch • Refill • 15 min", "#c6ff00", "HOLD 05 • BREAK"),
   hold06: scene("Starting Soon", "Doors opening • Get comfy", "#ffd400", "HOLD 06 • STARTING SOON"),
@@ -248,6 +248,9 @@ export function parseScene(v: unknown, f: SceneCard): SceneCard {
     next: r.next === "program" || SCENE_IDS.includes(r.next as SceneId) ? (r.next as SceneId | "program") : f.next,
     pillSize: clampTextScale(r.pillSize, f.pillSize),
     pillPlace: SCENE_PILL_PLACES.includes(r.pillPlace as ScenePillPlace) ? (r.pillPlace as ScenePillPlace) : f.pillPlace,
+    overlayOn: typeof r.overlayOn === "boolean" ? r.overlayOn : f.overlayOn,
+    overlayColor: hex(r.overlayColor, f.overlayColor),
+    overlayOpacity: typeof r.overlayOpacity === "number" && Number.isFinite(r.overlayOpacity) ? Math.round(Math.min(100, Math.max(0, r.overlayOpacity))) : f.overlayOpacity,
   }
 }
 export function parseScenes(v: unknown, base: Record<SceneId, SceneCard> = DEFAULT_SCENES): Record<SceneId, SceneCard> {
