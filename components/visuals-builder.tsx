@@ -12,11 +12,14 @@ import { LoadPaused } from "@/components/load-paused"
 import Link from "next/link"
 import { LinkPill } from "@/components/link-pill"
 import { AppNav } from "@/components/app-nav"
+import { UploadProgress } from "@/components/upload-progress"
+import { FilePicker } from "@/components/file-picker"
+import { useUpload } from "@/lib/use-upload"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
 import { VisualsLayer } from "@/components/visuals-layer"
 import { SceneCardView } from "@/components/visual-assets"
-import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
+import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_PILL_PLACES, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { parseStage, socialLook } from "@/lib/stage"
 import { endCardAt, type TransportAction } from "@/lib/transport"
@@ -127,6 +130,7 @@ function TextSize({ label = "Text size", value, onChange, testId }: { label?: st
 }
 
 export function VisualsBuilder() {
+  const uploader = useUpload()
   const { link, state, run } = useDeckSocket()
   const [loaded, setLoaded] = useState<LoadedEvent | null>(null)
   const [draft, setDraft] = useState<BuilderDraft | null>(null)
@@ -241,14 +245,13 @@ export function VisualsBuilder() {
   const setLogo = (id: LogoId, p: Partial<LogoConfig>) => setDraft({ ...draft, logos: { ...draft.logos, [id]: { ...draft.logos[id], ...p } } })
   const setQr = (p: Partial<QrConfig>) => setDraft({ ...draft, qr: { ...draft.qr, ...p } })
   const setScene = (id: SceneId, p: Partial<SceneCard>) => setDraft({ ...draft, scenes: { ...draft.scenes, [id]: { ...draft.scenes[id], ...p } } })
-  async function upload(file: File, kind: "logo" | "card" | "video"): Promise<string | null> {
+  async function upload(file: File, kind: "logo" | "card" | "video", tag: string): Promise<string | null> {
     const limit = kind === "video" ? 100_000_000 : 5_000_000
-    if (file.size > limit) { setNote({ tone: "error", text: kind === "video" ? "Video is over 100 MB." : "File is over 5 MB." }); return null }
+    if (file.size > limit) { const text = kind === "video" ? "Video is over 100 MB." : "File is over 5 MB."; uploader.fail(tag, file.name, text); setNote({ tone: "error", text }); return null }
     const q = kind === "logo" ? "?kind=logo" : kind === "video" ? "?kind=video" : ""
-    const res = await fetch(`/api/upload${q}`, { method: "POST", headers: { "content-type": file.type || "application/octet-stream" }, body: file })
-    const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
-    if (!res.ok || !body.url) { setNote({ tone: "error", text: body.error ?? `Upload failed (${res.status})` }); return null }
-    return body.url
+    const res = await uploader.start(`/api/upload${q}`, file, tag)
+    const url = res && res.status < 300 && typeof res.body?.url === "string" ? res.body.url : null
+    return url
   }
 
   return (
@@ -399,6 +402,8 @@ export function VisualsBuilder() {
                 <label className="grid gap-1"><Label>Label</Label><input data-testid="vb-scene-label" className={field} maxLength={120} value={c.label} onChange={(e) => setScene(id, { label: e.target.value })} /></label>
                 <label className="grid gap-1"><Label>Subline</Label><input data-testid="vb-scene-sub" className={field} maxLength={120} value={c.sub} onChange={(e) => setScene(id, { sub: e.target.value })} /></label>
                 <label className="grid gap-1"><Label>Pill text</Label><input data-testid="vb-scene-pill" className={field} maxLength={120} value={c.pill} onChange={(e) => setScene(id, { pill: e.target.value })} /></label>
+                <TextSize label="Pill text size" testId="vb-scene-pill-size" value={c.pillSize} onChange={(n) => setScene(id, { pillSize: n })} />
+                <div className="grid gap-1"><Label>Pill placement</Label><div className="flex gap-1">{SCENE_PILL_PLACES.map((p) => <button key={p} type="button" data-testid={`vb-scene-pill-place-${p}`} aria-pressed={c.pillPlace === p} className={chip(c.pillPlace === p)} onClick={() => setScene(id, { pillPlace: p })}>{p === "top" ? "Top" : "Bottom"}</button>)}</div></div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="grid gap-1"><Label>Dot colour</Label><input type="color" data-testid="vb-scene-dot" className="h-9 w-full" value={c.dot} onChange={(e) => setScene(id, { dot: e.target.value })} /></label>
                   <label className="grid gap-1"><Label>Background</Label><input type="color" data-testid="vb-scene-bg" className="h-9 w-full" value={c.bg} onChange={(e) => setScene(id, { bg: e.target.value })} /></label>
@@ -408,16 +413,18 @@ export function VisualsBuilder() {
                 </div>
                 <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={c.gradient} onChange={(e) => setScene(id, { gradient: e.target.checked })} className="accent-[#D9FF43]" /> Showreel gradient (solid mode)</label>
                 {c.bgMode !== "solid" ? (
-                  <label className="grid gap-1"><Label>{c.bgMode === "hero" ? "Hero image (above the title)" : "Background image"}</Label>
-                    <input type="file" data-testid="vb-scene-image" accept="image/png,image/jpeg,image/webp" className="text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f, "card").then((url) => url && setScene(id, { image: url })) }} />
+                  <div className="grid gap-1"><Label>{c.bgMode === "hero" ? "Hero image (above the title)" : "Background image"}</Label>
+                    <FilePicker testId="vb-scene-image" label="Choose image" accept="image/png,image/jpeg,image/webp" busy={uploader.busy} onFile={(f) => void upload(f, "card", `vb-scene-image-${id}`).then((url) => url && setScene(id, { image: url }))} />
+                  <UploadProgress state={uploader.state} tag={`vb-scene-image-${id}`} />
                     {c.image ? <span className="font-mono text-[10px] text-white/50">{c.image} <button type="button" className="underline" onClick={() => setScene(id, { image: "" })}>remove</button></span> : null}
-                  </label>
+                  </div>
                 ) : null}
                 {c.bgMode === "image" ? <Slider label="Dim" testId="vb-scene-dim" unit="%" value={c.dim} range={{ min: 0, max: 90 }} onChange={(n) => setScene(id, { dim: n })} /> : null}
                 <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={c.showQr} onChange={(e) => setScene(id, { showQr: e.target.checked })} className="accent-[#D9FF43]" /> Animated QR bottom-right (QR link)</label>
                                 <div className="grid gap-2 rounded-[10px] border border-[#2a2a2a] p-2">
                   <Label>Showreel video (local MP4, with audio)</Label>
-                  <input type="file" data-testid="vb-scene-video" accept="video/mp4" className="text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f, "video").then((url) => url && setScene(id, { video: url })) }} />
+                  <FilePicker testId="vb-scene-video" label="Choose video (mp4)" accept="video/mp4" busy={uploader.busy} onFile={(f) => void upload(f, "video", `vb-scene-video-${id}`).then((url) => url && setScene(id, { video: url }))} />
+                  <UploadProgress state={uploader.state} tag={`vb-scene-video-${id}`} />
                   {c.video ? <span className="truncate font-mono text-[10px] text-white/50">{c.video}</span> : <span className="font-mono text-[10px] text-white/40">No video</span>}
                   {c.video ? <button type="button" className={btn} onClick={() => setScene(id, { video: "" })}>Remove video</button> : null}
                   <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-videofront" checked={c.videoFront} onChange={(e) => setScene(id, { videoFront: e.target.checked })} className="accent-[#D9FF43]" /> Video in front (above card text and QR)</label>
@@ -512,10 +519,11 @@ export function VisualsBuilder() {
                       </div>
                       {lg.source === "default" ? <label className="grid gap-1"><Label>Colour (brand orange)</Label><input type="color" data-testid="vb-logo-color" className="h-9 w-full" value={lg.color} onChange={(e) => setLogo(id, { color: e.target.value })} /></label> : null}
                       {lg.source === "image" ? (
-                        <label className="grid gap-1"><Label>PNG, JPG or SVG (max 5 MB; SVG 100 KB, cleaned)</Label>
-                          <input type="file" data-testid="vb-logo-upload" accept="image/png,image/jpeg,image/svg+xml" className="text-[12px]" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f, "logo").then((url) => url && setLogo(id, { image: url })) }} />
+                        <div className="grid gap-1"><Label>PNG, JPG or SVG (max 5 MB; SVG 100 KB, cleaned)</Label>
+                          <FilePicker testId="vb-logo-upload" label="Choose image" accept="image/png,image/jpeg,image/svg+xml" busy={uploader.busy} onFile={(f) => void upload(f, "logo", `vb-logo-upload-${id}`).then((url) => url && setLogo(id, { image: url }))} />
+                  <UploadProgress state={uploader.state} tag={`vb-logo-upload-${id}`} />
                           {lg.image ? <span className="font-mono text-[10px] text-white/50">{lg.image}</span> : <span className="font-mono text-[10px] text-[#FF6A00]">No image yet</span>}
-                        </label>
+                        </div>
                       ) : null}
                       {lg.source === "svg" ? (
                         <label className="grid gap-1"><Label>Paste SVG code</Label>
