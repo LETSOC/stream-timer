@@ -492,7 +492,9 @@ html:has([data-desk-root]) body {
 
 /* Scene cards (HOLD 05/06/07, STANDBY, SHOWREEL) */
 .scene-card .visuals-layer { z-index: 1; }
-.scene-pill { position: absolute; top: calc(48 * var(--px)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: calc(16 * var(--px)); padding: calc(12 * var(--px)) calc(32 * var(--px)); border-radius: 9999px; background: #141414; border: calc(2 * var(--px)) solid rgba(255, 255, 255, 0.1); font-family: var(--vl-mono); font-size: calc(20 * var(--px)); letter-spacing: 0.1em; white-space: nowrap; }
+/* Pill sits on the 5% safe guide (54px of 1080). The offset uses the layer's unscaled --vl-px0, so a bigger pill grows away from the guide, never inward. */
+.scene-pill { position: absolute; top: calc(54 * var(--vl-px0, var(--px))); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: calc(16 * var(--px)); padding: calc(12 * var(--px)) calc(32 * var(--px)); border-radius: 9999px; background: #141414; border: calc(2 * var(--px)) solid rgba(255, 255, 255, 0.1); font-family: var(--vl-mono); font-size: calc(20 * var(--px)); letter-spacing: 0.1em; white-space: nowrap; }
+.scene-pill-bottom { top: auto; bottom: calc(54 * var(--vl-px0, var(--px))); }
 .scene-dot { width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-radius: 9999px; animation: vl-rec 1.2s ease-in-out infinite; }
 .scene-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; animation: vl-scene-in 0.35s ease-out both; }
 @keyframes vl-scene-in { from { transform: translateY(calc(24 * var(--px))); opacity: 0; } to { transform: none; opacity: 1; } }
