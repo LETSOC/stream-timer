@@ -142,6 +142,8 @@ export type StageOptions = {
   programSource: "main" | "backup"
   /** When the current overlay went up (ms), for the "on break" timer. */
   overlayAt: number | null
+  /** Desk "Resync": when set/changed, /stream rebuilds both program players (no disarm). */
+  playerResyncAt: number | null
 }
 
 export type ImageFit = "cover" | "contain"
@@ -291,6 +293,7 @@ export const DEFAULT_STAGE: StageOptions = {
   program: false,
   programSource: "main",
   overlayAt: null,
+  playerResyncAt: null,
 }
 
 export const TEXT_MAX = 200
@@ -457,6 +460,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     program: pick("program", (v) => v === true),
     programSource: pick("programSource", (v) => (v === "backup" ? "backup" : "main")),
     overlayAt: pick("overlayAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
+    playerResyncAt: pick("playerResyncAt", (v) => (typeof v === "number" && Number.isFinite(v) ? v : null)),
   }
 }
 
