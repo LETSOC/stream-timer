@@ -143,3 +143,17 @@ test("speaker preset panel draws its own live strap preview from the draft desig
   assert.ok(html.includes("strap-one-line") && html.includes("@onlinehyphen") && html.includes("Job title"))
   assert.ok(html.includes('data-testid="strap-live-dot"'))
 })
+
+test("cue button state follows the live deck strap", async () => {
+  const { cueState } = await import("@/lib/visuals-builder")
+  assert.equal(cueState(undefined, "a"), "idle")
+  assert.equal(cueState({ strapId: "b", strapMode: "in" }, "a"), "idle")
+  assert.equal(cueState({ strapId: "a", strapMode: "out" }, "a"), "cued")
+  assert.equal(cueState({ strapId: "a" }, "a"), "cued")
+  assert.equal(cueState({ strapId: "a", strapMode: "in" }, "a"), "live")
+  assert.equal(cueState({ strapId: "a", strapMode: "loop" }, "a"), "live")
+  const { readFileSync } = await import("node:fs")
+  const src = readFileSync(new URL("../components/visuals-builder.tsx", import.meta.url), "utf8")
+  assert.match(src, /data-testid="vb-strap-cue" data-cue=\{cs\}/)
+  assert.match(src, /cueState\(live, s\.id\)/)
+})
