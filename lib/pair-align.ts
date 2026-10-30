@@ -10,6 +10,15 @@ export const ALIGN_RATE_FAST = 1.05
 export const ALIGN_RATE_SLOW = 0.95
 export const ALIGN_SEEK_GAP_MS = 3000
 export const ALIGN_FRESH_MS = 1500
+/** Never pull the standby more than this behind its own normal delay: a much slower on-air input is matched by the capture's resync at the switch instead. */
+export const ALIGN_MAX_PULL_MS = 1500
+
+/** diffMs limited so the standby (ahead: diff < 0) is slowed at most to ownBase + ALIGN_MAX_PULL_MS. */
+export function cappedDiff(diffMs: number | null, ownLatMs: number | null, ownBaseMs: number | null): number | null {
+  if (diffMs === null || diffMs >= 0 || ownLatMs === null || ownBaseMs === null) return diffMs
+  const room = Math.max(0, ownBaseMs + ALIGN_MAX_PULL_MS - ownLatMs)
+  return -Math.min(-diffMs, room)
+}
 
 type Entry = { latMs: number; onAir: boolean; at: number }
 const players = new Map<string, Entry>()
