@@ -41,6 +41,7 @@ export type TransportAction =
   | { type: "setEnd"; endTime: string; endOffsetMin: number }
   /** Program feed input: Main (OBS) or Backup. Doesn't change the screen. */
   | { type: "programSource"; source: "main" | "backup" }
+  | { type: "resyncPlayers" }
   /** /stream in-page audio routing: raw program audio and/or the bed (applied at once, synced). */
   | { type: "streamAudio"; program?: boolean; bed?: boolean }
   /** Visuals: name strap IN / OUT / LOOP and its live look. Applied at once (no Save). */
@@ -214,6 +215,8 @@ export function parseAction(value: unknown): TransportAction | null {
     case "endOffset":
       if (v.clear === true) return { type: "endOffset", clear: true }
       return END_STEPS.includes(v.minutes as (typeof END_STEPS)[number]) ? { type: "endOffset", minutes: v.minutes as number } : null
+    case "resyncPlayers":
+      return { type: "resyncPlayers" }
     case "programSource":
       return v.source === "main" || v.source === "backup" ? { type: "programSource", source: v.source } : null
     case "streamAudio": {
@@ -341,6 +344,8 @@ export function applyTransport(state: TransportState, action: TransportAction, n
     }
     case "programSource":
       return next({}, { programSource: action.source })
+    case "resyncPlayers":
+      return next({}, { playerResyncAt: now })
     case "streamAudio":
       return next({}, { ...(action.program === undefined ? {} : { streamProgramAudio: action.program }), ...(action.bed === undefined ? {} : { streamBedAudio: action.bed }) })
     case "setEnd":
