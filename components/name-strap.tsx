@@ -53,8 +53,8 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
   )
   return (
     <div className="strap-scale" style={{ "--strap-px0": "var(--px)" } as CSSProperties}>
-      <div data-testid="name-strap" data-style={look.style} data-motion={look.motion} data-visible={visible ? "1" : "0"} data-name-size={design.nameSize} data-sub-size={design.subSize}
-        className={cn("strap", `strap-${look.style}`, `strap-m-${look.motion}`, visible ? "strap-on" : "strap-off", (look.style === "line" || look.style === "house") && !has("bar") && "strap-no-bar")} style={vars}>
+      <div data-testid="name-strap" data-style={look.style} data-motion={look.motion} data-visible={visible ? "1" : "0"} data-name-size={design.nameSize} data-sub-size={design.subSize} data-one-line={look.style === "line" && design.oneLine ? "1" : undefined}
+        className={cn("strap", `strap-${look.style}`, `strap-m-${look.motion}`, visible ? "strap-on" : "strap-off", (look.style === "line" || look.style === "house") && !has("bar") && "strap-no-bar", look.style === "line" && design.oneLine && "strap-one-line")} style={vars}>
         {look.style === "house" ? (
           <div className="strap-body">
             {has("dot") ? <span data-testid="strap-accent-circle" className="strap-dot" /> : null}
