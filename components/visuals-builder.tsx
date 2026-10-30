@@ -26,6 +26,7 @@ import { endCardAt, type TransportAction } from "@/lib/transport"
 import { useDeckSocket } from "@/lib/use-deck-socket"
 import { CORNER_LABEL, CORNERS, STRAP_ACCENT_LABEL, STYLE_ACCENTS, STRAP_COLOR_LABEL, STYLE_COLORS, strapColors, type StrapColorKey, TEXT_SCALE_RANGE, strapAccentOn, type StrapDesign, type TextScalePart, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
+import { DEFAULT_PILL, parsePillDesign, PILL_BOX_LABEL, PILL_BOXES, PILL_ICON_MODE_LABEL, PILL_ICON_MODES, PILL_LAYOUT_LABEL, PILL_LAYOUTS, PILL_NUM_LABEL, PILL_NUM_RANGE, PILL_NUMS, PILL_ORDER_LABEL, PILL_ORDERS, type PillDesign } from "@/lib/strap-pill"
 import { toggleDraftAccent, addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 import { StreamPlayer } from "@/components/stream-player"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
@@ -87,10 +88,48 @@ function LiveText({ label, value, onApply, testId, multiline }: { label: string;
 }
 
 /**
+ * Social pill layout options (StrapDesign.pill). Off = the classic pill exactly as before; "Customise"
+ * starts from the classic values, so nothing moves until a control is changed. Applies on Save.
+ */
+function PillOptions({ pill, onPill }: { pill: PillDesign | undefined; onPill: (p: PillDesign | undefined) => void }) {
+  if (!pill) {
+    return (
+      <div data-testid="vb-pill-options" className="grid gap-1"><Label>Pill layout</Label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" data-testid="vb-pill-customise" className={chip(false)} onClick={() => onPill({ ...DEFAULT_PILL })}>Customise</button>
+          <span className="font-mono text-[10px] text-white/45">Classic: live dot · icon · two lines.</span>
+        </div>
+      </div>
+    )
+  }
+  const set = (patch: Partial<PillDesign>) => onPill(parsePillDesign({ ...pill, ...patch }))
+  const choice = <T extends string>(label: string, id: string, list: readonly T[], labels: Record<T, string>, value: T, key: keyof PillDesign) => (
+    <div className="grid gap-1"><Label>{label}</Label>
+      <div className="flex flex-wrap gap-1">{list.map((v) => <button key={v} type="button" data-testid={`vb-pill-${id}-${v}`} aria-pressed={value === v} className={chip(value === v)} onClick={() => set({ [key]: v } as Partial<PillDesign>)}>{labels[v]}</button>)}</div>
+    </div>
+  )
+  const nums = PILL_NUMS.filter((k) => !(pill.icon === "full" && k === "iconSize") && !(pill.icon !== "full" && k === "iconInset") && !(pill.box !== "glass" && k === "blur"))
+  return (
+    <div data-testid="vb-pill-options" className="grid gap-3">
+      <div className="flex items-center justify-between"><Label>Pill layout</Label>
+        <button type="button" data-testid="vb-pill-classic" className={btn} onClick={() => onPill(undefined)}>Back to classic</button>
+      </div>
+      {choice("Text", "layout", PILL_LAYOUTS, PILL_LAYOUT_LABEL, pill.layout, "layout")}
+      <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-pill-hide-sub" checked={!pill.hideSub} onChange={(e) => set({ hideSub: !e.target.checked })} className="accent-[#D9FF43]" /> Show handle / title line</label>
+      {choice("Order", "order", PILL_ORDERS, PILL_ORDER_LABEL, pill.order, "order")}
+      {choice("Icon", "icon", PILL_ICON_MODES, PILL_ICON_MODE_LABEL, pill.icon, "icon")}
+      {choice("Box", "box", PILL_BOXES, PILL_BOX_LABEL, pill.box, "box")}
+      {nums.map((k) => <Slider key={k} label={PILL_NUM_LABEL[k]} testId={`vb-pill-${k}`} value={pill[k]} range={PILL_NUM_RANGE[k]} onChange={(n) => set({ [k]: n } as Partial<PillDesign>)} />)}
+      <span className="font-mono text-[10px] text-white/45">Live dot and icon show or hide with the Accents above. Auto order: dot · icon · text, or icon first when full-bleed. Full-bleed: the icon fills the pill{"'"}s height and hugs its side.</span>
+    </div>
+  )
+}
+
+/**
  * One strap design's values: name and subline text size and its accents (✓ = shown). Off accents are
  * not drawn, so the strap box shrinks to fit. Applies on Save, for every preset using this design.
  */
-function DesignValues({ style, design, onSize, onAccent, onColor, accent, text }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void; onColor: (colors: StrapDesign["colors"]) => void; accent: string; text: string }) {
+function DesignValues({ style, design, onSize, onAccent, onColor, onPill, accent, text }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void; onColor: (colors: StrapDesign["colors"]) => void; onPill: (pill: PillDesign | undefined) => void; accent: string; text: string }) {
   const c = strapColors(style, design, accent, text)
   const setColor = (k: StrapColorKey, v: string | null) => { const next = { ...(design.colors ?? {}) }; if (v === null) delete next[k]; else next[k] = v; onColor(Object.keys(next).length ? next : undefined) }
   return (
@@ -105,6 +144,7 @@ function DesignValues({ style, design, onSize, onAccent, onColor, accent, text }
           })}
         </div>
       </div>
+      {style === "pill" ? <PillOptions pill={design.pill} onPill={onPill} /> : null}
       <div className="grid gap-1"><Label>Colours (each element on its own)</Label>
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
           {STYLE_COLORS[style].map((k) => {
@@ -220,7 +260,7 @@ export function VisualsBuilder() {
   const patchStrap = (id: string, p: Partial<StrapPreset>) => setStraps(straps.map((s) => (s.id === id ? { ...s, ...p } : s)))
   const setDesign = (style: StrapStyle, p: Partial<StrapDesign>) => setDraft({ ...draft, strapDesigns: { ...draft.strapDesigns, [style]: { ...draft.strapDesigns[style], ...p } } })
   const setTextScale = (k: TextScalePart, n: number) => setDraft({ ...draft, textScale: { ...draft.textScale, [k]: n } })
-  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} onColor={(colors) => setDesign(style, { colors })} accent={draft.strapAccent} text={draft.strapText} />
+  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} onColor={(colors) => setDesign(style, { colors })} onPill={(pill) => setDesign(style, { pill })} accent={draft.strapAccent} text={draft.strapText} />
   const on: Record<LayoutPart | "ticker", boolean> = {
     ...(Object.fromEntries(LOGO_IDS.map((id) => [id, (live?.logosOn ?? []).includes(id)])) as Record<LogoId, boolean>),
     qr: live?.qrOn === true,
@@ -492,6 +532,9 @@ export function VisualsBuilder() {
                         onClick={() => (deckCorner ? void act(part === "strap" ? { type: "strap", corner: c } : { type: "socials", corner: c }) : set({ corner: c, ...(c !== p.corner ? { dx: 0, dy: 0 } : {}) }))}>{CORNER_LABEL[c]}</button>
                     })}
                   </div>
+                  {part === "strap" ? (
+                    <button type="button" data-testid="vb-center" aria-pressed={Boolean(p.center)} className={`${chip(Boolean(p.center))} justify-self-start`} onClick={() => set({ center: !p.center, ...(!p.center ? { dx: 0 } : {}) })}>Centre (top or bottom)</button>
+                  ) : null}
                 </div>
                 <div className="grid gap-1"><Label>Snap to</Label>
                   <div className="flex gap-1">{(["safe", "edge"] as const).map((s) => <button key={s} type="button" data-testid={`vb-snap-${s}`} aria-pressed={p.snap === s} className={chip(p.snap === s)} onClick={() => set({ snap: s })}>{s === "safe" ? "Safe 5%" : `Edge ${EDGE_PX}px`}</button>)}</div>
