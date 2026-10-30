@@ -15,9 +15,10 @@ import { AppNav } from "@/components/app-nav"
 import { UploadProgress } from "@/components/upload-progress"
 import { FilePicker } from "@/components/file-picker"
 import { useUpload } from "@/lib/use-upload"
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
 import { VisualsLayer } from "@/components/visuals-layer"
+import { NameStrap } from "@/components/name-strap"
 import { SceneCardView } from "@/components/visual-assets"
 import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_PILL_PLACES, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
@@ -430,7 +431,10 @@ export function VisualsBuilder() {
                   <select data-testid="vb-strap-style" className={field} value={s.style} onChange={(e) => patchStrap(s.id, { style: e.target.value as StrapStyle })}>{STRAP_STYLES.map((p) => <option key={p} value={p}>{STRAP_STYLE_LABEL[p]}</option>)}</select></label>
                 <Label>{STRAP_STYLE_LABEL[s.style]} design (shared by every preset in this style)</Label>
                 {designValues(s.style)}
-                <p className="font-mono text-[10px] text-white/45">Applies on Save. A preset needs a name or a title.</p>
+                <div data-testid="vb-strap-mini" className="overflow-hidden rounded-[10px] bg-[repeating-conic-gradient(#222_0_25%,#2a2a2a_0_50%)] bg-[length:16px_16px] p-3" style={{ "--px": "0.34px" } as CSSProperties}>
+                  <NameStrap key={`${s.id}-${s.style}`} preset={s} visible look={{ style: s.style, motion: savedStage.strapMotion, accent: draft.strapAccent, text: draft.strapText, design: draft.strapDesigns[s.style] }} />
+                </div>
+                <p className="font-mono text-[10px] text-white/45">Live preview of this preset (the big preview shows it too). Applies on Save. A preset needs a name or a title.</p>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" data-testid="vb-strap-dup" disabled={straps.length >= STRAP_MAX} className={btn} onClick={() => setStraps(duplicateStrap(straps, s.id))}>Duplicate</button>
                   <button type="button" data-testid="vb-strap-delete" className={`${btn} border-[#FF3B3B]/60 text-[#FF3B3B]`} onClick={() => { setStraps(deleteStrap(straps, s.id)); setSel({ kind: "part", part: "strap" }) }}>Delete</button>
