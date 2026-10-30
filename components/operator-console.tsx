@@ -1042,8 +1042,8 @@ export function OperatorConsole() {
             ) : (
               <>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 uppercase">
-                Live countdown · {timeZone}
+              <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 whitespace-nowrap uppercase">
+                Live countdown
               </h2>
               <span className="inline-flex items-center gap-1.5 font-mono text-[12px] uppercase">
                 <span className="size-2 rounded-full bg-[#D9FF43]" />
