@@ -1409,7 +1409,7 @@ export function OperatorConsole() {
             <p className="font-mono text-[13px] leading-5 text-black/70">
               Start stream sends 1280×720, 30 fps, H.264 2500 kbps, yuv420p, AAC stereo 128 kbps, silent audio, FLV over RTMP. The local player is the same picture as 2-second HLS segments.
             </p>
-            <Panel id="advanced-commands" title="Advanced · terminal commands" pill="scripts/stream-countdown.sh" defaultOpen={false}>
+            <Panel id="advanced-commands" title="Advanced · terminal commands" pill="Scripts" defaultOpen={false}>
               <p className="font-mono text-[12px] text-black/70">Fallback only: runs the countdown script from a Terminal, outside the desk encoder.</p>
               {dests.items.length ? (
                 <Field label="Command destination" htmlFor="cmd-dest">
@@ -1808,9 +1808,9 @@ function Panel({ id, title, pill, dirty = false, defaultOpen = true, children }:
       <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
       <span className="flex items-center gap-2">
         {dirty ? <span data-testid={`unsaved-${id}`} className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[12px] font-bold text-white">Unsaved changes</span> : null}
-        {pill && !dirty ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
+        {pill && !dirty ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] whitespace-nowrap text-white">{pill}</span> : null}
         {id ? (
-          <svg viewBox="0 0 24 24" className={`size-4 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <svg viewBox="0 0 24 24" className={`size-4 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="m6 9 6 6 6-6" />
           </svg>
         ) : null}
