@@ -127,3 +127,19 @@ test("Minimal line: one-line option (line only, default two lines)", () => {
   assert.ok(one.includes("strap-one-line") && one.includes('data-one-line="1"'))
   assert.ok(one.includes("Designer") && one.includes("@alex"))
 })
+
+test("speaker preset panel draws its own live strap preview from the draft design", async () => {
+  const { readFileSync } = await import("node:fs")
+  const src = readFileSync(new URL("../components/visuals-builder.tsx", import.meta.url), "utf8")
+  const at = src.indexOf('data-testid="vb-strap-mini"')
+  assert.ok(at > 0, "inline preview present in the preset panel")
+  const block = src.slice(at, at + 600)
+  assert.match(block, /<NameStrap[^>]*preset=\{s\}/)
+  assert.match(block, /style: s\.style/)
+  assert.match(block, /design: draft\.strapDesigns\[s\.style\]/)
+  // the preset preview path renders one line for a preset with title + handle + platform icon + live dot
+  const full = { name: "Speaker Name", title: "Job title · Company", handle: "@onlinehyphen", platform: "youtube" as const }
+  const html = renderToStaticMarkup(createElement(NameStrap, { preset: full, visible: true, look: { style: "line", motion: "slide-left", accent: "#d9ff43", text: "#ffffff", design: { ...DEFAULT_STRAP_DESIGN, nameSize: 50, subSize: 100, oneLine: true } } }))
+  assert.ok(html.includes("strap-one-line") && html.includes("@onlinehyphen") && html.includes("Job title"))
+  assert.ok(html.includes('data-testid="strap-live-dot"'))
+})
