@@ -52,8 +52,31 @@ export const SETTLE_MIN_AHEAD_S = 0.6
 /** After a paused settle (thin buffer = the delay is upstream, not ours), wait this long before retrying. */
 export const SETTLE_RETRY_MS = 60000
 
-export type SettleState = { floorMs: number | null; overSince: number | null; active: boolean; startedAt: number; fromMs: number; retryAt: number }
-export const newSettle = (): SettleState => ({ floorMs: null, overSince: null, active: false, startedAt: 0, fromMs: 0, retryAt: 0 })
+export type SettleState = { floorMs: number | null; overSince: number | null; active: boolean; startedAt: number; fromMs: number; retryAt: number; /** No floor creep before this (just went on air). */ creepHoldUntil: number }
+export const newSettle = (): SettleState => ({ floorMs: null, overSince: null, active: false, startedAt: 0, fromMs: 0, retryAt: 0, creepHoldUntil: 0 })
+
+/** Going on air this far above the player's own normal delay (inherited from the other input via pair-align) → jump to live at once. */
+export const ON_AIR_JUMP_OVER_MS = 700
+/** After going on air the floor doesn't creep for this long, so an inherited delay never becomes "normal". */
+export const SETTLE_CREEP_HOLD_MS = 120_000
+
+/** Standby player: learn its own normal delay (best seen, never creeps up while it is pulled toward the on-air one). */
+export function noteStandbyLatency(st: SettleState, latencyMs: number | null, targetMs: number = SETTLE_TARGET_MS) {
+  if (latencyMs === null || !Number.isFinite(latencyMs) || latencyMs <= 0) return
+  const v = Math.min(targetMs, Math.max(SETTLE_MIN_FLOOR_MS, latencyMs))
+  st.floorMs = st.floorMs === null ? v : Math.min(st.floorMs, v)
+}
+
+/** The player just went on air: forget any half-done catch-up and hold the floor still for a while. */
+export function settleOnAir(st: SettleState, now: number) {
+  st.active = false; st.overSince = null; st.retryAt = 0; st.creepHoldUntil = now + SETTLE_CREEP_HOLD_MS
+}
+
+/** Just on air and well behind its own normal delay → jump to live instead of a slow 1.05x catch-up. */
+export function onAirJumpDue(st: SettleState, latencyMs: number | null, targetMs: number = SETTLE_TARGET_MS): boolean {
+  if (st.floorMs === null || latencyMs === null) return false
+  return latencyMs > Math.min(st.floorMs, targetMs) + ON_AIR_JUMP_OVER_MS
+}
 
 export type SettleStep = { rate: number; event: null | { kind: "start" | "done" | "abort"; fromMs: number; toMs: number; floorMs: number; tookMs: number } }
 
@@ -62,7 +85,8 @@ export function settleTick(st: SettleState, latencyMs: number | null, aheadS: nu
   if (latencyMs === null) return { rate: st.active ? SETTLE_RATE : 1, event: null }
   // The floor follows the best latency seen, and creeps up slowly (1ms per sample) so a new path that is
   // genuinely slower (e.g. another input) becomes the target instead of being chased forever.
-  if (!st.active) st.floorMs = st.floorMs === null ? Math.max(SETTLE_MIN_FLOOR_MS, latencyMs) : Math.max(SETTLE_MIN_FLOOR_MS, Math.min(latencyMs, st.floorMs + 1))
+  // Not right after going on air: the delay then may be the other input's, not this path's.
+  if (!st.active) st.floorMs = st.floorMs === null ? Math.max(SETTLE_MIN_FLOOR_MS, latencyMs) : Math.max(SETTLE_MIN_FLOOR_MS, Math.min(latencyMs, now < st.creepHoldUntil ? st.floorMs : st.floorMs + 1))
   if (st.floorMs !== null && st.floorMs > targetMs) st.floorMs = targetMs
   const floor = Math.min(st.floorMs ?? latencyMs, targetMs)
   if (st.active) {

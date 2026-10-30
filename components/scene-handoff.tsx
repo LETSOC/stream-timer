@@ -9,7 +9,7 @@ import type { QrConfig, SceneCard } from "@/lib/visuals-assets"
  * /stream scene output with a seamless scene-to-scene switch: the outgoing scene (its video holding
  * the last frame) stays on top until the incoming scene's video has painted its first frame.
  */
-export function SceneHandoff({ id, scenes, qr, now, className }: { id: string; scenes: Record<string, SceneCard>; qr?: QrConfig; now: number | null; className: string }) {
+export function SceneHandoff({ id, scenes, qr, now, className, onReady }: { id: string; scenes: Record<string, SceneCard>; qr?: QrConfig; now: number | null; className: string; /** the current scene painted its first frame (or has no video): /stream drops the program cover */ onReady?: (id: string) => void }) {
   const [s, setS] = useState<HandoffState>(() => handoffStart(id))
   if (s.current !== id) setS(handoffShow(s, id))
   const cur = s.current !== id ? id : s.current
@@ -28,7 +28,7 @@ export function SceneHandoff({ id, scenes, qr, now, className }: { id: string; s
           then showed until its video painted). */}
       {[cur, ...(leaving !== null && leaving !== cur && scenes[leaving] ? [leaving] : [])].map((sid) => (
         <div key={sid} data-testid={sid === cur ? `scene-in-${sid}` : `scene-cover-${sid}`} className="absolute inset-0" style={{ zIndex: sid === cur ? 0 : 20 }}>
-          <SceneCardView id={sid} card={scenes[sid]} qr={qr} now={now} onAir onReady={sid === cur ? () => setS((p) => handoffReady(p, sid)) : undefined} className="h-full w-full" />
+          <SceneCardView id={sid} card={scenes[sid]} qr={qr} now={now} onAir onReady={sid === cur ? () => { setS((p) => handoffReady(p, sid)); onReady?.(sid) } : undefined} className="h-full w-full" />
         </div>
       ))}
     </div>
