@@ -157,3 +157,14 @@ test("cue button state follows the live deck strap", async () => {
   assert.match(src, /data-testid="vb-strap-cue" data-cue=\{cs\}/)
   assert.match(src, /cueState\(live, s\.id\)/)
 })
+
+test("preset panel buttons: press feedback, two-tap delete, duplicate selects the copy, revert confirms", async () => {
+  const { readFileSync } = await import("node:fs")
+  const src = readFileSync(new URL("../components/visuals-builder.tsx", import.meta.url), "utf8")
+  assert.match(src, /const btn = "[^"]*active:scale-95[^"]*disabled:cursor-not-allowed/)
+  assert.match(src, /if \(armedDelete !== s\.id\) \{ setArmedDelete\(s\.id\); return \}/)
+  assert.ok(src.includes('"Tap again to delete"'))
+  assert.match(src, /setSel\(\{ kind: "strap", id: copy\.id \}\); setFreshCopy\(copy\.id\)/)
+  assert.ok(src.includes('"Duplicated ✓"') && src.includes('"Reverted ✓"') && src.includes('"Saved ✓"'))
+  assert.match(src, /data-testid="vb-revert" disabled=\{!dirty \|\| saving\}/)
+})
