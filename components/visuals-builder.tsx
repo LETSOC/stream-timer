@@ -48,7 +48,7 @@ const COMPONENT_LABEL: Record<LayoutPart | "ticker", string> = { ...LAYOUT_PART_
 const panel = "rounded-[14px] border border-[#2a2a2a] bg-[#141414]"
 const field = "h-9 w-full rounded-[10px] border border-[#2a2a2a] bg-[#0a0a0a] px-3 text-[13px] text-white outline-none focus:border-[#D9FF43]"
 const chip = (on: boolean) => `rounded-full px-3 py-1 font-mono text-[11px] font-bold tracking-wide uppercase ${on ? "bg-[#D9FF43] text-[#0a0a0a]" : "border border-[#2a2a2a] text-white/75 hover:border-white/40"}`
-const btn = "rounded-full border border-[#2a2a2a] px-3 py-1 font-mono text-[11px] text-white hover:border-white/50 disabled:opacity-35"
+const btn = "rounded-full border border-[#2a2a2a] px-3 py-1 font-mono text-[11px] text-white transition-[transform,background-color,border-color,color] duration-150 hover:border-white/50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100"
 const mono = "font-mono text-[10px] tracking-[0.14em] text-white/45 uppercase"
 
 function Label({ children, live }: { children: ReactNode; live?: boolean }) {
@@ -232,6 +232,20 @@ export function VisualsBuilder() {
     if (!r.ok && r.status !== 401) setNote({ tone: "error", text: r.error ?? `Failed (${r.status})` })
   }
   const [cueing, setCueing] = useState<string | null>(null)
+  // Brief "done" labels on panel buttons (key → label), plus Delete's two-tap arm and the new-copy highlight.
+  const [flashes, setFlashes] = useState<Record<string, string>>({})
+  const flash = (key: string, text: string, ms = 1800) => {
+    setFlashes((f) => ({ ...f, [key]: text }))
+    window.setTimeout(() => setFlashes((f) => { if (f[key] !== text) return f; const n = { ...f }; delete n[key]; return n }), ms)
+  }
+  const [armedDelete, setArmedDelete] = useState<string | null>(null)
+  useEffect(() => { if (!armedDelete) return; const t = window.setTimeout(() => setArmedDelete(null), 3000); return () => window.clearTimeout(t) }, [armedDelete])
+  const [freshCopy, setFreshCopy] = useState<string | null>(null)
+  useEffect(() => {
+    if (!freshCopy) return
+    document.querySelector(`[data-testid="vb-strap-${freshCopy}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    const t = window.setTimeout(() => setFreshCopy(null), 2200); return () => window.clearTimeout(t)
+  }, [freshCopy])
   const [cuedFlash, setCuedFlash] = useState<string | null>(null)
   useEffect(() => { if (!cuedFlash) return; const t = window.setTimeout(() => setCuedFlash(null), 1800); return () => window.clearTimeout(t) }, [cuedFlash])
   async function cue(id: string) {
@@ -256,7 +270,8 @@ export function VisualsBuilder() {
       if (!res.ok) { setNote({ tone: "error", text: body.error ?? `Save failed (${res.status})` }); return }
       const next = await load()
       if (next) { setLoaded(next); setDraft(draftFrom(parseStage(next.stage))) }
-      setNote({ tone: "ok", text: "Saved" })
+      setNote({ tone: "ok", text: "Saved ✓" })
+      flash("save", "Saved ✓")
     } finally {
       setSaving(false)
     }
@@ -327,8 +342,8 @@ export function VisualsBuilder() {
         <div className="ml-auto flex items-center gap-2">
           {note ? <span data-testid="vb-note" className={`font-mono text-[11px] ${note.tone === "ok" ? "text-[#D9FF43]" : "text-[#FF3B3B]"}`}>{note.text}</span> : null}
           {dirty ? <span className="font-mono text-[11px] text-[#FF6A00]">Unsaved changes</span> : null}
-          <button type="button" data-testid="vb-revert" disabled={!dirty || saving} onClick={() => setDraft(draftFrom(savedStage))} className={btn}>Revert</button>
-          <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className="rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold text-[#0a0a0a] disabled:opacity-35">{saving ? "Saving…" : "Save"}</button>
+          <button type="button" data-testid="vb-revert" disabled={!dirty || saving} title={dirty ? "Throw away unsaved changes" : "Nothing to revert"} onClick={() => { setDraft(draftFrom(savedStage)); setArmedDelete(null); setNote({ tone: "ok", text: "Reverted to last save ✓" }); flash("revert", "Reverted ✓") }} className={`${btn} ${flashes.revert ? "disabled:opacity-100 border-[#D9FF43]! text-[#D9FF43]!" : ""}`}>{flashes.revert ?? "Revert"}</button>
+          <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className={`rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold text-[#0a0a0a] transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100 ${saving ? "animate-pulse" : ""} ${flashes.save ? "disabled:opacity-100" : ""}`}>{saving ? "Saving…" : flashes.save ?? "Save"}</button>
           <LinkPill link={link} testId="vb-link-state" />
 
         </div>
@@ -345,7 +360,7 @@ export function VisualsBuilder() {
           <ul className="m-0 grid list-none gap-1 p-0">
             {straps.map((s) => (
               <li key={s.id}>
-                <button type="button" data-testid={`vb-strap-${s.id}`} onClick={() => setSel({ kind: "strap", id: s.id })} className={`w-full rounded-[10px] px-2.5 py-2 text-left ${sel.kind === "strap" && sel.id === s.id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
+                <button type="button" data-testid={`vb-strap-${s.id}`} onClick={() => setSel({ kind: "strap", id: s.id })} className={`w-full rounded-[10px] px-2.5 py-2 text-left ${sel.kind === "strap" && sel.id === s.id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"} ${freshCopy === s.id ? "animate-pulse bg-[#D9FF43]/15 ring-2" : ""} transition-colors`}>
                   <span className="block text-[13px] font-semibold break-words">{s.name || "(no name)"}{live?.strapId === s.id ? <span className="ml-2 font-mono text-[9px] text-[#D9FF43]">CUED</span> : null}</span>
                   <span className="block font-mono text-[10px] text-white/50 break-words">{s.title || "—"} · {STRAP_STYLE_LABEL[s.style].split(" ")[0]}</span>
                 </button>
@@ -446,8 +461,24 @@ export function VisualsBuilder() {
                 </div>
                 <p className="font-mono text-[10px] text-white/45">Live preview of this preset (the big preview shows it too). Applies on Save. A preset needs a name or a title.</p>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" data-testid="vb-strap-dup" disabled={straps.length >= STRAP_MAX} className={btn} onClick={() => setStraps(duplicateStrap(straps, s.id))}>Duplicate</button>
-                  <button type="button" data-testid="vb-strap-delete" className={`${btn} border-[#FF3B3B]/60 text-[#FF3B3B]`} onClick={() => { setStraps(deleteStrap(straps, s.id)); setSel({ kind: "part", part: "strap" }) }}>Delete</button>
+                  <button type="button" data-testid="vb-strap-dup" disabled={straps.length >= STRAP_MAX} title={straps.length >= STRAP_MAX ? `Up to ${STRAP_MAX} presets` : "Copy this preset"}
+                    className={`${btn} ${flashes[`dup-${s.id}`] ? "border-[#D9FF43]! text-[#D9FF43]!" : ""}`}
+                    onClick={() => {
+                      const next = duplicateStrap(straps, s.id)
+                      const copy = next.find((x) => !straps.some((y) => y.id === x.id))
+                      if (!copy) { setNote({ tone: "error", text: `Could not duplicate (max ${STRAP_MAX} presets).` }); return }
+                      setStraps(next); setArmedDelete(null); setSel({ kind: "strap", id: copy.id }); setFreshCopy(copy.id)
+                      flash(`dup-${copy.id}`, "Duplicated ✓"); setNote({ tone: "ok", text: `Duplicated as “${copy.name}”. Save to keep it.` })
+                    }}>{flashes[`dup-${s.id}`] ?? "Duplicate"}</button>
+                  <button type="button" data-testid="vb-strap-delete" data-armed={armedDelete === s.id ? "1" : undefined} aria-live="polite"
+                    title={armedDelete === s.id ? "Tap again within 3 s to delete" : "Delete this preset (asks to confirm)"}
+                    className={`${btn} ${armedDelete === s.id ? "border-[#FF3B3B]! bg-[#FF3B3B] font-bold text-white! animate-pulse" : "border-[#FF3B3B]/60 text-[#FF3B3B]!"}`}
+                    onClick={() => {
+                      if (armedDelete !== s.id) { setArmedDelete(s.id); return }
+                      const name = s.name || "(no name)"
+                      setArmedDelete(null); setStraps(deleteStrap(straps, s.id)); setSel({ kind: "part", part: "strap" })
+                      setNote({ tone: "ok", text: `Deleted “${name}” ✓ — Save to confirm, or Revert to undo.` })
+                    }}>{armedDelete === s.id ? "Tap again to delete" : "Delete"}</button>
                   {(() => {
                     const cs = cueState(live, s.id)
                     const unsaved = !savedStage.straps.some((x) => x.id === s.id)
