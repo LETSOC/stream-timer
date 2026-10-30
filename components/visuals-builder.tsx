@@ -48,7 +48,7 @@ const COMPONENT_LABEL: Record<LayoutPart | "ticker", string> = { ...LAYOUT_PART_
 const panel = "rounded-[14px] border border-[#2a2a2a] bg-[#141414]"
 const field = "h-9 w-full rounded-[10px] border border-[#2a2a2a] bg-[#0a0a0a] px-3 text-[13px] text-white outline-none focus:border-[#D9FF43]"
 const chip = (on: boolean) => `rounded-full px-3 py-1 font-mono text-[11px] font-bold tracking-wide uppercase ${on ? "bg-[#D9FF43] text-[#0a0a0a]" : "border border-[#2a2a2a] text-white/75 hover:border-white/40"}`
-const btn = "rounded-full border border-[#2a2a2a] px-3 py-1 font-mono text-[11px] text-white transition-[transform,background-color,border-color,color] duration-150 hover:border-white/50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100"
+const btn = "rounded-full border border-[#2a2a2a] px-3 py-1 font-mono text-[11px] text-white transition-[transform,background-color,border-color,color] duration-150 hover:border-white/50 active:scale-95 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100"
 const mono = "font-mono text-[10px] tracking-[0.14em] text-white/45 uppercase"
 
 function Label({ children, live }: { children: ReactNode; live?: boolean }) {
@@ -271,7 +271,7 @@ export function VisualsBuilder() {
       const next = await load()
       if (next) { setLoaded(next); setDraft(draftFrom(parseStage(next.stage))) }
       setNote({ tone: "ok", text: "Saved ✓" })
-      flash("save", "Saved ✓")
+      flash("save", "Saved")
     } finally {
       setSaving(false)
     }
@@ -342,8 +342,8 @@ export function VisualsBuilder() {
         <div className="ml-auto flex items-center gap-2">
           {note ? <span data-testid="vb-note" className={`font-mono text-[11px] ${note.tone === "ok" ? "text-[#D9FF43]" : "text-[#FF3B3B]"}`}>{note.text}</span> : null}
           {dirty ? <span className="font-mono text-[11px] text-[#FF6A00]">Unsaved changes</span> : null}
-          <button type="button" data-testid="vb-revert" disabled={!dirty || saving} title={dirty ? "Throw away unsaved changes" : "Nothing to revert"} onClick={() => { setDraft(draftFrom(savedStage)); setArmedDelete(null); setNote({ tone: "ok", text: "Reverted to last save ✓" }); flash("revert", "Reverted ✓") }} className={`${btn} ${flashes.revert ? "disabled:opacity-100 border-[#D9FF43]! text-[#D9FF43]!" : ""}`}>{flashes.revert ?? "Revert"}</button>
-          <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className={`rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold text-[#0a0a0a] transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100 ${saving ? "animate-pulse" : ""} ${flashes.save ? "disabled:opacity-100" : ""}`}>{saving ? "Saving…" : flashes.save ?? "Save"}</button>
+          <button type="button" data-testid="vb-revert" disabled={!dirty || saving} title={dirty ? "Throw away unsaved changes" : "Nothing to revert"} onClick={() => { setDraft(draftFrom(savedStage)); setArmedDelete(null); setNote({ tone: "ok", text: "Reverted to last save ✓" }); flash("revert", "Reverted") }} className={`${btn} ${flashes.revert ? "disabled:opacity-100 border-[#D9FF43]! text-[#D9FF43]!" : ""}`}>{flashes.revert ?? "Revert"}</button>
+          <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className={`rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold whitespace-nowrap text-[#0a0a0a] transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100 ${saving ? "animate-pulse" : ""} ${flashes.save ? "disabled:opacity-100" : ""}`}>{saving ? "Saving…" : flashes.save ?? "Save"}</button>
           <LinkPill link={link} testId="vb-link-state" />
 
         </div>
@@ -468,7 +468,7 @@ export function VisualsBuilder() {
                       const copy = next.find((x) => !straps.some((y) => y.id === x.id))
                       if (!copy) { setNote({ tone: "error", text: `Could not duplicate (max ${STRAP_MAX} presets).` }); return }
                       setStraps(next); setArmedDelete(null); setSel({ kind: "strap", id: copy.id }); setFreshCopy(copy.id)
-                      flash(`dup-${copy.id}`, "Duplicated ✓"); setNote({ tone: "ok", text: `Duplicated as “${copy.name}”. Save to keep it.` })
+                      flash(`dup-${copy.id}`, "Duplicated"); setNote({ tone: "ok", text: `Duplicated as “${copy.name}”. Save to keep it.` })
                     }}>{flashes[`dup-${s.id}`] ?? "Duplicate"}</button>
                   <button type="button" data-testid="vb-strap-delete" data-armed={armedDelete === s.id ? "1" : undefined} aria-live="polite"
                     title={armedDelete === s.id ? "Tap again within 3 s to delete" : "Delete this preset (asks to confirm)"}
@@ -485,7 +485,7 @@ export function VisualsBuilder() {
                     const busy = cueing === s.id
                     const flash = cuedFlash === s.id
                     const look = cs === "live" ? "border-[#FF6A00]! bg-[#FF6A00] text-black!" : cs === "cued" ? "border-[#D9FF43]! bg-[#D9FF43] text-black!" : ""
-                    const label = busy ? "Cueing…" : cs === "live" ? "● On air now" : flash ? "Cued ✓" : cs === "cued" ? "✓ Cued on deck" : <>Cue on deck <span className="text-[#FF6A00]">· live</span></>
+                    const label = busy ? "Cueing…" : cs === "live" ? "● On air now" : flash ? "Cued" : cs === "cued" ? "Cued on deck" : <>Cue on deck <span className="text-[#FF6A00]">· live</span></>
                     return (
                       <button type="button" data-testid="vb-strap-cue" data-cue={cs} aria-pressed={cs !== "idle"} aria-live="polite" disabled={busy || cs !== "idle" || dirty || unsaved}
                         title={cs === "live" ? "This preset is on air. Take it off from the deck." : cs === "cued" ? "Already cued on the deck. Put it on air from the deck." : dirty ? "Save first" : unsaved ? "Save this preset first" : "Cue this preset on the deck (live)"}
