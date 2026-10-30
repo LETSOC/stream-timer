@@ -28,7 +28,7 @@ import { useDeckSocket } from "@/lib/use-deck-socket"
 import { CORNER_LABEL, CORNERS, STRAP_ACCENT_LABEL, STYLE_ACCENTS, STRAP_COLOR_LABEL, STYLE_COLORS, strapColors, type StrapColorKey, TEXT_SCALE_RANGE, strapAccentOn, type StrapDesign, type TextScalePart, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
 import { DEFAULT_PILL, parsePillDesign, PILL_BOX_LABEL, PILL_BOXES, PILL_ICON_MODE_LABEL, PILL_ICON_MODES, PILL_LAYOUT_LABEL, PILL_LAYOUTS, PILL_NUM_LABEL, PILL_NUM_RANGE, PILL_NUMS, PILL_ORDER_LABEL, PILL_ORDERS, type PillDesign } from "@/lib/strap-pill"
-import { toggleDraftAccent, addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
+import { toggleDraftAccent, addStrap, cueState, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 import { StreamPlayer } from "@/components/stream-player"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { muteOnlyAudio } from "@/lib/preview-audio"
@@ -230,6 +230,16 @@ export function VisualsBuilder() {
   async function act(action: TransportAction) {
     const r = await run(action, undefined)
     if (!r.ok && r.status !== 401) setNote({ tone: "error", text: r.error ?? `Failed (${r.status})` })
+  }
+  const [cueing, setCueing] = useState<string | null>(null)
+  const [cuedFlash, setCuedFlash] = useState<string | null>(null)
+  useEffect(() => { if (!cuedFlash) return; const t = window.setTimeout(() => setCuedFlash(null), 1800); return () => window.clearTimeout(t) }, [cuedFlash])
+  async function cue(id: string) {
+    setCueing(id)
+    const r = await run({ type: "strap", id }, undefined)
+    setCueing(null)
+    if (r.ok) setCuedFlash(id)
+    else if (r.status !== 401) setNote({ tone: "error", text: r.error ?? `Cue failed (${r.status})` })
   }
   const visual = (a: Omit<Extract<TransportAction, { type: "visual" }>, "type">) => act({ type: "visual", ...a } as TransportAction)
 
@@ -438,8 +448,21 @@ export function VisualsBuilder() {
                 <div className="flex flex-wrap gap-2">
                   <button type="button" data-testid="vb-strap-dup" disabled={straps.length >= STRAP_MAX} className={btn} onClick={() => setStraps(duplicateStrap(straps, s.id))}>Duplicate</button>
                   <button type="button" data-testid="vb-strap-delete" className={`${btn} border-[#FF3B3B]/60 text-[#FF3B3B]`} onClick={() => { setStraps(deleteStrap(straps, s.id)); setSel({ kind: "part", part: "strap" }) }}>Delete</button>
-                  <button type="button" data-testid="vb-strap-cue" disabled={dirty || !savedStage.straps.some((x) => x.id === s.id)} title={dirty ? "Save first" : undefined} className={btn} onClick={() => void act({ type: "strap", id: s.id })}>Cue on deck <span className="text-[#FF6A00]">· live</span></button>
+                  {(() => {
+                    const cs = cueState(live, s.id)
+                    const unsaved = !savedStage.straps.some((x) => x.id === s.id)
+                    const busy = cueing === s.id
+                    const flash = cuedFlash === s.id
+                    const look = cs === "live" ? "border-[#FF6A00]! bg-[#FF6A00] text-black!" : cs === "cued" ? "border-[#D9FF43]! bg-[#D9FF43] text-black!" : ""
+                    const label = busy ? "Cueing…" : cs === "live" ? "● On air now" : flash ? "Cued ✓" : cs === "cued" ? "✓ Cued on deck" : <>Cue on deck <span className="text-[#FF6A00]">· live</span></>
+                    return (
+                      <button type="button" data-testid="vb-strap-cue" data-cue={cs} aria-pressed={cs !== "idle"} aria-live="polite" disabled={busy || cs !== "idle" || dirty || unsaved}
+                        title={cs === "live" ? "This preset is on air. Take it off from the deck." : cs === "cued" ? "Already cued on the deck. Put it on air from the deck." : dirty ? "Save first" : unsaved ? "Save this preset first" : "Cue this preset on the deck (live)"}
+                        className={`${btn} transition-[transform,background-color,color] duration-150 active:scale-95 ${look} ${cs !== "idle" ? "disabled:opacity-100" : ""} ${busy ? "animate-pulse" : ""}`} onClick={() => void cue(s.id)}>{label}</button>
+                    )
+                  })()}
                 </div>
+                {cueState(live, s.id) === "idle" && (dirty || !savedStage.straps.some((x) => x.id === s.id)) ? <p data-testid="vb-strap-cue-hint" className="font-mono text-[10px] text-white/45">Save to cue this preset on the deck.</p> : null}
               </div>
             )
           })() : sel.kind === "scene" ? (() => {
