@@ -153,6 +153,8 @@ export function OperatorConsole() {
   const [welcomeFit, setWelcomeFit] = useState<ImageFit>("cover")
   const [overlay, setOverlay] = useState<Overlay>("none")
   const [overlayAt, setOverlayAt] = useState<number | null>(null)
+  // Last desk Resync stamp from the server; carried in saves so a save never undoes or re-fires it.
+  const [playerResyncAt, setPlayerResyncAt] = useState<number | null>(null)
   const [program, setProgram] = useState(false)
   const [programSource, setProgramSource] = useState<"main" | "backup">("main")
   // Main/Backup switch in flight (one at a time; the 1s poll must not flip the buttons back meanwhile).
@@ -360,6 +362,7 @@ export function OperatorConsole() {
     // Every card (scene cards too): an unknown value here used to keep "none" and the next desk save took the card down.
     if (isOverlay(stage.overlay)) setOverlay(stage.overlay)
     if (stage.overlayAt === null || typeof stage.overlayAt === "number") setOverlayAt(stage.overlayAt ?? null)
+    if (stage.playerResyncAt === null || typeof stage.playerResyncAt === "number") setPlayerResyncAt(stage.playerResyncAt ?? null)
     if (typeof stage.program === "boolean") setProgram(stage.program)
     if (stage.programSource === "main" || stage.programSource === "backup") setProgramSource(stage.programSource)
     setVisuals((cur) => ({ ...cur, ...Object.fromEntries(VISUAL_KEYS.filter((k) => stage[k] !== undefined).map((k) => [k, stage[k]])) }))
@@ -412,7 +415,7 @@ export function OperatorConsole() {
       .finally(() => setHydrated(true))
   }, [updateEvent, applyStage])
 
-  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endOffsetMin, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, standbyTitle, standbyMessage, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
+  const draftStage: StageOptions = { checker, showMeta, showLink, transparent, lineSpacing, blockGap, clockScale, clockText, logoUrl, speakers, gallerySeconds, galleryPause, galleryOffset, galleryScale, endTitle, endSubtitle, endDate, endBody, endQrUrl, endButton, endOffsetMin, forceEnd, holdCountdown, breakTitle, breakMessage, breakImage, breakFit, holdTitle, holdMessage, holdImage, holdFit, standbyTitle, standbyMessage, welcomeTitle, welcomeMessage, welcomeImage, welcomeFit, overlay, overlayAt, playerResyncAt, program, programSource, streamProgramAudio: streamAudio.program, streamBedAudio: streamAudio.bed, deskLive: liveMode, ...visuals }
   const draftJson = JSON.stringify({ event, stage: draftStage })
   const draftSnap = useParsedJson<DeskSnapshot>(draftJson)
   const drafts = useSectionDrafts(draftSnap, published, hydrated)
@@ -769,6 +772,7 @@ export function OperatorConsole() {
     if (action.type === "screen") {
       setOverlay(next.stage.overlay)
       setOverlayAt(next.stage.overlayAt)
+      setPlayerResyncAt(next.stage.playerResyncAt ?? null)
       setProgram(next.stage.program)
       setForceEnd(next.stage.forceEnd)
       setHoldCountdown(next.stage.holdCountdown)
@@ -879,6 +883,16 @@ export function OperatorConsole() {
       switchingRef.current = false
       setSwitchingTo(null)
     }
+  }
+  /** Desk "Resync": rebuild both /stream program players (no disarm), fresh delay memory. */
+  async function resyncPlayers() {
+    const response = await fetchT("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "resyncPlayers" }, from: "desk" }) }).catch(() => null)
+    if (!response) return setToast("No answer from the server. Tap Resync again.")
+    if (handleUnauthorized(response)) return
+    const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null
+    if (!response.ok || !body?.ok) return setToast(body?.error ?? "Could not resync the players.")
+    showToast("failover", "Players rebuilding (stay armed)")
+    window.setTimeout(() => void syncNowRef.current(), 0)
   }
   async function saveStreamAudio(patch: { program?: boolean; bed?: boolean }) {
     const prev = streamAudio
@@ -1126,6 +1140,7 @@ export function OperatorConsole() {
               <button type="button" data-testid="open-feed-lost" className={`${pillClass("outline")} col-span-2`} onClick={() => { setSectionOpen("feed-lost", true); requestAnimationFrame(() => document.getElementById("section-feed-lost")?.scrollIntoView({ behavior: "smooth", block: "center" })) }}>Open feed-lost card</button>
             </div>
               <div className="space-y-1.5"><ProgramSourceSwitch view={sources} active={programSource} pending={switchingTo} onBlocked={setToast} onSwitch={(source) => void switchProgramSource(source)} onFailover={(patch) => void saveFailover(patch)} onArm={(op, feed) => { void armFeed(op, feed).then((r) => showToast(r.ok ? "failover" : "error", r.text)) }} onMark={(type, note) => { void markDropout("desk", type, note).then((r) => { if (r.ok) { showToast("mark", markToast(r)); setMarkSeq((n) => n + 1) } else showToast("error", r.error) }) }} />
+                <ConfirmButton data-testid="resync-players" className={`${pillClass("outline")} w-full`} confirmLabel="Rebuild both players · confirm" title="Rebuilds the Main and Backup players on /stream (last frame held, stays armed) and resets their delay memory." onConfirm={() => void resyncPlayers()}>Resync players</ConfirmButton>
                 <DropoutLogPanel refresh={markSeq} onToast={(tone, text) => showToast(tone === "ok" ? "mark" : "error", text)} /></div>
             {program && rtmpChannels.slate.running ? <p data-testid="slate-program-note" className="rounded-lg bg-[#b45309]/10 px-2 py-1 font-mono text-[12px] leading-5 text-[#7a3b06]">The Slate channel (ffmpeg text) can{"'"}t show the OBS program; it keeps the countdown. Use Browser capture for the program.</p> : null}
             {liveMode ? <p className="font-mono text-[12px] leading-5 text-black/70">Live: test clocks, pause, reset, restore and keyboard shortcuts are locked. Go live now and the end card still work.</p> : null}
