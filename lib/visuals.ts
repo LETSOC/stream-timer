@@ -53,7 +53,7 @@ export const STYLE_COLORS: Record<StrapStyle, readonly StrapColorKey[]> = {
   gradient: ["name", "sub", "box", "grad", "icon"],
 }
 export type StrapColors = Partial<Record<StrapColorKey, string>>
-export type StrapDesign = { nameSize: number; subSize: number; /** accents switched off (all on by default) */ off: StrapAccent[]; /** per-element colour overrides */ colors?: StrapColors; /** Social pill only: layout options (lib/strap-pill.ts); unset = the classic pill */ pill?: PillDesign }
+export type StrapDesign = { nameSize: number; subSize: number; /** accents switched off (all on by default) */ off: StrapAccent[]; /** per-element colour overrides */ colors?: StrapColors; /** Social pill only: layout options (lib/strap-pill.ts); unset = the classic pill */ pill?: PillDesign; /** Minimal line only: name, title and handle on one line (unset = two lines) */ oneLine?: boolean }
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i
 /** "" = no colour (use the platform's own). Built-in colours as they were before per-element colours. */
@@ -96,7 +96,7 @@ export function parseStrapDesigns(value: unknown, legacy: { circle?: boolean; ar
       : style === "house" ? STYLE_ACCENTS.house.filter((a) => (a === "dot" && legacy.circle === false) || (a === "arrow" && legacy.arrow === false)) : []
     const colors = parseColors(d?.colors)
     const pill = style === "pill" ? parsePillDesign(d?.pill) : undefined
-    return [style, { nameSize: clampTextScale(d?.nameSize), subSize: clampTextScale(d?.subSize), off, ...(colors ? { colors } : {}), ...(pill ? { pill } : {}) }]
+    return [style, { nameSize: clampTextScale(d?.nameSize), subSize: clampTextScale(d?.subSize), off, ...(colors ? { colors } : {}), ...(pill ? { pill } : {}), ...(style === "line" && d?.oneLine === true ? { oneLine: true } : {}) }]
   })) as StrapDesigns
 }
 
