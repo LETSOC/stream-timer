@@ -127,3 +127,10 @@ export function builderProgramFeed(state: { programSource?: "main" | "backup"; p
   const signal = state?.programSources?.[source]?.ready ?? state?.programReady === true
   return { path: enabled && signal ? (source === "backup" ? "program-backup" : "program") : null, source, signal }
 }
+
+/** Speaker preset vs the live deck: "live" when it is the cued strap and on air (IN / LOOP), "cued" when cued but off, else "idle". */
+export type CueState = "idle" | "cued" | "live"
+export function cueState(live: { strapId?: string; strapMode?: string } | undefined, id: string): CueState {
+  if (!live || live.strapId !== id) return "idle"
+  return live.strapMode === "in" || live.strapMode === "loop" ? "live" : "cued"
+}
