@@ -48,3 +48,8 @@ drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:fontsize=80:fontc
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`
 }
+
+/** Destination the Advanced terminal command points at: the operator's pick, else the slate's, else the first saved one. */
+export function pickCommandDestination<T extends { id: string }>(items: T[], chosenId: string | null, fallbackId: string | null): T | null {
+  return items.find((item) => item.id === chosenId) ?? items.find((item) => item.id === fallbackId) ?? items[0] ?? null
+}
