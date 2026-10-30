@@ -129,7 +129,7 @@ function PillOptions({ pill, onPill }: { pill: PillDesign | undefined; onPill: (
  * One strap design's values: name and subline text size and its accents (✓ = shown). Off accents are
  * not drawn, so the strap box shrinks to fit. Applies on Save, for every preset using this design.
  */
-function DesignValues({ style, design, onSize, onAccent, onColor, onPill, accent, text }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void; onColor: (colors: StrapDesign["colors"]) => void; onPill: (pill: PillDesign | undefined) => void; accent: string; text: string }) {
+function DesignValues({ style, design, onSize, onAccent, onColor, onPill, onOneLine, accent, text }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void; onColor: (colors: StrapDesign["colors"]) => void; onPill: (pill: PillDesign | undefined) => void; onOneLine: (one: boolean) => void; accent: string; text: string }) {
   const c = strapColors(style, design, accent, text)
   const setColor = (k: StrapColorKey, v: string | null) => { const next = { ...(design.colors ?? {}) }; if (v === null) delete next[k]; else next[k] = v; onColor(Object.keys(next).length ? next : undefined) }
   return (
@@ -144,6 +144,11 @@ function DesignValues({ style, design, onSize, onAccent, onColor, onPill, accent
           })}
         </div>
       </div>
+      {style === "line" ? (
+        <div className="grid gap-1"><Label>Text</Label>
+          <div className="flex gap-1">{([false, true] as const).map((one) => <button key={String(one)} type="button" data-testid={`vb-line-${one ? "inline" : "stack"}`} aria-pressed={Boolean(design.oneLine) === one} className={chip(Boolean(design.oneLine) === one)} onClick={() => onOneLine(one)}>{one ? "One line" : "Two lines"}</button>)}</div>
+        </div>
+      ) : null}
       {style === "pill" ? <PillOptions pill={design.pill} onPill={onPill} /> : null}
       <div className="grid gap-1"><Label>Colours (each element on its own)</Label>
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
@@ -260,7 +265,7 @@ export function VisualsBuilder() {
   const patchStrap = (id: string, p: Partial<StrapPreset>) => setStraps(straps.map((s) => (s.id === id ? { ...s, ...p } : s)))
   const setDesign = (style: StrapStyle, p: Partial<StrapDesign>) => setDraft({ ...draft, strapDesigns: { ...draft.strapDesigns, [style]: { ...draft.strapDesigns[style], ...p } } })
   const setTextScale = (k: TextScalePart, n: number) => setDraft({ ...draft, textScale: { ...draft.textScale, [k]: n } })
-  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} onColor={(colors) => setDesign(style, { colors })} onPill={(pill) => setDesign(style, { pill })} accent={draft.strapAccent} text={draft.strapText} />
+  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} onColor={(colors) => setDesign(style, { colors })} onPill={(pill) => setDesign(style, { pill })} onOneLine={(one) => setDesign(style, { oneLine: one || undefined })} accent={draft.strapAccent} text={draft.strapText} />
   const on: Record<LayoutPart | "ticker", boolean> = {
     ...(Object.fromEntries(LOGO_IDS.map((id) => [id, (live?.logosOn ?? []).includes(id)])) as Record<LogoId, boolean>),
     qr: live?.qrOn === true,
