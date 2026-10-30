@@ -13,6 +13,7 @@ import { useNow } from "@/lib/use-now"
 import { clampChecker, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { SceneHandoff } from "@/components/scene-handoff"
+import { HANDOFF_MAX_MS, PROGRAM_FADE_TAIL_MS, programCoverNext, programCoverReady, sceneTailNext } from "@/lib/scene-handoff"
 import { isScene } from "@/lib/visuals-assets"
 import { brandUrl } from "@/lib/brand-asset"
 import { preloadImages, stageImageUrls } from "@/lib/image-preload"
@@ -243,6 +244,28 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   if (seen.screen !== screen) setSeen({ screen, lastOther: seen.screen !== "program" ? seen.screen : seen.lastOther })
   const shownScreen = screen === "program" && programDisplay === "under" ? (seen.screen !== "program" ? seen.screen : seen.lastOther) : screen
   const ended = shownScreen === "end"
+  // Program ⇄ scene handoff (like scene → scene): program → scene keeps the program picture on top until the
+  // scene's video paints (≤ HANDOFF_MAX_MS); scene → program keeps the scene under the feed's fade-in.
+  const [prevShown, setPrevShown] = useState(shownScreen)
+  const [programCover, setProgramCover] = useState<string | null>(null)
+  const [sceneTail, setSceneTail] = useState<string | null>(null)
+  if (prevShown !== shownScreen) {
+    setPrevShown(shownScreen)
+    setProgramCover(programCoverNext({ cover: programCover, from: prevShown, to: shownScreen, toIsScene: isScene(shownScreen), programVideo: displays[air.source] === "video" }))
+    setSceneTail(sceneTailNext({ from: prevShown, to: shownScreen, fromIsScene: isScene(prevShown) }))
+  }
+  useEffect(() => {
+    if (programCover === null) return
+    playerDiag("·", `program → ${programCover}: program picture held on top until the scene's video paints`)
+    const id = window.setTimeout(() => setProgramCover(null), HANDOFF_MAX_MS)
+    return () => window.clearTimeout(id)
+  }, [programCover])
+  useEffect(() => {
+    if (sceneTail === null) return
+    const id = window.setTimeout(() => setSceneTail(null), PROGRAM_FADE_TAIL_MS)
+    return () => window.clearTimeout(id)
+  }, [sceneTail])
+  const onSceneReady = useCallback((id: string) => setProgramCover((c) => programCoverReady(c, id)), [])
   // Browser capture (re)start: its first frame is taken once <html data-stream-ready> is set. With
   // Program up, wait for the program picture (≤ 8s) so the output never opens on the countdown underneath.
   const [capturePage] = useState(() => isCapturePage())
@@ -312,12 +335,15 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         const live = isAir || (handing && source === wanted)
         if (!previewMountSource({ gentle: gentlePreview || lightPreview, live })) return null
         if (!(sourceReady[source] || (stage.program && live))) return null
-        return <ProgramFeed key={source} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || (!isAir && fade?.out !== source)} crossfadeMs={crossfadeMs} tail={fade?.out === source} fadeIn={fade?.in === source} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} standbyBg={stage.standbyBg} />
+        return <ProgramFeed key={source} coverOut={programCover !== null && isAir} rebuild={stage.playerResyncAt ?? null} source={source} path={source === "backup" ? "program-backup" : "program"} onAir={isAir} incoming={handing && source === wanted} ready={sourceReady[source] || (isAir && programReady)} active={screen === "program" && live} muted={params.get("mute") === "1" || (!isAir && fade?.out !== source)} crossfadeMs={crossfadeMs} tail={fade?.out === source} fadeIn={fade?.in === source} programAudio={stage.streamProgramAudio} holdFrame={!isAir ? 0 : handing ? 60_000 : sourceReady[source === "main" ? "backup" : "main"] ? 4000 : 0} onDisplay={source === "main" ? onMain : onBackup} onAlive={source === "main" ? onAliveMain : onAliveBackup} rearmHoldUntil={rearmHoldUntil} standbyTitle={stage.standbyTitle} standbyMessage={stage.standbyMessage} standbyBg={stage.standbyBg} />
       })}
       <StreamAudioOverlay />
       {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} hold={isScene(shownScreen) && Boolean(stage.scenes[shownScreen]?.video) && stage.scenes[shownScreen]?.pauseBed === true} viewKey={viewKey} /> : null}
       {params.get("guides") === "1" ? <StageGuides className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null}
-      {shownScreen === "program" ? null : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
+      {shownScreen === "program" ? (
+        // Same slot as the scene below: the scene element is kept (not remounted) under the program fade-in.
+        sceneTail !== null && isScene(sceneTail) && stage.scenes[sceneTail] ? <SceneHandoff id={sceneTail} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} className="z-[1] h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null
+      ) : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
         <OverlayCard
           kind={shownScreen}
           title={shownScreen === "break" ? stage.breakTitle : shownScreen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
@@ -330,7 +356,7 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
           className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
         />
       ) : isScene(shownScreen) ? (
-        <SceneHandoff id={shownScreen} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} className="z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
+        <SceneHandoff id={shownScreen} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} onReady={onSceneReady} className="z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
       ) : ended ? (
         <EndStreamPage bg={stage.endBg} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
