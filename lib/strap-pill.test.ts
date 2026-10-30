@@ -112,3 +112,18 @@ test("VisualsLayer: centred strap is anchored on the middle of the frame", () =>
   assert.ok(m[1].includes("left:calc(960 * var(--px))"), m[1])
   assert.ok(m[1].includes("translateX(-50%)"), m[1])
 })
+
+test("Minimal line: one-line option (line only, default two lines)", () => {
+  assert.equal("oneLine" in parseStrapDesigns({}).line, false)
+  assert.equal(parseStrapDesigns({ line: { oneLine: true } }).line.oneLine, true)
+  assert.equal("oneLine" in parseStrapDesigns({ line: { oneLine: "yes" } }).line, false)
+  assert.equal("oneLine" in parseStrapDesigns({ house: { oneLine: true } }).house, false)
+  assert.equal(parseStage(JSON.parse(JSON.stringify(parseStage({ strapDesigns: { line: { oneLine: true } } })))).strapDesigns.line.oneLine, true)
+  const line = (design: StrapDesign) => renderToStaticMarkup(createElement(NameStrap, { preset, visible: true, look: { style: "line", motion: "slide-left", accent: "#d9ff43", text: "#ffffff", design } }))
+  const two = line(DEFAULT_STRAP_DESIGN)
+  assert.equal(two.includes("strap-one-line"), false)
+  assert.equal(two.includes("data-one-line"), false)
+  const one = line({ ...DEFAULT_STRAP_DESIGN, oneLine: true })
+  assert.ok(one.includes("strap-one-line") && one.includes('data-one-line="1"'))
+  assert.ok(one.includes("Designer") && one.includes("@alex"))
+})
