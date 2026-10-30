@@ -84,10 +84,12 @@ function StrapInner({ initial }: { initial: OverlayInitial }) {
   const preset = stage.straps.find((p) => p.id === stage.strapId) ?? null
   const visible = Boolean(preset && now && strapVisible(stage.strapMode, stage.strapAt, stage.strapHoldSec, now.getTime()))
   const where = corner ? parseCorner(corner, stage.strapCorner) : stage.strapCorner
+  // Builder › Name strap › program layout "Centre": this page has no layout gaps, but it follows centring.
+  const centre = !corner && Boolean(stage.visualsLayout?.program.strap.center)
   return (
     <Frame checker={checker} guides={guides} blocked={blocked}>
       {preset ? (
-        <div className="overlay-anchor" style={anchorStyle(where, inset)} data-corner={where}>
+        <div className="overlay-anchor" style={centre ? { ...anchorStyle(where, inset), left: "calc(960 * var(--px))", right: undefined, alignItems: "center", transform: "translateX(-50%)" } : anchorStyle(where, inset)} data-corner={where} data-center={centre ? "1" : undefined}>
           <NameStrap key={preset.id} preset={preset} visible={visible} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText, design: stage.strapDesigns?.[stage.strapStyle || preset.style] }} />
         </div>
       ) : null}
