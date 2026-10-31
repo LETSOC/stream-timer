@@ -1,6 +1,6 @@
 "use client"
 /** Desk + deck: the LAN URL another device on this Wi-Fi can open, with a scannable QR. IP is detected server-side (/api/ip). */
-import { Check, ChevronDown, ChevronUp, Copy, RefreshCw } from "lucide-react"
+import { Check, Copy, RefreshCw } from "lucide-react"
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import { copyOrShow, CopyFallbackHost } from "@/components/copy-fallback"
 import { QrImage } from "@/components/qr-image"
@@ -50,35 +50,38 @@ export function LocalAccessPill({ dark = false, className = "" }: { dark?: boole
   const refresh = async () => { setSpin(true); await load(); window.setTimeout(() => setSpin(false), 400) }
   const copy = async () => { if (!url) return; await copyOrShow("Local URL", url); setCopied(true); window.setTimeout(() => setCopied(false), 1500) }
 
-  if (collapsed === "1") {
-    return (
-      <button type="button" data-testid="local-access" data-collapsed="1" onClick={() => setCollapsed("0")} aria-expanded={false}
-        className={`flex w-full items-center gap-2.5 rounded-full px-4 py-3 text-left ${t.card} ${className}`}>
-        <span aria-hidden className={`size-2 shrink-0 rounded-full ${dot}`} />
-        <span className="font-mono text-[12px] font-bold tracking-[0.16em] uppercase">Local access</span>
-        <span data-testid="local-access-short" className="min-w-0 flex-1 truncate font-mono text-[13px]">{shortUrl}</span>
-        <ChevronDown aria-hidden className={`size-4 shrink-0 ${t.sub}`} />
-      </button>
-    )
-  }
+  const open = collapsed !== "1"
+  // Same header row in both states (fixed h-8), so nothing shifts on expand/collapse; chevron matches the desk Panel.
+  const chevron = (
+    <svg viewBox="0 0 24 24" className={`size-4 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  )
   return (
-    <section data-testid="local-access" data-collapsed="0" data-url={url ?? ""} aria-label="Local access" className={`@container rounded-[22px] p-4 ${t.card} ${className}`}>
+    <section data-testid="local-access" data-collapsed={open ? "0" : "1"} data-url={url ?? ""} aria-label="Local access" className={`@container rounded-[22px] p-4 ${t.card} ${className}`}>
       <CopyFallbackHost />
-      <div className="flex items-center gap-2.5">
+      <div className="flex h-8 items-center gap-2.5">
         <span aria-hidden className={`size-2 shrink-0 rounded-full ${dot}`} />
-        <h2 className="font-mono text-[12px] font-bold tracking-[0.16em] uppercase">Local access</h2>
-        {ok ? <span data-testid="local-access-live" className="rounded-full bg-[#12b76a]/15 px-2 py-0.5 font-mono text-[11px] font-bold tracking-[0.1em] text-[#12b76a] ring-1 ring-[#12b76a]/30">LIVE</span>
-          : ok === false ? <span className="rounded-full bg-[#f04438]/15 px-2 py-0.5 font-mono text-[11px] font-bold tracking-[0.1em] text-[#f04438]">OFFLINE</span> : null}
-        <label className={`ml-auto inline-flex cursor-pointer items-center gap-1 font-mono text-[11px] ${t.sub}`} title="Re-check the IP every 10s">
-          <input type="checkbox" data-testid="local-access-auto" checked={auto === "1"} onChange={(e) => setAuto(e.target.checked ? "1" : "0")} className="size-3.5 accent-[#12b76a]" />Auto
-        </label>
-        <button type="button" data-testid="local-access-refresh" aria-label="Refresh IP" onClick={() => void refresh()} className="grid size-8 place-items-center rounded-full">
-          <RefreshCw aria-hidden className={`size-4 ${spin ? "animate-spin" : ""}`} />
-        </button>
-        <button type="button" data-testid="local-access-collapse" aria-label="Collapse" aria-expanded onClick={() => setCollapsed("1")} className="grid size-8 place-items-center rounded-full">
-          <ChevronUp aria-hidden className="size-4" />
+        <h2 className="shrink-0 font-mono text-[12px] font-bold tracking-[0.16em] whitespace-nowrap uppercase">Local access</h2>
+        {open ? (
+          <>
+            {ok ? <span data-testid="local-access-live" className="rounded-full bg-[#12b76a]/15 px-2 py-0.5 font-mono text-[11px] font-bold tracking-[0.1em] text-[#12b76a] ring-1 ring-[#12b76a]/30">LIVE</span>
+              : ok === false ? <span className="rounded-full bg-[#f04438]/15 px-2 py-0.5 font-mono text-[11px] font-bold tracking-[0.1em] text-[#f04438]">OFFLINE</span> : null}
+            <label className={`ml-auto inline-flex cursor-pointer items-center gap-1 font-mono text-[11px] ${t.sub}`} title="Re-check the IP every 10s">
+              <input type="checkbox" data-testid="local-access-auto" checked={auto === "1"} onChange={(e) => setAuto(e.target.checked ? "1" : "0")} className="size-3.5 accent-[#12b76a]" />Auto
+            </label>
+            <button type="button" data-testid="local-access-refresh" aria-label="Refresh IP" onClick={() => void refresh()} className="grid size-8 shrink-0 place-items-center rounded-full">
+              <RefreshCw aria-hidden className={`size-4 ${spin ? "animate-spin" : ""}`} />
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setCollapsed("0")} data-testid="local-access-short" className="min-w-0 flex-1 truncate text-left font-mono text-[13px]">{shortUrl}</button>
+        )}
+        <button type="button" data-testid="local-access-collapse" aria-label={open ? "Collapse" : "Expand"} aria-expanded={open} onClick={() => setCollapsed(open ? "1" : "0")} className="grid size-8 shrink-0 place-items-center rounded-full">
+          {chevron}
         </button>
       </div>
+      {open ? (
 
       <div className="mt-3 flex flex-col gap-3 @[560px]:flex-row @[560px]:items-start">
         <div className="min-w-0 flex-1 space-y-3">
@@ -105,6 +108,7 @@ export function LocalAccessPill({ dark = false, className = "" }: { dark?: boole
           <span data-testid="local-access-url" className={`max-w-full truncate rounded-full px-3 py-1 font-mono text-[12px] ${t.chip}`}>{url ?? "—"}</span>
         </div>
       </div>
+      ) : null}
     </section>
   )
 }

@@ -69,6 +69,7 @@ import { srtLatencyNote } from "@/lib/srt-note"
 import {
   buildLocalTestCommand,
   buildStreamShellCommand,
+  pickCommandDestination,
 } from "@/lib/ffmpeg-command"
 
 type SaveFailure = "conflict" | "error" | "offline"
@@ -107,7 +108,9 @@ export function OperatorConsole() {
   const rtmpLive = rtmpChannels.slate.running || rtmpChannels.capture.running
   const selectedDest = dests.items.find((item) => item.id === (manageId ?? dests.selectedId)) ?? dests.items[0] ?? null
   const slateDest = dests.items.find((item) => item.id === dests.selectedId) ?? null
-  const rtmpUrl = slateDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
+  const [cmdDestId, setCmdDestId] = useState<string | null>(null)
+  const cmdDest = pickCommandDestination(dests.items, cmdDestId, slateDest?.id ?? null)
+  const rtmpUrl = cmdDest?.masked ?? "rtmp://YOUR-INGEST/STREAM-KEY"
   const [copied, setCopied] = useState<"stream" | "file" | "link" | "params" | "dest" | null>(null)
   const [checker, setChecker] = useState(6)
   const [showMeta, setShowMeta] = useState(true)
@@ -298,6 +301,8 @@ export function OperatorConsole() {
     targetUnix,
     rtmpUrl,
   })
+  // Copied text carries the full URL only after a reveal; the screen always shows the masked one.
+  const streamCommandFull = cmdDest && revealed?.id === cmdDest.id ? buildStreamShellCommand({ eventName: name, dateLine, targetUnix, rtmpUrl: revealed.url }) : null
   const fileCommand = buildLocalTestCommand({
     eventName: name,
     dateLine,
@@ -1037,8 +1042,8 @@ export function OperatorConsole() {
             ) : (
               <>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 uppercase">
-                Live countdown · {timeZone}
+              <h2 className="font-mono text-[13px] tracking-[0.14em] text-white/75 whitespace-nowrap uppercase">
+                Live countdown
               </h2>
               <span className="inline-flex items-center gap-1.5 font-mono text-[12px] uppercase">
                 <span className="size-2 rounded-full bg-[#D9FF43]" />
@@ -1404,8 +1409,24 @@ export function OperatorConsole() {
             <p className="font-mono text-[13px] leading-5 text-black/70">
               Start stream sends 1280×720, 30 fps, H.264 2500 kbps, yuv420p, AAC stereo 128 kbps, silent audio, FLV over RTMP. The local player is the same picture as 2-second HLS segments.
             </p>
-            <CommandBlock value={streamCommand} copied={copied === "stream"} onCopy={() => copy("stream", streamCommand)} />
-            <CommandBlock value={fileCommand} copied={copied === "file"} onCopy={() => copy("file", fileCommand)} />
+            <Panel id="advanced-commands" title="Advanced · terminal commands" pill="Scripts" defaultOpen={false}>
+              <p className="font-mono text-[12px] text-black/70">Fallback only: runs the countdown script from a Terminal, outside the desk encoder.</p>
+              {dests.items.length ? (
+                <Field label="Command destination" htmlFor="cmd-dest">
+                  <select id="cmd-dest" data-testid="cmd-dest" className="h-9 w-full px-3 text-sm" value={cmdDest?.id ?? ""} onChange={(event) => { setRevealed(null); setCmdDestId(event.target.value || null) }}>
+                    {dests.items.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name} · {item.host}</option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+              <CommandBlock value={streamCommand} copied={copied === "stream"} label={cmdDest && !streamCommandFull ? "Reveal key to copy" : undefined} onCopy={() => {
+                if (!cmdDest) return void copy("stream", streamCommand)
+                if (streamCommandFull) return void copy("stream", streamCommandFull, "command")
+                void revealDest(cmdDest.id)
+              }} />
+              <CommandBlock value={fileCommand} copied={copied === "file"} onCopy={() => copy("file", fileCommand)} />
+            </Panel>
           </Panel>
         </section>
 
@@ -1787,9 +1808,9 @@ function Panel({ id, title, pill, dirty = false, defaultOpen = true, children }:
       <h2 className="text-[13px] font-black tracking-[0.12em] uppercase">{title}</h2>
       <span className="flex items-center gap-2">
         {dirty ? <span data-testid={`unsaved-${id}`} className="rounded-full bg-[#b45309] px-2 py-1 font-mono text-[12px] font-bold text-white">Unsaved changes</span> : null}
-        {pill && !dirty ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] text-white">{pill}</span> : null}
+        {pill && !dirty ? <span className="rounded-full bg-black px-2 py-1 font-mono text-[12px] whitespace-nowrap text-white">{pill}</span> : null}
         {id ? (
-          <svg viewBox="0 0 24 24" className={`size-4 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <svg viewBox="0 0 24 24" className={`size-4 shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="m6 9 6 6 6-6" />
           </svg>
         ) : null}
@@ -1857,10 +1878,12 @@ function Field({
 function CommandBlock({
   value,
   copied,
+  label,
   onCopy,
 }: {
   value: string
   copied: boolean
+  label?: string
   onCopy: () => void
 }) {
   return (
@@ -1869,7 +1892,7 @@ function CommandBlock({
         {value}
       </pre>
       <Pill tone="outline" onClick={onCopy} className="w-full">
-        {copied ? "Copied" : "Copy command"}
+        {copied ? "Copied" : label ?? "Copy command"}
       </Pill>
     </div>
   )
