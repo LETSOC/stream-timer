@@ -53,9 +53,9 @@ function placeStyle(stage: StageOptions, screen: LayerScreen, part: LayoutPart, 
       position: "absolute",
       left: px(o.left), right: px(o.right), top: px(o.top), bottom: px(o.bottom),
       display: "flex", flexDirection: "column",
-      alignItems: o.right !== undefined ? "flex-end" : "flex-start",
-      transform: p.size === 100 ? undefined : `scale(${p.size / 100})`,
-      transformOrigin: cornerOrigin(corner),
+      alignItems: p.center ? "center" : o.right !== undefined ? "flex-end" : "flex-start",
+      transform: [p.center ? "translateX(-50%)" : "", p.size === 100 ? "" : `scale(${p.size / 100})`].filter(Boolean).join(" ") || undefined,
+      transformOrigin: cornerOrigin(corner, p.center),
     },
   }
 }

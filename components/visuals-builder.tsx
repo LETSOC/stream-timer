@@ -15,9 +15,10 @@ import { AppNav } from "@/components/app-nav"
 import { UploadProgress } from "@/components/upload-progress"
 import { FilePicker } from "@/components/file-picker"
 import { useUpload } from "@/lib/use-upload"
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPart } from "@/components/countdown-stage"
 import { VisualsLayer } from "@/components/visuals-layer"
+import { NameStrap } from "@/components/name-strap"
 import { SceneCardView } from "@/components/visual-assets"
 import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_PILL_PLACES, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
@@ -26,7 +27,8 @@ import { endCardAt, type TransportAction } from "@/lib/transport"
 import { useDeckSocket } from "@/lib/use-deck-socket"
 import { CORNER_LABEL, CORNERS, STRAP_ACCENT_LABEL, STYLE_ACCENTS, STRAP_COLOR_LABEL, STYLE_COLORS, strapColors, type StrapColorKey, TEXT_SCALE_RANGE, strapAccentOn, type StrapDesign, type TextScalePart, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, TICKER_TYPES, sanitizeTickerItems, type Corner, type Platform, type StrapMotion, type StrapPreset, type StrapStyle, type TickerType } from "@/lib/visuals"
 import { EDGE_PX, GAP_X_RANGE, GAP_Y_RANGE, LAYOUT_PART_LABEL, SIZE_RANGE, type LayoutPart, type LayoutScreen } from "@/lib/visuals-layout"
-import { toggleDraftAccent, addStrap, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
+import { DEFAULT_PILL, parsePillDesign, PILL_BOX_LABEL, PILL_BOXES, PILL_ICON_MODE_LABEL, PILL_ICON_MODES, PILL_LAYOUT_LABEL, PILL_LAYOUTS, PILL_NUM_LABEL, PILL_NUM_RANGE, PILL_NUMS, PILL_ORDER_LABEL, PILL_ORDERS, type PillDesign } from "@/lib/strap-pill"
+import { toggleDraftAccent, addStrap, cueState, builderProgramFeed, deleteStrap, draftDirty, draftFrom, duplicateStrap, previewStage, saveBody, setPlace, type BuilderDraft, type LoadedEvent } from "@/lib/visuals-builder"
 import { StreamPlayer } from "@/components/stream-player"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { muteOnlyAudio } from "@/lib/preview-audio"
@@ -46,7 +48,7 @@ const COMPONENT_LABEL: Record<LayoutPart | "ticker", string> = { ...LAYOUT_PART_
 const panel = "rounded-[14px] border border-[#2a2a2a] bg-[#141414]"
 const field = "h-9 w-full rounded-[10px] border border-[#2a2a2a] bg-[#0a0a0a] px-3 text-[13px] text-white outline-none focus:border-[#D9FF43]"
 const chip = (on: boolean) => `rounded-full px-3 py-1 font-mono text-[11px] font-bold tracking-wide uppercase ${on ? "bg-[#D9FF43] text-[#0a0a0a]" : "border border-[#2a2a2a] text-white/75 hover:border-white/40"}`
-const btn = "rounded-full border border-[#2a2a2a] px-3 py-1 font-mono text-[11px] text-white hover:border-white/50 disabled:opacity-35"
+const btn = "rounded-full border border-[#2a2a2a] px-3 py-1 font-mono text-[11px] text-white transition-[transform,background-color,border-color,color] duration-150 hover:border-white/50 active:scale-95 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100"
 const mono = "font-mono text-[10px] tracking-[0.14em] text-white/45 uppercase"
 
 function Label({ children, live }: { children: ReactNode; live?: boolean }) {
@@ -87,10 +89,48 @@ function LiveText({ label, value, onApply, testId, multiline }: { label: string;
 }
 
 /**
+ * Social pill layout options (StrapDesign.pill). Off = the classic pill exactly as before; "Customise"
+ * starts from the classic values, so nothing moves until a control is changed. Applies on Save.
+ */
+function PillOptions({ pill, onPill }: { pill: PillDesign | undefined; onPill: (p: PillDesign | undefined) => void }) {
+  if (!pill) {
+    return (
+      <div data-testid="vb-pill-options" className="grid gap-1"><Label>Pill layout</Label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" data-testid="vb-pill-customise" className={chip(false)} onClick={() => onPill({ ...DEFAULT_PILL })}>Customise</button>
+          <span className="font-mono text-[10px] text-white/45">Classic: live dot · icon · two lines.</span>
+        </div>
+      </div>
+    )
+  }
+  const set = (patch: Partial<PillDesign>) => onPill(parsePillDesign({ ...pill, ...patch }))
+  const choice = <T extends string>(label: string, id: string, list: readonly T[], labels: Record<T, string>, value: T, key: keyof PillDesign) => (
+    <div className="grid gap-1"><Label>{label}</Label>
+      <div className="flex flex-wrap gap-1">{list.map((v) => <button key={v} type="button" data-testid={`vb-pill-${id}-${v}`} aria-pressed={value === v} className={chip(value === v)} onClick={() => set({ [key]: v } as Partial<PillDesign>)}>{labels[v]}</button>)}</div>
+    </div>
+  )
+  const nums = PILL_NUMS.filter((k) => !(pill.icon === "full" && k === "iconSize") && !(pill.icon !== "full" && k === "iconInset") && !(pill.box !== "glass" && k === "blur"))
+  return (
+    <div data-testid="vb-pill-options" className="grid gap-3">
+      <div className="flex items-center justify-between"><Label>Pill layout</Label>
+        <button type="button" data-testid="vb-pill-classic" className={btn} onClick={() => onPill(undefined)}>Back to classic</button>
+      </div>
+      {choice("Text", "layout", PILL_LAYOUTS, PILL_LAYOUT_LABEL, pill.layout, "layout")}
+      <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-pill-hide-sub" checked={!pill.hideSub} onChange={(e) => set({ hideSub: !e.target.checked })} className="accent-[#D9FF43]" /> Show handle / title line</label>
+      {choice("Order", "order", PILL_ORDERS, PILL_ORDER_LABEL, pill.order, "order")}
+      {choice("Icon", "icon", PILL_ICON_MODES, PILL_ICON_MODE_LABEL, pill.icon, "icon")}
+      {choice("Box", "box", PILL_BOXES, PILL_BOX_LABEL, pill.box, "box")}
+      {nums.map((k) => <Slider key={k} label={PILL_NUM_LABEL[k]} testId={`vb-pill-${k}`} value={pill[k]} range={PILL_NUM_RANGE[k]} onChange={(n) => set({ [k]: n } as Partial<PillDesign>)} />)}
+      <span className="font-mono text-[10px] text-white/45">Live dot and icon show or hide with the Accents above. Auto order: dot · icon · text, or icon first when full-bleed. Full-bleed: the icon fills the pill{"'"}s height and hugs its side.</span>
+    </div>
+  )
+}
+
+/**
  * One strap design's values: name and subline text size and its accents (✓ = shown). Off accents are
  * not drawn, so the strap box shrinks to fit. Applies on Save, for every preset using this design.
  */
-function DesignValues({ style, design, onSize, onAccent, onColor, accent, text }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void; onColor: (colors: StrapDesign["colors"]) => void; accent: string; text: string }) {
+function DesignValues({ style, design, onSize, onAccent, onColor, onPill, onOneLine, accent, text }: { style: StrapStyle; design: StrapDesign; onSize: (p: Partial<Pick<StrapDesign, "nameSize" | "subSize">>) => void; onAccent: (a: (typeof STYLE_ACCENTS)[StrapStyle][number]) => void; onColor: (colors: StrapDesign["colors"]) => void; onPill: (pill: PillDesign | undefined) => void; onOneLine: (one: boolean) => void; accent: string; text: string }) {
   const c = strapColors(style, design, accent, text)
   const setColor = (k: StrapColorKey, v: string | null) => { const next = { ...(design.colors ?? {}) }; if (v === null) delete next[k]; else next[k] = v; onColor(Object.keys(next).length ? next : undefined) }
   return (
@@ -105,6 +145,12 @@ function DesignValues({ style, design, onSize, onAccent, onColor, accent, text }
           })}
         </div>
       </div>
+      {style === "line" ? (
+        <div className="grid gap-1"><Label>Text</Label>
+          <div className="flex gap-1">{([false, true] as const).map((one) => <button key={String(one)} type="button" data-testid={`vb-line-${one ? "inline" : "stack"}`} aria-pressed={Boolean(design.oneLine) === one} className={chip(Boolean(design.oneLine) === one)} onClick={() => onOneLine(one)}>{one ? "One line" : "Two lines"}</button>)}</div>
+        </div>
+      ) : null}
+      {style === "pill" ? <PillOptions pill={design.pill} onPill={onPill} /> : null}
       <div className="grid gap-1"><Label>Colours (each element on its own)</Label>
         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
           {STYLE_COLORS[style].map((k) => {
@@ -185,6 +231,30 @@ export function VisualsBuilder() {
     const r = await run(action, undefined)
     if (!r.ok && r.status !== 401) setNote({ tone: "error", text: r.error ?? `Failed (${r.status})` })
   }
+  const [cueing, setCueing] = useState<string | null>(null)
+  // Brief "done" labels on panel buttons (key → label), plus Delete's two-tap arm and the new-copy highlight.
+  const [flashes, setFlashes] = useState<Record<string, string>>({})
+  const flash = (key: string, text: string, ms = 1800) => {
+    setFlashes((f) => ({ ...f, [key]: text }))
+    window.setTimeout(() => setFlashes((f) => { if (f[key] !== text) return f; const n = { ...f }; delete n[key]; return n }), ms)
+  }
+  const [armedDelete, setArmedDelete] = useState<string | null>(null)
+  useEffect(() => { if (!armedDelete) return; const t = window.setTimeout(() => setArmedDelete(null), 3000); return () => window.clearTimeout(t) }, [armedDelete])
+  const [freshCopy, setFreshCopy] = useState<string | null>(null)
+  useEffect(() => {
+    if (!freshCopy) return
+    document.querySelector(`[data-testid="vb-strap-${freshCopy}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    const t = window.setTimeout(() => setFreshCopy(null), 2200); return () => window.clearTimeout(t)
+  }, [freshCopy])
+  const [cuedFlash, setCuedFlash] = useState<string | null>(null)
+  useEffect(() => { if (!cuedFlash) return; const t = window.setTimeout(() => setCuedFlash(null), 1800); return () => window.clearTimeout(t) }, [cuedFlash])
+  async function cue(id: string) {
+    setCueing(id)
+    const r = await run({ type: "strap", id }, undefined)
+    setCueing(null)
+    if (r.ok) setCuedFlash(id)
+    else if (r.status !== 401) setNote({ tone: "error", text: r.error ?? `Cue failed (${r.status})` })
+  }
   const visual = (a: Omit<Extract<TransportAction, { type: "visual" }>, "type">) => act({ type: "visual", ...a } as TransportAction)
 
   async function save() {
@@ -200,7 +270,8 @@ export function VisualsBuilder() {
       if (!res.ok) { setNote({ tone: "error", text: body.error ?? `Save failed (${res.status})` }); return }
       const next = await load()
       if (next) { setLoaded(next); setDraft(draftFrom(parseStage(next.stage))) }
-      setNote({ tone: "ok", text: "Saved" })
+      setNote({ tone: "ok", text: "Saved ✓" })
+      flash("save", "Saved")
     } finally {
       setSaving(false)
     }
@@ -220,7 +291,7 @@ export function VisualsBuilder() {
   const patchStrap = (id: string, p: Partial<StrapPreset>) => setStraps(straps.map((s) => (s.id === id ? { ...s, ...p } : s)))
   const setDesign = (style: StrapStyle, p: Partial<StrapDesign>) => setDraft({ ...draft, strapDesigns: { ...draft.strapDesigns, [style]: { ...draft.strapDesigns[style], ...p } } })
   const setTextScale = (k: TextScalePart, n: number) => setDraft({ ...draft, textScale: { ...draft.textScale, [k]: n } })
-  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} onColor={(colors) => setDesign(style, { colors })} accent={draft.strapAccent} text={draft.strapText} />
+  const designValues = (style: StrapStyle) => <DesignValues style={style} design={draft.strapDesigns[style]} onSize={(p) => setDesign(style, p)} onAccent={(a) => setDraft(toggleDraftAccent(draft, style, a))} onColor={(colors) => setDesign(style, { colors })} onPill={(pill) => setDesign(style, { pill })} onOneLine={(one) => setDesign(style, { oneLine: one || undefined })} accent={draft.strapAccent} text={draft.strapText} />
   const on: Record<LayoutPart | "ticker", boolean> = {
     ...(Object.fromEntries(LOGO_IDS.map((id) => [id, (live?.logosOn ?? []).includes(id)])) as Record<LogoId, boolean>),
     qr: live?.qrOn === true,
@@ -271,8 +342,8 @@ export function VisualsBuilder() {
         <div className="ml-auto flex items-center gap-2">
           {note ? <span data-testid="vb-note" className={`font-mono text-[11px] ${note.tone === "ok" ? "text-[#D9FF43]" : "text-[#FF3B3B]"}`}>{note.text}</span> : null}
           {dirty ? <span className="font-mono text-[11px] text-[#FF6A00]">Unsaved changes</span> : null}
-          <button type="button" data-testid="vb-revert" disabled={!dirty || saving} onClick={() => setDraft(draftFrom(savedStage))} className={btn}>Revert</button>
-          <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className="rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold text-[#0a0a0a] disabled:opacity-35">{saving ? "Saving…" : "Save"}</button>
+          <button type="button" data-testid="vb-revert" disabled={!dirty || saving} title={dirty ? "Throw away unsaved changes" : "Nothing to revert"} onClick={() => { setDraft(draftFrom(savedStage)); setArmedDelete(null); setNote({ tone: "ok", text: "Reverted to last save ✓" }); flash("revert", "Reverted") }} className={`${btn} ${flashes.revert ? "disabled:opacity-100 border-[#D9FF43]! text-[#D9FF43]!" : ""}`}>{flashes.revert ?? "Revert"}</button>
+          <button type="button" data-testid="vb-save" disabled={!dirty || saving} onClick={() => void save()} className={`rounded-full bg-[#D9FF43] px-4 py-1.5 font-mono text-[12px] font-bold whitespace-nowrap text-[#0a0a0a] transition-transform duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:active:scale-100 ${saving ? "animate-pulse" : ""} ${flashes.save ? "disabled:opacity-100" : ""}`}>{saving ? "Saving…" : flashes.save ?? "Save"}</button>
           <LinkPill link={link} testId="vb-link-state" />
 
         </div>
@@ -289,7 +360,7 @@ export function VisualsBuilder() {
           <ul className="m-0 grid list-none gap-1 p-0">
             {straps.map((s) => (
               <li key={s.id}>
-                <button type="button" data-testid={`vb-strap-${s.id}`} onClick={() => setSel({ kind: "strap", id: s.id })} className={`w-full rounded-[10px] px-2.5 py-2 text-left ${sel.kind === "strap" && sel.id === s.id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
+                <button type="button" data-testid={`vb-strap-${s.id}`} onClick={() => setSel({ kind: "strap", id: s.id })} className={`w-full rounded-[10px] px-2.5 py-2 text-left ${sel.kind === "strap" && sel.id === s.id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"} ${freshCopy === s.id ? "animate-pulse bg-[#D9FF43]/15 ring-2" : ""} transition-colors`}>
                   <span className="block text-[13px] font-semibold break-words">{s.name || "(no name)"}{live?.strapId === s.id ? <span className="ml-2 font-mono text-[9px] text-[#D9FF43]">CUED</span> : null}</span>
                   <span className="block font-mono text-[10px] text-white/50 break-words">{s.title || "—"} · {STRAP_STYLE_LABEL[s.style].split(" ")[0]}</span>
                 </button>
@@ -385,12 +456,44 @@ export function VisualsBuilder() {
                   <select data-testid="vb-strap-style" className={field} value={s.style} onChange={(e) => patchStrap(s.id, { style: e.target.value as StrapStyle })}>{STRAP_STYLES.map((p) => <option key={p} value={p}>{STRAP_STYLE_LABEL[p]}</option>)}</select></label>
                 <Label>{STRAP_STYLE_LABEL[s.style]} design (shared by every preset in this style)</Label>
                 {designValues(s.style)}
-                <p className="font-mono text-[10px] text-white/45">Applies on Save. A preset needs a name or a title.</p>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" data-testid="vb-strap-dup" disabled={straps.length >= STRAP_MAX} className={btn} onClick={() => setStraps(duplicateStrap(straps, s.id))}>Duplicate</button>
-                  <button type="button" data-testid="vb-strap-delete" className={`${btn} border-[#FF3B3B]/60 text-[#FF3B3B]`} onClick={() => { setStraps(deleteStrap(straps, s.id)); setSel({ kind: "part", part: "strap" }) }}>Delete</button>
-                  <button type="button" data-testid="vb-strap-cue" disabled={dirty || !savedStage.straps.some((x) => x.id === s.id)} title={dirty ? "Save first" : undefined} className={btn} onClick={() => void act({ type: "strap", id: s.id })}>Cue on deck <span className="text-[#FF6A00]">· live</span></button>
+                <div data-testid="vb-strap-mini" className="overflow-hidden rounded-[10px] bg-[repeating-conic-gradient(#222_0_25%,#2a2a2a_0_50%)] bg-[length:16px_16px] p-3" style={{ "--px": "0.34px" } as CSSProperties}>
+                  <NameStrap key={`${s.id}-${s.style}`} preset={s} visible look={{ style: s.style, motion: savedStage.strapMotion, accent: draft.strapAccent, text: draft.strapText, design: draft.strapDesigns[s.style] }} />
                 </div>
+                <p className="font-mono text-[10px] text-white/45">Live preview of this preset (the big preview shows it too). Applies on Save. A preset needs a name or a title.</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" data-testid="vb-strap-dup" disabled={straps.length >= STRAP_MAX} title={straps.length >= STRAP_MAX ? `Up to ${STRAP_MAX} presets` : "Copy this preset"}
+                    className={`${btn} ${flashes[`dup-${s.id}`] ? "border-[#D9FF43]! text-[#D9FF43]!" : ""}`}
+                    onClick={() => {
+                      const next = duplicateStrap(straps, s.id)
+                      const copy = next.find((x) => !straps.some((y) => y.id === x.id))
+                      if (!copy) { setNote({ tone: "error", text: `Could not duplicate (max ${STRAP_MAX} presets).` }); return }
+                      setStraps(next); setArmedDelete(null); setSel({ kind: "strap", id: copy.id }); setFreshCopy(copy.id)
+                      flash(`dup-${copy.id}`, "Duplicated"); setNote({ tone: "ok", text: `Duplicated as “${copy.name}”. Save to keep it.` })
+                    }}>{flashes[`dup-${s.id}`] ?? "Duplicate"}</button>
+                  <button type="button" data-testid="vb-strap-delete" data-armed={armedDelete === s.id ? "1" : undefined} aria-live="polite"
+                    title={armedDelete === s.id ? "Tap again within 3 s to delete" : "Delete this preset (asks to confirm)"}
+                    className={`${btn} ${armedDelete === s.id ? "border-[#FF3B3B]! bg-[#FF3B3B] font-bold text-white! animate-pulse" : "border-[#FF3B3B]/60 text-[#FF3B3B]!"}`}
+                    onClick={() => {
+                      if (armedDelete !== s.id) { setArmedDelete(s.id); return }
+                      const name = s.name || "(no name)"
+                      setArmedDelete(null); setStraps(deleteStrap(straps, s.id)); setSel({ kind: "part", part: "strap" })
+                      setNote({ tone: "ok", text: `Deleted “${name}” ✓ — Save to confirm, or Revert to undo.` })
+                    }}>{armedDelete === s.id ? "Tap again to delete" : "Delete"}</button>
+                  {(() => {
+                    const cs = cueState(live, s.id)
+                    const unsaved = !savedStage.straps.some((x) => x.id === s.id)
+                    const busy = cueing === s.id
+                    const flash = cuedFlash === s.id
+                    const look = cs === "live" ? "border-[#FF6A00]! bg-[#FF6A00] text-black!" : cs === "cued" ? "border-[#D9FF43]! bg-[#D9FF43] text-black!" : ""
+                    const label = busy ? "Cueing…" : cs === "live" ? "● On air now" : flash ? "Cued" : cs === "cued" ? "Cued on deck" : <>Cue on deck <span className="text-[#FF6A00]">· live</span></>
+                    return (
+                      <button type="button" data-testid="vb-strap-cue" data-cue={cs} aria-pressed={cs !== "idle"} aria-live="polite" disabled={busy || cs !== "idle" || dirty || unsaved}
+                        title={cs === "live" ? "This preset is on air. Take it off from the deck." : cs === "cued" ? "Already cued on the deck. Put it on air from the deck." : dirty ? "Save first" : unsaved ? "Save this preset first" : "Cue this preset on the deck (live)"}
+                        className={`${btn} transition-[transform,background-color,color] duration-150 active:scale-95 ${look} ${cs !== "idle" ? "disabled:opacity-100" : ""} ${busy ? "animate-pulse" : ""}`} onClick={() => void cue(s.id)}>{label}</button>
+                    )
+                  })()}
+                </div>
+                {cueState(live, s.id) === "idle" && (dirty || !savedStage.straps.some((x) => x.id === s.id)) ? <p data-testid="vb-strap-cue-hint" className="font-mono text-[10px] text-white/45">Save to cue this preset on the deck.</p> : null}
               </div>
             )
           })() : sel.kind === "scene" ? (() => {
@@ -492,6 +595,9 @@ export function VisualsBuilder() {
                         onClick={() => (deckCorner ? void act(part === "strap" ? { type: "strap", corner: c } : { type: "socials", corner: c }) : set({ corner: c, ...(c !== p.corner ? { dx: 0, dy: 0 } : {}) }))}>{CORNER_LABEL[c]}</button>
                     })}
                   </div>
+                  {part === "strap" ? (
+                    <button type="button" data-testid="vb-center" aria-pressed={Boolean(p.center)} className={`${chip(Boolean(p.center))} justify-self-start`} onClick={() => set({ center: !p.center, ...(!p.center ? { dx: 0 } : {}) })}>Centre (top or bottom)</button>
+                  ) : null}
                 </div>
                 <div className="grid gap-1"><Label>Snap to</Label>
                   <div className="flex gap-1">{(["safe", "edge"] as const).map((s) => <button key={s} type="button" data-testid={`vb-snap-${s}`} aria-pressed={p.snap === s} className={chip(p.snap === s)} onClick={() => set({ snap: s })}>{s === "safe" ? "Safe 5%" : `Edge ${EDGE_PX}px`}</button>)}</div>

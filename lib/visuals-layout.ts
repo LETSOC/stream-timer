@@ -20,9 +20,12 @@ export const EDGE_PX = 32
 /** Gaps span the whole 1920x1080 frame from any corner (a part can sit anywhere, not just near its corner). */
 export const GAP_X_RANGE = { min: 0, max: 1800 } as const
 export const GAP_Y_RANGE = { min: 0, max: 1000 } as const
+/** Frame width (px @1080p): a centred part anchors on its middle. */
+export const FRAME_W = 1920
 export const SIZE_RANGE = { min: 50, max: 200 } as const
 
-export type PartPlace = { corner: Corner; snap: Snap; dx: number; dy: number; size: number }
+/** center: centred across the frame (the corner then only picks top or bottom; X gap nudges right of centre). */
+export type PartPlace = { corner: Corner; snap: Snap; dx: number; dy: number; size: number; center?: boolean }
 export type ScreenLayout = Record<LayoutPart, PartPlace>
 export type VisualsLayout = Record<LayoutScreen, ScreenLayout>
 
@@ -84,6 +87,7 @@ export function parsePlace(value: unknown, fallback: PartPlace): PartPlace {
     dx: num(r.dx, GAP_X_RANGE, fallback.dx),
     dy: num(r.dy, GAP_Y_RANGE, fallback.dy),
     size: num(r.size, SIZE_RANGE, fallback.size),
+    ...((r.center === undefined ? fallback.center : r.center === true) ? { center: true } : {}),
   }
 }
 
@@ -110,14 +114,14 @@ export function placeOffsets(p: PartPlace, inset = 0, lift = 0, corner: Corner =
   const bx = (p.snap === "edge" ? EDGE_PX : SAFE_X_PX) + inset + p.dx
   const by = (p.snap === "edge" ? EDGE_PX : SAFE_Y_PX) + inset + p.dy
   return {
-    ...(corner.endsWith("right") ? { right: bx } : { left: bx }),
+    ...(p.center ? { left: FRAME_W / 2 + p.dx } : corner.endsWith("right") ? { right: bx } : { left: bx }),
     ...(corner.startsWith("top") ? { top: by } : { bottom: by + lift }),
   }
 }
 
 /** CSS transform-origin for scaling a part from its anchored corner. */
-export function cornerOrigin(corner: Corner): string {
-  return `${corner.startsWith("top") ? "top" : "bottom"} ${corner.endsWith("right") ? "right" : "left"}`
+export function cornerOrigin(corner: Corner, center = false): string {
+  return `${corner.startsWith("top") ? "top" : "bottom"} ${center ? "center" : corner.endsWith("right") ? "right" : "left"}`
 }
 
 /** Program strap/socials follow the deck corner buttons; everything else uses the layout corner. */
