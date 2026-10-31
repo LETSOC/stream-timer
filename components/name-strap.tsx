@@ -1,9 +1,10 @@
 "use client"
 
-import type { CSSProperties } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import { PlatformIcon } from "@/components/platform-icon"
 import { DEFAULT_STRAP_DESIGN, strapAccentOn, strapColors, type StrapDesign, type StrapMotion, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 import { cn } from "@/lib/utils"
+import { pillIconSide, pillOrder, pillPadding, type PillDesign } from "@/lib/strap-pill"
 
 export type StrapLook = {
   style: StrapStyle
@@ -52,8 +53,8 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
   )
   return (
     <div className="strap-scale" style={{ "--strap-px0": "var(--px)" } as CSSProperties}>
-      <div data-testid="name-strap" data-style={look.style} data-motion={look.motion} data-visible={visible ? "1" : "0"} data-name-size={design.nameSize} data-sub-size={design.subSize}
-        className={cn("strap", `strap-${look.style}`, `strap-m-${look.motion}`, visible ? "strap-on" : "strap-off", (look.style === "line" || look.style === "house") && !has("bar") && "strap-no-bar")} style={vars}>
+      <div data-testid="name-strap" data-style={look.style} data-motion={look.motion} data-visible={visible ? "1" : "0"} data-name-size={design.nameSize} data-sub-size={design.subSize} data-one-line={look.style === "line" && design.oneLine ? "1" : undefined}
+        className={cn("strap", `strap-${look.style}`, `strap-m-${look.motion}`, visible ? "strap-on" : "strap-off", (look.style === "line" || look.style === "house") && !has("bar") && "strap-no-bar", look.style === "line" && design.oneLine && "strap-one-line")} style={vars}>
         {look.style === "house" ? (
           <div className="strap-body">
             {has("dot") ? <span data-testid="strap-accent-circle" className="strap-dot" /> : null}
@@ -76,6 +77,8 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
               </span>
             ) : null}
           </div>
+        ) : look.style === "pill" && design.pill ? (
+          <PillBody pill={design.pill} live={has("live")} icon={icon ? <PlatformIcon platform={preset.platform} className="strap-pill-icon" bg={c.icon} /> : null} name={preset.name} sub={design.pill.hideSub ? "" : handle || preset.title} />
         ) : look.style === "pill" ? (
           <div className="strap-body">
             {has("live") ? <span data-testid="strap-live-dot" className="strap-live-dot" aria-hidden /> : null}
@@ -93,6 +96,46 @@ export function NameStrap({ preset, look, visible }: { preset: Pick<StrapPreset,
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+const u = (n: number) => `calc(${n} * var(--px))`
+
+/**
+ * Social pill with layout options (StrapDesign.pill): one or two text lines, element order, inline or
+ * full-bleed icon (as tall as the pill's inside, hugging its side), solid / glass / outline box, sizes.
+ * Full-bleed icon size = text block height (line-height 1.2) + 2 × Padding Y.
+ */
+function PillBody({ pill, live, icon, name, sub }: { pill: PillDesign; live: boolean; icon: ReactNode; name: string; sub: string }) {
+  const parts = pillOrder(pill, { dot: live, icon: Boolean(icon) })
+  const side = pillIconSide(parts)
+  const full = pill.icon === "full" && side !== "none"
+  const [pt, pr, pb, pl] = pillPadding(pill, side)
+  const nameH = "calc(34 * 1.2 * var(--px))"
+  const subH = "calc(22 * 1.2 * var(--strap-sub-px))"
+  const textH = !sub ? nameH : pill.layout === "inline" ? `max(${nameH}, ${subH})` : `calc(${nameH} + ${subH} + ${pill.lineGap} * var(--strap-sub-px))`
+  const iconPx = full ? `calc(${textH} + ${2 * pill.padY} * var(--px))` : u(pill.iconSize)
+  const style = {
+    padding: `${u(pt)} ${u(pr)} ${u(pb)} ${u(pl)}`,
+    gap: u(pill.gap),
+    borderWidth: u(pill.border),
+    "--pill-icon": iconPx,
+    "--pill-dot": u(pill.dotSize),
+    "--pill-line-gap": pill.lineGap,
+    "--pill-blur": u(pill.blur),
+  } as CSSProperties
+  return (
+    <div className={cn("strap-body", "strap-pill-x", `strap-pill-${pill.layout}`, `strap-pill-box-${pill.box}`, full && "strap-pill-full")} data-pill-order={parts.join("-")} data-pill-icon={pill.icon} data-pill-layout={pill.layout} style={style}>
+      {parts.map((part) =>
+        part === "dot" ? <span key="dot" data-testid="strap-live-dot" className="strap-live-dot" aria-hidden />
+        : part === "icon" ? <span key="icon" className="strap-pill-icon-wrap">{icon}</span>
+        : (
+          <div key="text" className="strap-lines">
+            <span className="strap-name">{name}</span>
+            {sub ? <span className="strap-title">{sub}</span> : null}
+          </div>
+        ))}
     </div>
   )
 }
