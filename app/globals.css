@@ -537,3 +537,21 @@ html:has([data-desk-root]) body {
 .strap.strap-block .strap-title { background: var(--sc-box2); }
 .strap.strap-pill .strap-body { background: color-mix(in srgb, var(--sc-box) 90%, transparent); border-color: var(--sc-bar); }
 .strap.strap-gradient .strap-body { background: linear-gradient(90deg, var(--sc-box) 0%, #6a5ee0 45%, var(--sc-grad) 100%); }
+
+/* Social pill layout options (StrapDesign.pill, lib/strap-pill.ts). Only drawn with .strap-pill-x, so the
+   classic pill above is untouched. Padding, gap and border width come inline from NameStrap. */
+.strap.strap-pill .strap-pill-x { display: inline-flex; align-items: center; border-style: solid; }
+.strap-pill .strap-pill-x .strap-pill-icon-wrap { display: inline-flex; flex: none; }
+.strap-pill .strap-pill-x .strap-pill-icon { font-size: var(--pill-icon); }
+.strap-pill .strap-pill-x .strap-live-dot { width: var(--pill-dot); height: var(--pill-dot); }
+.strap-pill .strap-pill-x .strap-title { margin-top: calc(var(--pill-line-gap) * var(--px)); }
+.strap-pill .strap-pill-inline .strap-lines { display: flex; align-items: baseline; gap: calc(12 * var(--strap-sub-px)); white-space: nowrap; }
+.strap-pill .strap-pill-inline .strap-title { margin-top: 0; }
+.strap-pill .strap-pill-full .strap-name, .strap-pill .strap-pill-full .strap-title { line-height: 1.2; }
+.strap-pill .strap-pill-full .strap-pill-icon { box-shadow: 0 0 0 calc(3 * var(--px)) #fff inset; }
+.strap.strap-pill .strap-pill-box-glass { background: color-mix(in srgb, var(--sc-box) 82%, transparent); backdrop-filter: blur(var(--pill-blur)) saturate(1.2); -webkit-backdrop-filter: blur(var(--pill-blur)) saturate(1.2); box-shadow: 0 calc(8 * var(--px)) calc(32 * var(--px)) rgba(0, 0, 0, 0.4); }
+.strap.strap-pill .strap-pill-box-outline { background: transparent; }
+
+/* Minimal line strap: one-line text option (StrapDesign.oneLine). Name, title and handle on one row. */
+.strap-line.strap-one-line .strap-lines { display: flex; align-items: baseline; gap: calc(18 * var(--px)); white-space: nowrap; }
+.strap-line.strap-one-line .strap-title, .strap-line.strap-one-line .strap-social { margin-top: 0; }
