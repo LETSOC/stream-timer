@@ -4,8 +4,8 @@ import { DEFAULT_SCENES, MAIN_SCENE_IDS, SCENE_IDS, TALK_SCENE_IDS, isScene, isT
 import { CARD_OVERLAYS, parseStage } from "@/lib/stage"
 import { deskCoverNext } from "@/lib/scene-handoff"
 
-test("Scenes - Talks: four cards talk01–04, default Left, every classic option present", () => {
-  assert.deepEqual([...TALK_SCENE_IDS], ["talk01", "talk02", "talk03", "talk04"])
+test("Scenes - Talks: eight cards talk01–08, default Left, every classic option present", () => {
+  assert.deepEqual([...TALK_SCENE_IDS], ["talk01", "talk02", "talk03", "talk04", "talk05", "talk06", "talk07", "talk08"])
   for (const id of TALK_SCENE_IDS) {
     assert.ok(isScene(id) && isTalkScene(id))
     assert.ok((CARD_OVERLAYS as readonly string[]).includes(id))
@@ -84,4 +84,41 @@ test("scene subline renders at full opacity (same colour as the label)", async (
   const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8")
   const rule = css.match(/\.scene-sub \{[^}]*\}/)?.[0] ?? ""
   assert.ok(rule && !/opacity|color|filter/.test(rule), rule)
+})
+
+test("TALKS 05–08 exist with labels and the same options", () => {
+  for (const id of ["talk05", "talk06", "talk07", "talk08"] as const) {
+    assert.ok(isTalkScene(id))
+    assert.equal(DEFAULT_SCENES[id].pill, `TALKS ${id.slice(4)}`)
+    assert.equal(parseScene({ align: "right", labelPx: 90, textWidth: 50, label: "A\nB" }, DEFAULT_SCENES[id]).align, "right")
+  }
+  const stage = parseStage({ overlay: "talk08" })
+  assert.equal(stage.overlay, "talk08")
+})
+
+test("imageFront: default off, validated, survives save round-trip", () => {
+  for (const id of SCENE_IDS) assert.equal(DEFAULT_SCENES[id].imageFront, false)
+  assert.equal(parseScene({ imageFront: true }, DEFAULT_SCENES.talk05).imageFront, true)
+  assert.equal(parseScene({ imageFront: "yes" }, DEFAULT_SCENES.talk05).imageFront, false)
+  const saved = parseScenes({ talk07: { imageFront: true, image: "/uploads/logo.png", bgMode: "image" } })
+  const again = parseScenes(JSON.parse(JSON.stringify(saved)))
+  assert.equal(again.talk07.imageFront, true)
+  assert.equal(parseStage({ scenes: saved }).scenes.talk07.imageFront, true)
+  assert.equal(parseScenes({ hold05: { label: "x" } }).hold05.imageFront, false)
+})
+
+test("imageFront render: image layer above everything, QR on top of it; off = classic order", async () => {
+  const React = await import("react")
+  const { renderToStaticMarkup } = await import("react-dom/server")
+  const { SceneCardView } = await import("@/components/visual-assets")
+  const qr = { url: "https://example.com" } as never
+  const base = { ...DEFAULT_SCENES.talk05, bgMode: "image" as const, image: "/uploads/a.png", video: "/uploads/v.mp4", videoFront: true }
+  const on = renderToStaticMarkup(React.createElement(SceneCardView, { id: "talk05", card: { ...base, imageFront: true }, qr, now: 0 }))
+  const iTop = on.indexOf("scene-image-top-talk05"), iVid = on.indexOf("scene-video-talk05"), iQr = on.indexOf("scene-qr")
+  assert.ok(iVid > 0 && iTop > iVid && iQr > iTop, "front video < image < QR")
+  assert.doesNotMatch(on, /background-image:url/)
+  const off = renderToStaticMarkup(React.createElement(SceneCardView, { id: "talk05", card: { ...base, videoFront: false }, qr, now: 0 }))
+  assert.doesNotMatch(off, /scene-image-top/)
+  const hero = renderToStaticMarkup(React.createElement(SceneCardView, { id: "talk05", card: { ...base, video: "", bgMode: "hero", imageFront: true }, qr, now: 0 }))
+  assert.match(hero, /scene-hero-top/)
 })
