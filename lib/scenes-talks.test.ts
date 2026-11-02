@@ -69,7 +69,8 @@ test("scene font sizes: defaults 144/26, clamped, old data keeps defaults", asyn
 test("scene label/subline keep manual line breaks, sanitised", async () => {
   const { sceneLines, sceneOneLine } = await import("@/lib/visuals-assets")
   const c = parseScene({ label: "Grace  Hopper\r\non compilers\n\n\nand more", sub: "  one  line  " }, DEFAULT_SCENES.talk02)
-  assert.equal(c.label, "Grace Hopper\non compilers\nand more")
+  assert.equal(c.label, "Grace Hopper\non compilers") // capped at 4 lines, trailing blanks dropped
+  assert.equal(sceneLines("\n\nA\n\nB\n\n"), "A\n\nB")
   assert.equal(c.sub, "one line")
   assert.equal(sceneLines("a\nb\nc\nd\ne\nf"), "a\nb\nc\nd")
   assert.equal(sceneLines("<b>x</b>\ny"), "<b>x</b>\ny") // stays text; React renders it escaped
