@@ -48,3 +48,23 @@ export const PROGRAM_FADE_TAIL_MS = 400
 export function sceneTailNext(input: { from: string; to: string; fromIsScene: boolean }): string | null {
   return input.to === "program" && input.fromIsScene ? input.from : null
 }
+
+/**
+ * Desk card → scene (hold, break, welcome, countdown or end card → a Visuals scene): the desk card stays
+ * on top, untouched, until the incoming scene's video has painted (or HANDOFF_MAX_MS), so the cut never
+ * shows black or the scene's bare background. Returns { from: desk card kept, scene: scene waited on }.
+ */
+export type DeskCover = { from: string; scene: string }
+
+export function deskCoverNext(input: { cover: DeskCover | null; from: string; to: string; fromIsScene: boolean; toIsScene: boolean }): DeskCover | null {
+  if (!input.toIsScene) return null
+  // Scene → scene while the desk card still covers: keep the desk card up, now waiting on the newest scene.
+  if (input.fromIsScene) return input.cover !== null ? { from: input.cover.from, scene: input.to } : null
+  if (input.from === "program") return null // program → scene has its own cover (programCoverNext)
+  return { from: input.from, scene: input.to }
+}
+
+/** A scene reports its first frame: only the scene being waited on drops the desk card cover. */
+export function deskCoverReady(cover: DeskCover | null, id: string): DeskCover | null {
+  return cover !== null && cover.scene === id ? null : cover
+}
