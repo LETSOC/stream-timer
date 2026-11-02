@@ -514,6 +514,9 @@ html:has([data-desk-root]) body {
 .scene-align-left .scene-center > *, .scene-align-right .scene-center > * { max-width: calc(100% - 210 * var(--px)); }
 /* Font size controls: long text wraps; on Talks cards it stays inside the 5% box (title max 3 lines, subline max 2). */
 .scene-title, .scene-sub { overflow-wrap: anywhere; white-space: pre-line; }
+/* Text box width (builder slider, 30–100%): squeezes the label + subline so they wrap to more lines. 100% = unchanged. */
+.scene-center[style*="--scene-text-w"] > :is(.scene-title, .scene-sub) { max-width: calc(100% * var(--scene-text-w)); }
+.scene-align-left .scene-center[style*="--scene-text-w"] > :is(.scene-title, .scene-sub), .scene-align-right .scene-center[style*="--scene-text-w"] > :is(.scene-title, .scene-sub) { max-width: calc((100% - 210 * var(--px)) * var(--scene-text-w)); }
 .scene-align-left :is(.scene-title, .scene-sub), .scene-align-right :is(.scene-title, .scene-sub) { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 .scene-align-left .scene-title, .scene-align-right .scene-title { -webkit-line-clamp: 3; line-clamp: 3; padding-bottom: 0.1em; }
 .scene-align-left .scene-sub, .scene-align-right .scene-sub { -webkit-line-clamp: 2; line-clamp: 2; }
