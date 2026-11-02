@@ -57,7 +57,7 @@ import { DraftBar, readStoredDrafts, useSectionDrafts } from "@/components/secti
 import { OverlayCard } from "@/components/overlay-card"
 import type { SpeakerCard } from "@/lib/event"
 import { ConfirmButton } from "@/components/confirm-button"
-import { isScene, SCENE_IDS, type SceneId } from "@/lib/visuals-assets"
+import { isScene, SCENE_IDS, TALK_SCENE_IDS, type SceneId } from "@/lib/visuals-assets"
 import { SceneCardView } from "@/components/visual-assets"
 import { VisualsDeskSection } from "@/components/visuals-desk"
 import { VerticalCard } from "@/components/vertical-output"
@@ -1127,6 +1127,11 @@ export function OperatorConsole() {
               {DESK_CARDS.map(([id, name]) => <ConfirmButton key={id} data-testid={`show-${id}`} data-group="desk" data-on={overlay === id ? "1" : undefined} className={`${pillClass(overlay === id ? "deskOn" : "desk")} whitespace-nowrap`} confirmLabel={`Show ${name.toLowerCase()} · confirm`} onConfirm={() => showScreen(id)}>{busyLabel(id, overlay === id ? `● ${name} card on` : `Show ${name.toLowerCase()} card`)}</ConfirmButton>)}
               <p data-testid="cards-visuals-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#6927da] uppercase">Visuals</p>
               {[...SCENE_IDS.filter((id) => id.startsWith("hold")), "showreel" as const, "standby" as const].map((id) => {
+                const name = SCENE_DESK_LABEL[id]
+                return <ConfirmButton key={id} data-testid={`show-${id}`} data-group="visuals" data-on={overlay === id ? "1" : undefined} className={`${pillClass(overlay === id ? "visualsOn" : "visuals")} whitespace-nowrap`} confirmLabel={`Show ${name} · confirm`} onConfirm={() => showScreen(id)}>{busyLabel(id, overlay === id ? `● ${name} on` : `Show ${name}`)}</ConfirmButton>
+              })}
+              <p data-testid="cards-talks-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#6927da] uppercase">Scenes - Talks</p>
+              {TALK_SCENE_IDS.map((id) => {
                 const name = SCENE_DESK_LABEL[id]
                 return <ConfirmButton key={id} data-testid={`show-${id}`} data-group="visuals" data-on={overlay === id ? "1" : undefined} className={`${pillClass(overlay === id ? "visualsOn" : "visuals")} whitespace-nowrap`} confirmLabel={`Show ${name} · confirm`} onConfirm={() => showScreen(id)}>{busyLabel(id, overlay === id ? `● ${name} on` : `Show ${name}`)}</ConfirmButton>
               })}
@@ -2765,7 +2770,7 @@ function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; b
 
 /** The original desk cards (blue on the desk, Transport › Desk). */
 const DESK_CARDS = [["welcome", "Welcome"], ["break", "Break"], ["hold", "Hold"]] as const
-const SCENE_DESK_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby", showreel: "Showreel" }
+const SCENE_DESK_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby", showreel: "Showreel", talk01: "Talks 01", talk02: "Talks 02", talk03: "Talks 03", talk04: "Talks 04" }
 const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "strapDesigns", "textScale", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes", "slateLook", "countdownBg", "endBg", "breakBg", "holdBg", "standbyBg", "welcomeBg"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
