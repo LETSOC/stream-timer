@@ -46,3 +46,12 @@ test("desk card → Talks card uses the same seamless handoff cover", () => {
   const cover = deskCoverNext({ cover: null, from: "hold", to: "talk01", fromIsScene: false, toIsScene: isScene("talk01") })
   assert.ok(cover && cover.from === "hold")
 })
+
+test("Talks layout CSS: content, pill and QR on the 5% safe line (96/54 of 1920x1080)", async () => {
+  const fs = await import("node:fs")
+  const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8")
+  assert.match(css, /--talk-safe-x: calc\(96 \* var\(--vl-px0, var\(--px\)\)\); --talk-safe-y: calc\(54 \*/)
+  assert.match(css, /\.scene-align-left \.scene-pill \{ left: var\(--talk-safe-x\)/)
+  assert.match(css, /\.scene-align-right \.scene-qr \{ right: auto; left: var\(--talk-safe-x\); bottom: var\(--talk-safe-y\)/)
+  assert.doesNotMatch(css, /scene-align-[a-z]+[^}]*160 \*/)
+})
