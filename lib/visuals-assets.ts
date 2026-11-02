@@ -53,7 +53,7 @@ const TEXT_MAX = 120
 
 const hex = (v: unknown, f: string) => (typeof v === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v.trim()) ? v.trim().toLowerCase() : f)
 /** Scene title / subline: keeps manual line breaks (max 4 lines), collapses other whitespace. Rendered as text, never HTML. */
-export const sceneLines = (v: unknown, f = ""): string => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4).join("\n").slice(0, TEXT_MAX) : f)
+export const sceneLines = (v: unknown, f = ""): string => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/\s+/g, " ").trim()).join("\n").replace(/^\n+|\n+$/g, "").split("\n").slice(0, 4).join("\n").replace(/\n+$/, "").slice(0, TEXT_MAX) : f)
 /** One-line form of a scene text (desk / deck labels). */
 export const sceneOneLine = (v: string): string => v.replace(/\s*\n\s*/g, " ")
 const line = (v: unknown, f = "") => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX) : f)
@@ -219,14 +219,15 @@ export const TALK_ALIGNS = ["left", "right"] as const satisfies readonly SceneAl
 /** Scene title / subline font sizes (px at 1080p). Defaults = the design sizes (144 / 26). */
 export const SCENE_LABEL_PX = { min: 48, max: 200, def: 144 } as const
 export const SCENE_SUB_PX = { min: 14, max: 72, def: 26 } as const
+export const SCENE_TEXT_WIDTH = { min: 30, max: 100, def: 100 } as const
 const clampPx = (v: unknown, r: { min: number; max: number }, f: number) => typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(r.max, Math.max(r.min, v))) : f
 export const SCENE_BG_MODES = ["solid", "image", "hero"] as const
 export type SceneBgMode = (typeof SCENE_BG_MODES)[number]
 export const SCENE_PILL_PLACES = ["top", "bottom"] as const
 export type ScenePillPlace = (typeof SCENE_PILL_PLACES)[number]
-export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | ""; /** Pill text size % (TEXT_SCALE_RANGE, 100 = design size), like the Q&A / Sponsored pills. */ pillSize: number; /** Pill on the top or bottom safe guide (grows away from it). */ pillPlace: ScenePillPlace; /** Colour layer over a background video (only when the video is behind the text). */ overlayOn: boolean; overlayColor: string; /** 0–100 % */ overlayOpacity: number; /** Text block + media position. Talks cards: left / right (default left). */ align: SceneAlign; /** Title font size, px at 1920×1080 (scales with --px). */ labelPx: number; /** Subline font size, px at 1920×1080. */ subPx: number }
+export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | ""; /** Pill text size % (TEXT_SCALE_RANGE, 100 = design size), like the Q&A / Sponsored pills. */ pillSize: number; /** Pill on the top or bottom safe guide (grows away from it). */ pillPlace: ScenePillPlace; /** Colour layer over a background video (only when the video is behind the text). */ overlayOn: boolean; overlayColor: string; /** 0–100 % */ overlayOpacity: number; /** Text block + media position. Talks cards: left / right (default left). */ align: SceneAlign; /** Title font size, px at 1920×1080 (scales with --px). */ labelPx: number; /** Subline font size, px at 1920×1080. */ subPx: number; /** Text box width, % of the space available (30–100). Smaller = more lines. */ textWidth: number }
 
-const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", pillSize: 100, pillPlace: "top", overlayOn: false, overlayColor: "#000000", overlayOpacity: 40, align: "center", labelPx: SCENE_LABEL_PX.def, subPx: SCENE_SUB_PX.def, ...extra })
+const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", pillSize: 100, pillPlace: "top", overlayOn: false, overlayColor: "#000000", overlayOpacity: 40, align: "center", labelPx: SCENE_LABEL_PX.def, subPx: SCENE_SUB_PX.def, textWidth: SCENE_TEXT_WIDTH.def, ...extra })
 export const DEFAULT_SCENES: Record<SceneId, SceneCard> = {
   hold05: scene("Break", "Stretch • Refill • 15 min", "#c6ff00", "HOLD 05 • BREAK"),
   hold06: scene("Starting Soon", "Doors opening • Get comfy", "#ffd400", "HOLD 06 • STARTING SOON"),
@@ -277,6 +278,7 @@ export function parseScene(v: unknown, f: SceneCard): SceneCard {
     align: f.align === "center" ? "center" : r.align === "left" || r.align === "right" ? r.align : f.align,
     labelPx: clampPx(r.labelPx, SCENE_LABEL_PX, f.labelPx),
     subPx: clampPx(r.subPx, SCENE_SUB_PX, f.subPx),
+    textWidth: clampPx(r.textWidth, SCENE_TEXT_WIDTH, f.textWidth),
   }
 }
 export function parseScenes(v: unknown, base: Record<SceneId, SceneCard> = DEFAULT_SCENES): Record<SceneId, SceneCard> {
