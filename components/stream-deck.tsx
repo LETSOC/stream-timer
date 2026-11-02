@@ -21,14 +21,14 @@ import { StreamPlayer } from "@/components/stream-player"
 import { remainingUntil } from "@/lib/countdown"
 import { ProgramPlayer, programOperatorSrc } from "@/components/program-feed"
 import { CARD_OVERLAYS } from "@/lib/stage"
-import { isScene } from "@/lib/visuals-assets"
+import { isScene, isTalkScene } from "@/lib/visuals-assets"
 import { fetchT } from "@/lib/fetch-timeout"
 import { usePoll } from "@/lib/use-poll"
 import { deckScreen, effectiveNow, endCardAt, END_STEPS, endsLabel, formatOffset, eventTarget, EXTENDS, extendTarget, isRisky, JUMPS, lockedInLive, type DeckState, type Screen, type TransportAction } from "@/lib/transport"
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
-const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", program: "Program (OBS)", end: "End card" }
+const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", talk01: "Talks 01", talk02: "Talks 02", talk03: "Talks 03", talk04: "Talks 04", program: "Program (OBS)", end: "End card" }
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling (no WebSocket)", offline: "Offline" }
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
@@ -278,7 +278,9 @@ export function StreamDeck() {
         <p data-testid="deck-cards-desk-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#84caff] uppercase">Desk</p>
         {CARD_OVERLAYS.filter((name) => !isScene(name)).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "deskOn" : "desk"))}
         <p data-testid="deck-cards-visuals-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#bdb4fe] uppercase">Visuals</p>
-        {CARD_OVERLAYS.filter((name) => isScene(name)).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "visualsOn" : "visuals"))}
+        {CARD_OVERLAYS.filter((name) => isScene(name) && !isTalkScene(name)).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "visualsOn" : "visuals"))}
+        <p data-testid="deck-cards-talks-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#bdb4fe] uppercase">Scenes - Talks</p>
+        {CARD_OVERLAYS.filter((name) => isTalkScene(name)).map((name) => button(`screen-${name}`, { type: "screen", screen: name }, screen === name ? `● ${SCREEN_LABEL[name]}` : SCREEN_LABEL[name], screen === name ? "visualsOn" : "visuals"))}
         {button("screen-program", { type: "screen", screen: "program" }, state?.program ? (screen === "program" ? "● Program (OBS)" : screen === "end" ? "Program · end card over it (tap to stay on)" : "● Program (under card)") : "Show program (OBS)", state?.program ? "on" : "solid", "col-span-2")}
         {state?.program && state.programReady === false ? <p data-testid="deck-program-waiting" className="col-span-2 font-mono text-[12px] text-[#fdb022]">OBS isn{"'"}t sending to /program: /stream shows &ldquo;Waiting for OBS&rdquo;.</p> : null}
         {/* Always shown (like the desk): disarmed feeds stay visible with a two-tap Arm, even with both off. */}
