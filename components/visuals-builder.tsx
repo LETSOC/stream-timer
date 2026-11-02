@@ -536,6 +536,7 @@ export function VisualsBuilder() {
                     <FilePicker testId="vb-scene-image" label="Choose image" accept="image/png,image/jpeg,image/webp" busy={uploader.busy} onFile={(f) => void upload(f, "card", `vb-scene-image-${id}`).then((url) => url && setScene(id, { image: url }))} />
                   <UploadProgress state={uploader.state} tag={`vb-scene-image-${id}`} />
                     {c.image ? <span className="font-mono text-[10px] text-white/50">{c.image} <button type="button" className="underline" onClick={() => setScene(id, { image: "" })}>remove</button></span> : null}
+                    <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" data-testid="vb-scene-imagefront" checked={c.imageFront} onChange={(e) => setScene(id, { imageFront: e.target.checked })} className="accent-[#D9FF43]" /> Image on top (under QR)</label>
                   </div>
                 ) : null}
                 {c.bgMode === "image" ? <Slider label="Dim" testId="vb-scene-dim" unit="%" value={c.dim} range={{ min: 0, max: 90 }} onChange={(n) => setScene(id, { dim: n })} /> : null}
