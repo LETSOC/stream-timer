@@ -28,7 +28,7 @@ import { deckScreen, effectiveNow, endCardAt, END_STEPS, endsLabel, formatOffset
 import { useDeckSocket, type DeckLink } from "@/lib/use-deck-socket"
 import type { EventConfig } from "@/lib/event"
 
-const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", talk01: "Talks 01", talk02: "Talks 02", talk03: "Talks 03", talk04: "Talks 04", program: "Program (OBS)", end: "End card" }
+const SCREEN_LABEL: Record<Screen, string> = { countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", talk01: "Talks 01", talk02: "Talks 02", talk03: "Talks 03", talk04: "Talks 04", talk05: "Talks 05", talk06: "Talks 06", talk07: "Talks 07", talk08: "Talks 08", program: "Program (OBS)", end: "End card" }
 const LINK_LABEL: Record<DeckLink, string> = { connecting: "Connecting…", live: "Live sync", polling: "Polling (no WebSocket)", offline: "Offline" }
 const LINK_TONE: Record<DeckLink, string> = { connecting: "bg-white/40", live: "bg-[#12b76a]", polling: "bg-[#f79009]", offline: "bg-[#f04438]" }
 
