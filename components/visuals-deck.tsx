@@ -23,8 +23,8 @@ import { LinkPill } from "@/components/link-pill"
 const DESK_SCENES = CARD_OVERLAYS.filter((n) => !isScene(n))
 const VISUALS_SCENES = CARD_OVERLAYS.filter((n) => isScene(n) && !isTalkScene(n))
 const TALKS_SCENES = CARD_OVERLAYS.filter((n) => isTalkScene(n))
-const SCENE_LABEL: Record<Screen, string> = { program: "LIVE", countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", talk01: "TALKS 01", talk02: "TALKS 02", talk03: "TALKS 03", talk04: "TALKS 04", end: "END (CARD)" }
-const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", talk01: "TALKS 01", talk02: "TALKS 02", talk03: "TALKS 03", talk04: "TALKS 04", end: "END" }
+const SCENE_LABEL: Record<Screen, string> = { program: "LIVE", countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", talk01: "TALKS 01", talk02: "TALKS 02", talk03: "TALKS 03", talk04: "TALKS 04", talk05: "TALKS 05", talk06: "TALKS 06", talk07: "TALKS 07", talk08: "TALKS 08", end: "END (CARD)" }
+const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", talk01: "TALKS 01", talk02: "TALKS 02", talk03: "TALKS 03", talk04: "TALKS 04", talk05: "TALKS 05", talk06: "TALKS 06", talk07: "TALKS 07", talk08: "TALKS 08", end: "END" }
 const LOGO_SHORT = ["1 □", "2 ○", "3 □", "4 ○", "5 W"]
 const BTN = "min-h-12 rounded-[14px] px-2 text-[15px] font-black touch-manipulation disabled:opacity-35"
 const GO = `${BTN} bg-[#12b76a] text-black`
