@@ -509,7 +509,15 @@ html:has([data-desk-root]) body {
 /* Scenes - Talks: the content block sits on the 5% title-safe line (96px of 1920 / 54px of 1080, like the stage guides'
    Safe zone 5%), pill follows on the same line; inner spacing on the 32px unit. QR swaps sides and stays inside the 5% box. */
 .scene-align-left, .scene-align-right { --talk-safe-x: calc(96 * var(--vl-px0, var(--px))); --talk-safe-y: calc(54 * var(--vl-px0, var(--px))); }
-.scene-align-left .scene-center, .scene-align-right .scene-center { padding: var(--talk-safe-y) var(--talk-safe-x); }
+.scene-align-left .scene-center, .scene-align-right .scene-center { padding: calc(150 * var(--px)) var(--talk-safe-x); }
+/* Big sizes: the text block keeps clear of the pill row (top 150 = 54 safe + pill + 32) and the QR column on the far side (178 + 32). */
+.scene-align-left .scene-center > *, .scene-align-right .scene-center > * { max-width: calc(100% - 210 * var(--px)); }
+/* Font size controls: long text wraps; on Talks cards it stays inside the 5% box (title max 3 lines, subline max 2). */
+.scene-title, .scene-sub { overflow-wrap: anywhere; white-space: pre-line; }
+.scene-align-left :is(.scene-title, .scene-sub), .scene-align-right :is(.scene-title, .scene-sub) { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.scene-align-left .scene-title, .scene-align-right .scene-title { -webkit-line-clamp: 3; line-clamp: 3; padding-bottom: 0.1em; }
+.scene-align-left .scene-sub, .scene-align-right .scene-sub { -webkit-line-clamp: 2; line-clamp: 2; }
+.scene-align-left .scene-center, .scene-align-right .scene-center { box-sizing: border-box; justify-content: safe center; }
 .scene-align-left .scene-center { align-items: flex-start; text-align: left; }
 .scene-align-right .scene-center { align-items: flex-end; text-align: right; }
 .scene-align-left .scene-hero, .scene-align-right .scene-hero { max-width: 60%; margin-bottom: calc(64 * var(--px)); }
