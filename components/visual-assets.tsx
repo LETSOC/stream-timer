@@ -145,7 +145,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
       <div className="visuals-layer" style={{ pointerEvents: "none", "--vl-px0": "var(--px)" } as CSSProperties}>
         {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
         <div className={`scene-pill${card.pillPlace === "bottom" ? " scene-pill-bottom" : ""}`} data-testid="scene-pill" data-place={card.pillPlace} data-text-size={card.pillSize} style={card.pillSize === 100 ? undefined : ({ "--px": `calc(var(--vl-px0) * ${card.pillSize / 100})` } as CSSProperties)}><span className="scene-dot" style={{ background: card.dot }} /><span>{card.pill}</span></div>
-        <div className="scene-center">
+        <div className="scene-center" data-text-width={card.textWidth ?? 100} style={card.textWidth && card.textWidth < 100 ? ({ "--scene-text-w": card.textWidth / 100 } as CSSProperties) : undefined}>
           {card.bgMode === "hero" && image ? <img src={image} alt="" draggable={false} className="scene-hero" /> : null}
           <div data-testid="scene-title" className="scene-title" style={card.labelPx && card.labelPx !== 144 ? { fontSize: px(card.labelPx) } : undefined}>{card.label}</div>
           {card.sub ? <div data-testid="scene-sub" className="scene-sub" style={card.subPx && card.subPx !== 26 ? { fontSize: px(card.subPx) } : undefined}>{card.sub}</div> : null}
