@@ -20,7 +20,7 @@ import { COUNTDOWN_PART_LABEL, COUNTDOWN_PARTS, CountdownStage, type CountdownPa
 import { VisualsLayer } from "@/components/visuals-layer"
 import { NameStrap } from "@/components/name-strap"
 import { SceneCardView } from "@/components/visual-assets"
-import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_PILL_PLACES, SCENE_LABEL, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
+import { LOGO_IDS, LOGO_SOURCES, SCENE_BG_MODES, SCENE_IDS, SCENE_PILL_PLACES, SCENE_LABEL, MAIN_SCENE_IDS, TALK_SCENE_IDS, TALK_ALIGNS, isTalkScene, sanitizeSvg, type LogoConfig, type LogoId, type LogoSource, type QrConfig, type SceneCard, type SceneId } from "@/lib/visuals-assets"
 import { DEFAULT_EVENT, type EventConfig } from "@/lib/event"
 import { parseStage, socialLook } from "@/lib/stage"
 import { endCardAt, type TransportAction } from "@/lib/transport"
@@ -370,7 +370,7 @@ export function VisualsBuilder() {
           <LibGroup title="Logos">{LOGO_IDS.map((id) => libItem(id))}</LibGroup>
           <LibGroup title="QR">{libItem("qr")}{libItem("qrLogo")}</LibGroup>
           <LibGroup title="Scenes">
-            {SCENE_IDS.map((id) => (
+            {MAIN_SCENE_IDS.map((id) => (
               <li key={id}>
                 <button type="button" data-testid={`vb-lib-scene-${id}`} onClick={() => setSel({ kind: "scene", id })} className={`flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] ${sel.kind === "scene" && sel.id === id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
                   <span className="size-2 rounded-full" style={{ background: draft.scenes[id].dot }} />
@@ -380,6 +380,18 @@ export function VisualsBuilder() {
               </li>
             ))}
             <li className="px-2.5 py-1 font-mono text-[10px] text-white/40">Break · Hold · Welcome · End: desk › Cards</li>
+          </LibGroup>
+          <LibGroup title="Scenes - Talks">
+            {TALK_SCENE_IDS.map((id) => (
+              <li key={id}>
+                <button type="button" data-testid={`vb-lib-scene-${id}`} onClick={() => setSel({ kind: "scene", id })} className={`flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] ${sel.kind === "scene" && sel.id === id ? "bg-white/10 ring-1 ring-[#D9FF43]" : "hover:bg-white/5"}`}>
+                  <span className="size-2 rounded-full" style={{ background: draft.scenes[id].dot }} />
+                  <span className="flex-1">{SCENE_LABEL[id]}</span>
+                  <span className="font-mono text-[9px] text-white/45">{draft.scenes[id].align === "right" ? "RIGHT" : "LEFT"}</span>
+                  {state?.overlay === id ? <span className="font-mono text-[9px] text-[#FF3B3B]">ON AIR</span> : null}
+                </button>
+              </li>
+            ))}
           </LibGroup>
           <LibGroup title="Pills">{libItem("talk")}{libItem("qa")}{libItem("sponsor")}</LibGroup>
           <LibGroup title="Ticker">{libItem("ticker")}</LibGroup>
@@ -501,7 +513,8 @@ export function VisualsBuilder() {
             const c = draft.scenes[id]
             return (
               <div className="grid gap-3">
-                <h2 className="text-[15px] font-semibold">Scene card · {SCENE_LABEL[id]}</h2>
+                <h2 className="text-[15px] font-semibold">{isTalkScene(id) ? "Talks card" : "Scene card"} · {SCENE_LABEL[id]}</h2>
+                {isTalkScene(id) ? <div className="grid gap-1"><Label>Layout</Label><div className="flex gap-1">{TALK_ALIGNS.map((a) => <button key={a} type="button" data-testid={`vb-scene-align-${a}`} aria-pressed={c.align === a} className={chip(c.align === a)} onClick={() => setScene(id, { align: a })}>{a === "left" ? "Left" : "Right"}</button>)}</div></div> : null}
                 <label className="grid gap-1"><Label>Label</Label><input data-testid="vb-scene-label" className={field} maxLength={120} value={c.label} onChange={(e) => setScene(id, { label: e.target.value })} /></label>
                 <label className="grid gap-1"><Label>Subline</Label><input data-testid="vb-scene-sub" className={field} maxLength={120} value={c.sub} onChange={(e) => setScene(id, { sub: e.target.value })} /></label>
                 <label className="grid gap-1"><Label>Pill text</Label><input data-testid="vb-scene-pill" className={field} maxLength={120} value={c.pill} onChange={(e) => setScene(id, { pill: e.target.value })} /></label>
