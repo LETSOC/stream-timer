@@ -500,7 +500,7 @@ html:has([data-desk-root]) body {
 @keyframes vl-scene-in { from { transform: translateY(calc(24 * var(--px))); opacity: 0; } to { transform: none; opacity: 1; } }
 .scene-hero { height: calc(240 * var(--px)); max-width: 80%; object-fit: contain; margin-bottom: calc(48 * var(--px)); }
 .scene-title { font-size: calc(144 * var(--px)); font-weight: 600; letter-spacing: -0.04em; line-height: 1; }
-.scene-sub { margin-top: calc(24 * var(--px)); font-family: var(--vl-mono); font-size: calc(26 * var(--px)); opacity: 0.6; }
+.scene-sub { margin-top: calc(24 * var(--px)); font-family: var(--vl-mono); font-size: calc(26 * var(--px)); }
 .scene-dots { margin-top: calc(64 * var(--px)); display: flex; gap: calc(16 * var(--px)); }
 .scene-dots i { width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-radius: 9999px; background: rgba(255, 255, 255, 0.3); animation: vl-pulse-dot 1.2s infinite; }
 .scene-dots i:nth-child(2) { animation-delay: 0.2s; }
