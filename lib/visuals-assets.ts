@@ -199,16 +199,26 @@ export function qrRingCell(size: number, step: number): { x: number; y: number }
 // ---------- Scene cards (full screen) ----------
 
 /** Extra full-screen cards from the design. Break, Hold, Welcome and End are the existing cards. */
-export const SCENE_IDS = ["hold05", "hold06", "hold07", "hold08", "hold09", "standby", "showreel"] as const
+export const SCENE_IDS = ["hold05", "hold06", "hold07", "hold08", "hold09", "standby", "showreel", "talk01", "talk02", "talk03", "talk04"] as const
 export type SceneId = (typeof SCENE_IDS)[number]
-export const SCENE_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "STANDBY", showreel: "SHOWREEL" }
+export const SCENE_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "STANDBY", showreel: "SHOWREEL", talk01: "TALKS 01", talk02: "TALKS 02", talk03: "TALKS 03", talk04: "TALKS 04" }
+/** "Scenes - Talks" group (builder, desk, deck): same card options plus a Left / Right layout. */
+export const TALK_SCENE_IDS = ["talk01", "talk02", "talk03", "talk04"] as const satisfies readonly SceneId[]
+export type TalkSceneId = (typeof TALK_SCENE_IDS)[number]
+export const isTalkScene = (v: unknown): v is TalkSceneId => TALK_SCENE_IDS.includes(v as TalkSceneId)
+/** The original Scenes group (HOLD 05–09, Standby, Showreel). */
+export const MAIN_SCENE_IDS = SCENE_IDS.filter((id) => !isTalkScene(id))
+/** Content layout: classic scenes are centred; Talks cards sit Left or Right. */
+export const SCENE_ALIGNS = ["center", "left", "right"] as const
+export type SceneAlign = (typeof SCENE_ALIGNS)[number]
+export const TALK_ALIGNS = ["left", "right"] as const satisfies readonly SceneAlign[]
 export const SCENE_BG_MODES = ["solid", "image", "hero"] as const
 export type SceneBgMode = (typeof SCENE_BG_MODES)[number]
 export const SCENE_PILL_PLACES = ["top", "bottom"] as const
 export type ScenePillPlace = (typeof SCENE_PILL_PLACES)[number]
-export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | ""; /** Pill text size % (TEXT_SCALE_RANGE, 100 = design size), like the Q&A / Sponsored pills. */ pillSize: number; /** Pill on the top or bottom safe guide (grows away from it). */ pillPlace: ScenePillPlace; /** Colour layer over a background video (only when the video is behind the text). */ overlayOn: boolean; overlayColor: string; /** 0–100 % */ overlayOpacity: number }
+export type SceneCard = { label: string; sub: string; dot: string; pill: string; bgMode: SceneBgMode; bg: string; gradient: boolean; image: string; dim: number; showQr: boolean; /** Local mp4 (/uploads/…). Plays with audio. */ video: string; /** When the video ends, cut to Program. */ autoSwitch: boolean; /** Video above the card text / QR. */ videoFront: boolean; /** Pause the /stream audio bed while this card's video is on air. */ pauseBed: boolean; /** Repeat the video. Off = play once, hold the last frame. */ loop: boolean; /** After the video (when autoSwitch): another scene, or Program. Empty = Program. */ next: SceneId | "program" | ""; /** Pill text size % (TEXT_SCALE_RANGE, 100 = design size), like the Q&A / Sponsored pills. */ pillSize: number; /** Pill on the top or bottom safe guide (grows away from it). */ pillPlace: ScenePillPlace; /** Colour layer over a background video (only when the video is behind the text). */ overlayOn: boolean; overlayColor: string; /** 0–100 % */ overlayOpacity: number; /** Text block + media position. Talks cards: left / right (default left). */ align: SceneAlign }
 
-const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", pillSize: 100, pillPlace: "top", overlayOn: false, overlayColor: "#000000", overlayOpacity: 40, ...extra })
+const scene = (label: string, sub: string, dot: string, pill: string, extra: Partial<SceneCard> = {}): SceneCard => ({ label, sub, dot, pill, bgMode: "solid", bg: "#0a0a0a", gradient: false, image: "", dim: 30, showQr: true, video: "", autoSwitch: false, videoFront: false, pauseBed: false, loop: false, next: "", pillSize: 100, pillPlace: "top", overlayOn: false, overlayColor: "#000000", overlayOpacity: 40, align: "center", ...extra })
 export const DEFAULT_SCENES: Record<SceneId, SceneCard> = {
   hold05: scene("Break", "Stretch • Refill • 15 min", "#c6ff00", "HOLD 05 • BREAK"),
   hold06: scene("Starting Soon", "Doors opening • Get comfy", "#ffd400", "HOLD 06 • STARTING SOON"),
@@ -217,6 +227,10 @@ export const DEFAULT_SCENES: Record<SceneId, SceneCard> = {
   hold09: scene("Hold 09", "", "#b388ff", "HOLD 09"),
   standby: scene("Stand By", "We’re getting ready • Stay tuned", "#ffd400", "STANDBY • HOLD"),
   showreel: scene("Showreel", "Hyphen Studio Work • 2026", "#ffffff", "SHOWREEL • PLAY", { gradient: true }),
+  talk01: scene("Talk 01", "Speaker name • Talk title", "#d9ff43", "TALKS 01", { align: "left" }),
+  talk02: scene("Talk 02", "Speaker name • Talk title", "#84caff", "TALKS 02", { align: "left" }),
+  talk03: scene("Talk 03", "Speaker name • Talk title", "#ff6a00", "TALKS 03", { align: "left" }),
+  talk04: scene("Talk 04", "Speaker name • Talk title", "#b388ff", "TALKS 04", { align: "left" }),
 }
 /** Pill text and dot for the existing cards, from the design. */
 export const CLASSIC_PILL = {
@@ -251,6 +265,8 @@ export function parseScene(v: unknown, f: SceneCard): SceneCard {
     overlayOn: typeof r.overlayOn === "boolean" ? r.overlayOn : f.overlayOn,
     overlayColor: hex(r.overlayColor, f.overlayColor),
     overlayOpacity: typeof r.overlayOpacity === "number" && Number.isFinite(r.overlayOpacity) ? Math.round(Math.min(100, Math.max(0, r.overlayOpacity))) : f.overlayOpacity,
+    // Talks cards only take left / right; classic scenes stay centred.
+    align: f.align === "center" ? "center" : r.align === "left" || r.align === "right" ? r.align : f.align,
   }
 }
 export function parseScenes(v: unknown, base: Record<SceneId, SceneCard> = DEFAULT_SCENES): Record<SceneId, SceneCard> {
