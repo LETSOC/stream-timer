@@ -506,6 +506,14 @@ html:has([data-desk-root]) body {
 .scene-dots i:nth-child(2) { animation-delay: 0.2s; }
 .scene-dots i:nth-child(3) { animation-delay: 0.4s; }
 .scene-qr { position: absolute; right: calc(32 * var(--px)); bottom: calc(32 * var(--px)); }
+/* Scenes - Talks: text block + hero sit left or right (inside the 1920 safe margin); pill follows; QR swaps to the far side. */
+.scene-align-left .scene-center, .scene-align-right .scene-center { padding: 0 calc(160 * var(--px)); }
+.scene-align-left .scene-center { align-items: flex-start; text-align: left; }
+.scene-align-right .scene-center { align-items: flex-end; text-align: right; }
+.scene-align-left .scene-hero, .scene-align-right .scene-hero { max-width: 60%; }
+.scene-align-left .scene-pill { left: calc(160 * var(--vl-px0, var(--px))); transform: none; }
+.scene-align-right .scene-pill { left: auto; right: calc(160 * var(--vl-px0, var(--px))); transform: none; }
+.scene-align-right .scene-qr { right: auto; left: calc(32 * var(--px)); }
 @media (prefers-reduced-motion: reduce) {
   .strap-live-dot, .strap-house .strap-dot, .scene-dot, .scene-dots i, .scene-center, .vl-qr-animated.vl-on svg { animation: none !important; }
 }
