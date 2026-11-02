@@ -134,7 +134,7 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
     backgroundPosition: "center",
   }
   return (
-    <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
+    <div data-testid={`scene-${id}`} data-align={card.align ?? "center"} className={`countdown-stage scene-card scene-align-${card.align ?? "center"} relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
       {video && !card.videoFront ? (
         <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} preload="auto" autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
