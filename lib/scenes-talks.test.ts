@@ -55,3 +55,25 @@ test("Talks layout CSS: content, pill and QR on the 5% safe line (96/54 of 1920x
   assert.match(css, /\.scene-align-right \.scene-qr \{ right: auto; left: var\(--talk-safe-x\); bottom: var\(--talk-safe-y\)/)
   assert.doesNotMatch(css, /scene-align-[a-z]+[^}]*160 \*/)
 })
+
+test("scene font sizes: defaults 144/26, clamped, old data keeps defaults", async () => {
+  const { SCENE_LABEL_PX, SCENE_SUB_PX } = await import("@/lib/visuals-assets")
+  for (const id of SCENE_IDS) { assert.equal(DEFAULT_SCENES[id].labelPx, 144); assert.equal(DEFAULT_SCENES[id].subPx, 26) }
+  assert.equal(parseScene({}, DEFAULT_SCENES.hold05).labelPx, 144)
+  assert.equal(parseScene({ labelPx: 999, subPx: 1 }, DEFAULT_SCENES.talk01).labelPx, SCENE_LABEL_PX.max)
+  assert.equal(parseScene({ labelPx: 999, subPx: 1 }, DEFAULT_SCENES.talk01).subPx, SCENE_SUB_PX.min)
+  assert.equal(parseScene({ labelPx: "big", subPx: 40.4 }, DEFAULT_SCENES.talk01).labelPx, 144)
+  assert.equal(parseScene({ subPx: 40.4 }, DEFAULT_SCENES.talk01).subPx, 40)
+})
+
+test("scene label/subline keep manual line breaks, sanitised", async () => {
+  const { sceneLines, sceneOneLine } = await import("@/lib/visuals-assets")
+  const c = parseScene({ label: "Grace  Hopper\r\non compilers\n\n\nand more", sub: "  one  line  " }, DEFAULT_SCENES.talk02)
+  assert.equal(c.label, "Grace Hopper\non compilers\nand more")
+  assert.equal(c.sub, "one line")
+  assert.equal(sceneLines("a\nb\nc\nd\ne\nf"), "a\nb\nc\nd")
+  assert.equal(sceneLines("<b>x</b>\ny"), "<b>x</b>\ny") // stays text; React renders it escaped
+  assert.equal(parseScene({ label: "\n\n" }, DEFAULT_SCENES.hold05).label, DEFAULT_SCENES.hold05.label)
+  assert.equal(sceneOneLine("Grace Hopper\non compilers"), "Grace Hopper on compilers")
+  assert.deepEqual(parseScenes(JSON.parse(JSON.stringify({ talk01: c }))).talk01.label, c.label)
+})
