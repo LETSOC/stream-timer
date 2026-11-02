@@ -77,3 +77,10 @@ test("scene label/subline keep manual line breaks, sanitised", async () => {
   assert.equal(sceneOneLine("Grace Hopper\non compilers"), "Grace Hopper on compilers")
   assert.deepEqual(parseScenes(JSON.parse(JSON.stringify({ talk01: c }))).talk01.label, c.label)
 })
+
+test("scene subline renders at full opacity (same colour as the label)", async () => {
+  const fs = await import("node:fs")
+  const css = fs.readFileSync(new URL("../app/globals.css", import.meta.url), "utf8")
+  const rule = css.match(/\.scene-sub \{[^}]*\}/)?.[0] ?? ""
+  assert.ok(rule && !/opacity|color|filter/.test(rule), rule)
+})
