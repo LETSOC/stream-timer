@@ -500,12 +500,35 @@ html:has([data-desk-root]) body {
 @keyframes vl-scene-in { from { transform: translateY(calc(24 * var(--px))); opacity: 0; } to { transform: none; opacity: 1; } }
 .scene-hero { height: calc(240 * var(--px)); max-width: 80%; object-fit: contain; margin-bottom: calc(48 * var(--px)); }
 .scene-title { font-size: calc(144 * var(--px)); font-weight: 600; letter-spacing: -0.04em; line-height: 1; }
-.scene-sub { margin-top: calc(24 * var(--px)); font-family: var(--vl-mono); font-size: calc(26 * var(--px)); opacity: 0.6; }
+.scene-sub { margin-top: calc(24 * var(--px)); font-family: var(--vl-mono); font-size: calc(26 * var(--px)); }
 .scene-dots { margin-top: calc(64 * var(--px)); display: flex; gap: calc(16 * var(--px)); }
 .scene-dots i { width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-radius: 9999px; background: rgba(255, 255, 255, 0.3); animation: vl-pulse-dot 1.2s infinite; }
 .scene-dots i:nth-child(2) { animation-delay: 0.2s; }
 .scene-dots i:nth-child(3) { animation-delay: 0.4s; }
 .scene-qr { position: absolute; right: calc(32 * var(--px)); bottom: calc(32 * var(--px)); }
+/* Scenes - Talks: the content block sits on the 5% title-safe line (96px of 1920 / 54px of 1080, like the stage guides'
+   Safe zone 5%), pill follows on the same line; inner spacing on the 32px unit. QR swaps sides and stays inside the 5% box. */
+.scene-align-left, .scene-align-right { --talk-safe-x: calc(96 * var(--vl-px0, var(--px))); --talk-safe-y: calc(54 * var(--vl-px0, var(--px))); }
+.scene-align-left .scene-center, .scene-align-right .scene-center { padding: calc(150 * var(--px)) var(--talk-safe-x); }
+/* Big sizes: the text block keeps clear of the pill row (top 150 = 54 safe + pill + 32) and the QR column on the far side (178 + 32). */
+.scene-align-left .scene-center > *, .scene-align-right .scene-center > * { max-width: calc(100% - 210 * var(--px)); }
+/* Font size controls: long text wraps; on Talks cards it stays inside the 5% box (title max 3 lines, subline max 2). */
+.scene-title, .scene-sub { overflow-wrap: anywhere; white-space: pre-line; }
+/* Text box width (builder slider, 30–100%): squeezes the label + subline so they wrap to more lines. 100% = unchanged. */
+.scene-center[style*="--scene-text-w"] > :is(.scene-title, .scene-sub) { max-width: calc(100% * var(--scene-text-w)); }
+.scene-align-left .scene-center[style*="--scene-text-w"] > :is(.scene-title, .scene-sub), .scene-align-right .scene-center[style*="--scene-text-w"] > :is(.scene-title, .scene-sub) { max-width: calc((100% - 210 * var(--px)) * var(--scene-text-w)); }
+.scene-align-left :is(.scene-title, .scene-sub), .scene-align-right :is(.scene-title, .scene-sub) { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.scene-align-left .scene-title, .scene-align-right .scene-title { -webkit-line-clamp: 3; line-clamp: 3; padding-bottom: 0.1em; }
+.scene-align-left .scene-sub, .scene-align-right .scene-sub { -webkit-line-clamp: 2; line-clamp: 2; }
+.scene-align-left .scene-center, .scene-align-right .scene-center { box-sizing: border-box; justify-content: safe center; }
+.scene-align-left .scene-center { align-items: flex-start; text-align: left; }
+.scene-align-right .scene-center { align-items: flex-end; text-align: right; }
+.scene-align-left .scene-hero, .scene-align-right .scene-hero { max-width: 60%; margin-bottom: calc(64 * var(--px)); }
+.scene-align-left .scene-sub, .scene-align-right .scene-sub { margin-top: calc(32 * var(--px)); }
+.scene-align-left .scene-pill { left: var(--talk-safe-x); transform: none; }
+.scene-align-right .scene-pill { left: auto; right: var(--talk-safe-x); transform: none; }
+.scene-align-left .scene-qr { right: var(--talk-safe-x); bottom: var(--talk-safe-y); }
+.scene-align-right .scene-qr { right: auto; left: var(--talk-safe-x); bottom: var(--talk-safe-y); }
 @media (prefers-reduced-motion: reduce) {
   .strap-live-dot, .strap-house .strap-dot, .scene-dot, .scene-dots i, .scene-center, .vl-qr-animated.vl-on svg { animation: none !important; }
 }

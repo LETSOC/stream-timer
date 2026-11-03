@@ -127,14 +127,26 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
     if (!onAir || !card.autoSwitch || !video || !isCapturePage()) return
     void fetch("/api/public/showreel-ended", { method: "POST" }).catch(() => undefined)
   }
+  // "Image on top": the image leaves its usual place and is drawn above the video, text, pill and front video; only the QR sits higher.
+  const imageTop = card.imageFront === true && !!image
   const bg: CSSProperties = {
     backgroundColor: card.bg,
-    backgroundImage: !video && card.bgMode === "image" && image ? `url("${image}")` : !video && card.gradient ? "linear-gradient(135deg,#2a1a1a 0%,#1a1a2a 100%)" : "none",
+    backgroundImage: !video && !imageTop && card.bgMode === "image" && image ? `url("${image}")` : !video && card.gradient ? "linear-gradient(135deg,#2a1a1a 0%,#1a1a2a 100%)" : "none",
     backgroundSize: "cover",
     backgroundPosition: "center",
   }
+  const qrMark = qr ? <div className="scene-qr"><QrMark cfg={qr} variant="animated" show now={now ?? null} testId="scene-qr" /></div> : null
+  // Text block. ghost = a copy in the "image on top" layer that only shows the hero (text hidden), so the hero keeps its exact place.
+  const centre = (ghost: boolean) => (
+    <div className="scene-center" data-text-width={card.textWidth ?? 100} style={card.textWidth && card.textWidth < 100 ? ({ "--scene-text-w": card.textWidth / 100 } as CSSProperties) : undefined}>
+      {card.bgMode === "hero" && image ? <img src={image} alt="" draggable={false} className="scene-hero" data-testid={ghost ? "scene-hero-top" : undefined} style={imageTop && !ghost ? { visibility: "hidden" } : undefined} /> : null}
+      <div data-testid={ghost ? undefined : "scene-title"} className="scene-title" style={{ ...(card.labelPx && card.labelPx !== 144 ? { fontSize: px(card.labelPx) } : {}), ...(ghost ? { visibility: "hidden" as const } : {}) }}>{card.label}</div>
+      {card.sub ? <div data-testid={ghost ? undefined : "scene-sub"} className="scene-sub" style={{ ...(card.subPx && card.subPx !== 26 ? { fontSize: px(card.subPx) } : {}), ...(ghost ? { visibility: "hidden" as const } : {}) }}>{card.sub}</div> : null}
+      <div className="scene-dots" style={ghost ? { visibility: "hidden" } : undefined}><i /><i /><i /></div>
+    </div>
+  )
   return (
-    <div data-testid={`scene-${id}`} className={`countdown-stage scene-card relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
+    <div data-testid={`scene-${id}`} data-align={card.align ?? "center"} className={`countdown-stage scene-card scene-align-${card.align ?? "center"} relative isolate aspect-video w-full overflow-hidden text-white ${className}`} style={bg}>
       {video && !card.videoFront ? (
         <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} preload="auto" autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 h-full w-full object-cover" />
       ) : null}
@@ -143,20 +155,21 @@ export function SceneCardView({ id, card, qr, now, className = "", onAir = false
         <div aria-hidden data-testid={`scene-video-overlay-${id}`} className="absolute inset-0" style={{ pointerEvents: "none", background: card.overlayColor, opacity: card.overlayOpacity / 100 }} />
       ) : null}
       <div className="visuals-layer" style={{ pointerEvents: "none", "--vl-px0": "var(--px)" } as CSSProperties}>
-        {card.bgMode === "image" && image ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
+        {card.bgMode === "image" && image && !imageTop ? <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${card.dim / 100})` }} /> : null}
         <div className={`scene-pill${card.pillPlace === "bottom" ? " scene-pill-bottom" : ""}`} data-testid="scene-pill" data-place={card.pillPlace} data-text-size={card.pillSize} style={card.pillSize === 100 ? undefined : ({ "--px": `calc(var(--vl-px0) * ${card.pillSize / 100})` } as CSSProperties)}><span className="scene-dot" style={{ background: card.dot }} /><span>{card.pill}</span></div>
-        <div className="scene-center">
-          {card.bgMode === "hero" && image ? <img src={image} alt="" draggable={false} className="scene-hero" /> : null}
-          <div data-testid="scene-title" className="scene-title">{card.label}</div>
-          {card.sub ? <div className="scene-sub">{card.sub}</div> : null}
-          <div className="scene-dots"><i /><i /><i /></div>
-        </div>
-        {card.showQr && qr?.url ? (
-          <div className="scene-qr"><QrMark cfg={qr} variant="animated" show now={now ?? null} testId="scene-qr" /></div>
-        ) : null}
+        {centre(false)}
+        {card.showQr && qr?.url && !imageTop ? qrMark : null}
       </div>
       {video && card.videoFront ? (
         <video key={`${id}:${video}`} ref={videoRef} data-testid={`scene-video-${id}`} src={video} preload="auto" autoPlay playsInline loop={card.loop && !card.autoSwitch} muted={!onAir || !card.pauseBed} onEnded={onEnded} className="absolute inset-0 z-50 h-full w-full object-cover" />
+      ) : null}
+      {imageTop ? (
+        <div className="visuals-layer scene-image-top" data-testid={`scene-image-top-${id}`} style={{ pointerEvents: "none", zIndex: 60, "--vl-px0": "var(--px)" } as CSSProperties}>
+          {card.bgMode === "image" ? <img src={image} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" /> : centre(true)}
+        </div>
+      ) : null}
+      {imageTop && card.showQr && qr?.url ? (
+        <div className="visuals-layer" style={{ pointerEvents: "none", zIndex: 70, "--vl-px0": "var(--px)" } as CSSProperties}>{qrMark}</div>
       ) : null}
     </div>
   )

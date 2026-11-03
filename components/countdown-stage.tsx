@@ -240,7 +240,7 @@ function SpeakerGallery({
       </div>
       <div className="absolute left-1/2 w-full -translate-x-1/2 text-center" style={{ top: `${(11 * scale) / 100}cqi` }}>
         <p className="mt-[0.7cqi] font-[Arial,Helvetica,sans-serif] text-[1.8cqi] font-bold text-white">{card.name}</p>
-        <p className="mt-[0.35cqi] font-[Arial,Helvetica,sans-serif] text-[1.05cqi] leading-snug text-white/75">{card.description}</p>
+        <p className="mt-[0.35cqi] font-[Arial,Helvetica,sans-serif] text-[1.05cqi] leading-snug text-white">{card.description}</p>
       </div>
     </div>
   )
@@ -352,7 +352,7 @@ function UnitRow({
             {unit.value}
           </div>
           <div
-            className="font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-white/80 uppercase"
+            className="font-[Arial,Helvetica,sans-serif] tracking-[0.14em] text-white uppercase"
             style={{ marginTop: `${g.labelGap * size}cqi`, fontSize: `${g.label * size * text}cqi`, paddingLeft: "0.14em" }}
           >
             {unit.label}

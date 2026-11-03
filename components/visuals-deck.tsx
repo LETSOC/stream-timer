@@ -6,7 +6,7 @@ import { AppNav } from "@/components/app-nav"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useDeckSocket } from "@/lib/use-deck-socket"
 import { deckScreen, type Screen, type TransportAction } from "@/lib/transport"
-import { isScene, LOGO_IDS, type LogoId } from "@/lib/visuals-assets"
+import { isScene, isTalkScene, LOGO_IDS, type LogoId } from "@/lib/visuals-assets"
 import { CORNER_LABEL, CORNERS, TALK_ENDING_TEXT, formatClock, sanitizeTickerItems, STRAP_HOLD_RANGE, STRAP_MOTION_LABEL, STRAP_MOTIONS, STRAP_STYLE_LABEL, STRAP_STYLES, type Corner, type StrapStyle } from "@/lib/visuals"
 import { deckLights, parseDuration, stepStrap, talkReadout, TALK_PRESETS_MIN } from "@/lib/visuals-deck"
 import { ConfirmButton } from "@/components/confirm-button"
@@ -21,9 +21,10 @@ import { LinkPill } from "@/components/link-pill"
  */
 // Same order and labels as the deck's Screen section (stream-deck.tsx, CARD_OVERLAYS order).
 const DESK_SCENES = CARD_OVERLAYS.filter((n) => !isScene(n))
-const VISUALS_SCENES = CARD_OVERLAYS.filter((n) => isScene(n))
-const SCENE_LABEL: Record<Screen, string> = { program: "LIVE", countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", end: "END (CARD)" }
-const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", end: "END" }
+const VISUALS_SCENES = CARD_OVERLAYS.filter((n) => isScene(n) && !isTalkScene(n))
+const TALKS_SCENES = CARD_OVERLAYS.filter((n) => isTalkScene(n))
+const SCENE_LABEL: Record<Screen, string> = { program: "LIVE", countdown: "Countdown", break: "Break card", hold: "Hold card", welcome: "Welcome card", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby card", showreel: "Showreel", talk01: "TALKS 01", talk02: "TALKS 02", talk03: "TALKS 03", talk04: "TALKS 04", talk05: "TALKS 05", talk06: "TALKS 06", talk07: "TALKS 07", talk08: "TALKS 08", end: "END (CARD)" }
+const SCENE_NOW: Record<Screen, string> = { program: "LIVE", countdown: "COUNTDOWN", hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", welcome: "WELCOME", standby: "STANDBY", break: "BREAK", hold: "HOLD", showreel: "SHOWREEL", talk01: "TALKS 01", talk02: "TALKS 02", talk03: "TALKS 03", talk04: "TALKS 04", talk05: "TALKS 05", talk06: "TALKS 06", talk07: "TALKS 07", talk08: "TALKS 08", end: "END" }
 const LOGO_SHORT = ["1 □", "2 ○", "3 □", "4 ○", "5 W"]
 const BTN = "min-h-12 rounded-[14px] px-2 text-[15px] font-black touch-manipulation disabled:opacity-35"
 const GO = `${BTN} bg-[#12b76a] text-black`
@@ -162,6 +163,8 @@ export function VisualsDeck() {
           {DESK_SCENES.map((t) => sceneBtn(t))}
           <p data-testid="vd-scenes-visuals-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#bdb4fe] uppercase">Visuals</p>
           {VISUALS_SCENES.map((t) => sceneBtn(t))}
+          <p data-testid="vd-scenes-talks-label" className="col-span-2 -mb-1 font-mono text-[11px] font-bold tracking-[0.14em] text-[#bdb4fe] uppercase">Scenes - Talks</p>
+          {TALKS_SCENES.map((t) => sceneBtn(t))}
           {sceneBtn("end", "col-span-2")}
         </div>
         <p className="mt-2 font-mono text-[11px] text-white/50">LIVE = program feed. Cards cover the picture; edit them in the builder › Scenes. END: hold 3s.</p>

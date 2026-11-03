@@ -13,7 +13,7 @@ import { useNow } from "@/lib/use-now"
 import { clampChecker, parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { OverlayCard } from "@/components/overlay-card"
 import { SceneHandoff } from "@/components/scene-handoff"
-import { HANDOFF_MAX_MS, PROGRAM_FADE_TAIL_MS, programCoverNext, programCoverReady, sceneTailNext } from "@/lib/scene-handoff"
+import { HANDOFF_MAX_MS, PROGRAM_FADE_TAIL_MS, deskCoverNext, deskCoverReady, programCoverNext, programCoverReady, sceneTailNext, type DeskCover } from "@/lib/scene-handoff"
 import { isScene } from "@/lib/visuals-assets"
 import { brandUrl } from "@/lib/brand-asset"
 import { preloadImages, stageImageUrls } from "@/lib/image-preload"
@@ -243,14 +243,16 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
   const [seen, setSeen] = useState<{ screen: typeof screen; lastOther: Exclude<typeof screen, "program"> }>({ screen, lastOther: screen === "program" ? "countdown" : screen })
   if (seen.screen !== screen) setSeen({ screen, lastOther: seen.screen !== "program" ? seen.screen : seen.lastOther })
   const shownScreen = screen === "program" && programDisplay === "under" ? (seen.screen !== "program" ? seen.screen : seen.lastOther) : screen
-  const ended = shownScreen === "end"
   // Program ⇄ scene handoff (like scene → scene): program → scene keeps the program picture on top until the
   // scene's video paints (≤ HANDOFF_MAX_MS); scene → program keeps the scene under the feed's fade-in.
   const [prevShown, setPrevShown] = useState(shownScreen)
   const [programCover, setProgramCover] = useState<string | null>(null)
   const [sceneTail, setSceneTail] = useState<string | null>(null)
+  // Desk card → scene: the desk card (same element, not remounted) stays on top until the scene's video paints.
+  const [deskCover, setDeskCover] = useState<DeskCover | null>(null)
   if (prevShown !== shownScreen) {
     setPrevShown(shownScreen)
+    setDeskCover(deskCoverNext({ cover: deskCover, from: prevShown, to: shownScreen, fromIsScene: isScene(prevShown), toIsScene: isScene(shownScreen) }))
     setProgramCover(programCoverNext({ cover: programCover, from: prevShown, to: shownScreen, toIsScene: isScene(shownScreen), programVideo: displays[air.source] === "video" }))
     setSceneTail(sceneTailNext({ from: prevShown, to: shownScreen, fromIsScene: isScene(prevShown) }))
   }
@@ -265,7 +267,18 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
     const id = window.setTimeout(() => setSceneTail(null), PROGRAM_FADE_TAIL_MS)
     return () => window.clearTimeout(id)
   }, [sceneTail])
-  const onSceneReady = useCallback((id: string) => setProgramCover((c) => programCoverReady(c, id)), [])
+  useEffect(() => {
+    if (deskCover === null) return
+    playerDiag("·", `${deskCover.from} → ${deskCover.scene}: desk card held on top until the scene's video paints`)
+    const id = window.setTimeout(() => setDeskCover(null), HANDOFF_MAX_MS)
+    return () => window.clearTimeout(id)
+  }, [deskCover])
+  const onSceneReady = useCallback((id: string) => {
+    setProgramCover((c) => programCoverReady(c, id))
+    setDeskCover((c) => deskCoverReady(c, id))
+  }, [])
+  // The desk card slot: the card on screen, or the one still covering an incoming scene.
+  const deskScreen = shownScreen === "program" || isScene(shownScreen) ? (deskCover !== null && isScene(shownScreen) ? deskCover.from : null) : shownScreen
   // Browser capture (re)start: its first frame is taken once <html data-stream-ready> is set. With
   // Program up, wait for the program picture (≤ 8s) so the output never opens on the countdown underneath.
   const [capturePage] = useState(() => isCapturePage())
@@ -340,24 +353,23 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
       <StreamAudioOverlay />
       {stage.streamBedAudio ? <StreamBed plan={bed} urlMute={params.get("mute") === "1"} screenIsProgram={shownScreen === "program"} programAudio={stage.streamProgramAudio} hold={isScene(shownScreen) && Boolean(stage.scenes[shownScreen]?.video) && stage.scenes[shownScreen]?.pauseBed === true} viewKey={viewKey} /> : null}
       {params.get("guides") === "1" ? <StageGuides className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null}
-      {shownScreen === "program" ? (
-        // Same slot as the scene below: the scene element is kept (not remounted) under the program fade-in.
-        sceneTail !== null && isScene(sceneTail) && stage.scenes[sceneTail] ? <SceneHandoff id={sceneTail} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} className="z-[1] h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null
-      ) : shownScreen === "break" || shownScreen === "hold" || shownScreen === "welcome" ? (
+      {/* Desk card slot (hold, break, welcome, end, countdown). On a desk card → scene cut the same element
+          stays mounted and is lifted on top until the scene's first video frame (no black, no remount). */}
+      {deskScreen === null ? null : (
+      <div data-testid="desk-card-slot" data-covering={deskScreen !== shownScreen ? deskScreen : ""} className={deskScreen !== shownScreen ? "absolute top-1/2 left-1/2 z-20 flex h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)] -translate-x-1/2 -translate-y-1/2 items-center justify-center" : "contents"}>
+      {deskScreen === "break" || deskScreen === "hold" || deskScreen === "welcome" ? (
         <OverlayCard
-          kind={shownScreen}
-          title={shownScreen === "break" ? stage.breakTitle : shownScreen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
-          message={shownScreen === "break" ? stage.breakMessage : shownScreen === "welcome" ? stage.welcomeMessage : stage.holdMessage}
-          image={shownScreen === "break" ? stage.breakImage : shownScreen === "welcome" ? stage.welcomeImage : stage.holdImage}
-          fit={shownScreen === "break" ? stage.breakFit : shownScreen === "welcome" ? stage.welcomeFit : stage.holdFit}
-          bg={shownScreen === "break" ? stage.breakBg : shownScreen === "welcome" ? stage.welcomeBg : stage.holdBg}
+          kind={deskScreen}
+          title={deskScreen === "break" ? stage.breakTitle : deskScreen === "welcome" ? stage.welcomeTitle : stage.holdTitle}
+          message={deskScreen === "break" ? stage.breakMessage : deskScreen === "welcome" ? stage.welcomeMessage : stage.holdMessage}
+          image={deskScreen === "break" ? stage.breakImage : deskScreen === "welcome" ? stage.welcomeImage : stage.holdImage}
+          fit={deskScreen === "break" ? stage.breakFit : deskScreen === "welcome" ? stage.welcomeFit : stage.holdFit}
+          bg={deskScreen === "break" ? stage.breakBg : deskScreen === "welcome" ? stage.welcomeBg : stage.holdBg}
           since={stage.overlayAt}
           clock={now}
           className="relative z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
         />
-      ) : isScene(shownScreen) ? (
-        <SceneHandoff id={shownScreen} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} onReady={onSceneReady} className="z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
-      ) : ended ? (
+      ) : deskScreen === "end" ? (
         <EndStreamPage bg={stage.endBg} className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" card={{
           title: stage.endTitle,
           subtitle: stage.endSubtitle,
@@ -399,6 +411,15 @@ function StreamView({ initial }: { initial: StreamInitial | null }) {
         className="h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]"
       />
       )}
+      </div>
+      )}
+      {/* Scene slot: the scene, or (on program) the scene kept under the program fade-in; same element either way. */}
+      {shownScreen === "program" ? (
+        // Same slot as the scene below: the scene element is kept (not remounted) under the program fade-in.
+        sceneTail !== null && isScene(sceneTail) && stage.scenes[sceneTail] ? <SceneHandoff id={sceneTail} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} className="z-[1] h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" /> : null
+      ) : isScene(shownScreen) ? (
+        <SceneHandoff id={shownScreen} scenes={stage.scenes} qr={stage.qr} now={now ? now.getTime() : null} onReady={onSceneReady} className="z-10 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)]" />
+      ) : null}
       {/* Visuals layer (deck): straps, talk-ends pill, ticker, Q&A, Sponsored. Over countdown and program, hidden by full-screen cards. */}
       <div className="pointer-events-none absolute top-1/2 left-1/2 z-30 h-[min(100dvh,56.25vw)] w-[min(100vw,177.78dvh)] -translate-x-1/2 -translate-y-1/2">
         <VisualsLayer stage={stage} event={event} screen={shownScreen} now={now ? now.getTime() : null}
