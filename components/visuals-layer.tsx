@@ -22,12 +22,13 @@ import { cornerOrigin, layoutScreen, partCorner, placeOffsets, type LayoutPart }
 export type LayerScreen = "countdown" | "program" | "break" | "hold" | "welcome" | SceneId | "end" | "overlay"
 
 /** Pure: which parts of the layer show on a screen. OBS overlay page ("overlay") shows everything that is on. */
-export function layerParts(stage: Pick<StageOptions, "streamVisuals" | "talkVisible" | "tickerVisible" | "tickerItems" | "qaVisible" | "sponsorVisible" | "socialsOverlay"> & Partial<Pick<StageOptions, "logosOn" | "qrOn" | "qrLogoOn">>, screen: LayerScreen) {
+export function layerParts(stage: Pick<StageOptions, "streamVisuals" | "talkVisible" | "tickerVisible" | "tickerItems" | "qaVisible" | "sponsorVisible" | "socialsOverlay"> & Partial<Pick<StageOptions, "logosOn" | "qrOn" | "qrLogoOn" | "strapsObsOnly">>, screen: LayerScreen) {
   // Every full-screen card (break / hold / welcome / end and the scene cards) hides the layer.
   const full = screen !== "countdown" && screen !== "program" && screen !== "overlay"
   const on = screen === "overlay" || (!full && stage.streamVisuals)
   return {
-    strap: on,
+    // Straps to OBS only: off on /stream (the ffmpeg capture), still on the OBS overlay pages.
+    strap: on && !(stage.strapsObsOnly === true && screen !== "overlay"),
     talk: on && stage.talkVisible,
     ticker: on && stage.tickerVisible && stage.tickerItems.length > 0,
     qa: on && stage.qaVisible,
@@ -71,7 +72,7 @@ function Pill({ show, kind, place, children, testId, scale = 100 }: { show: bool
   )
 }
 
-export function VisualsLayer({ stage, event, screen, now, eventEndMs, className = "" }: {
+export function VisualsLayer({ stage, event, screen, now, eventEndMs, className = "", only, layoutAs }: {
   stage: StageOptions
   event: EventConfig
   screen: LayerScreen
@@ -80,6 +81,10 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
   /** event end instant (Festival mode), null if unknown */
   eventEndMs: number | null
   className?: string
+  /** "strap": draw only the name strap (OBS /overlay/visuals/straps), same place and motion as on /stream. */
+  only?: "strap"
+  /** Place parts as on this screen (layout) while showing as `screen`. Straps page: follows /stream's countdown vs program layout. */
+  layoutAs?: LayerScreen
 }) {
   const parts = layerParts(stage, screen)
   const ts = stage.textScale ?? DEFAULT_TEXT_SCALE
@@ -88,13 +93,14 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
   const preset = stage.straps.find((p) => p.id === stage.strapId) ?? null
   const strapOn = Boolean(parts.strap && preset && now !== null && strapVisible(stage.strapMode, stage.strapAt, stage.strapHoldSec, now))
   const talk = now === null ? { ms: null, over: false } : talkPillValue(stage.talkMode, parseTalkTimer(stage.talkEndsAt, stage.talkPausedMs), eventEndMs, now)
-  const at = (part: LayoutPart) => placeStyle(stage, screen, part, lift)
+  const at = (part: LayoutPart) => placeStyle(stage, layoutAs ?? screen, part, lift)
   const strapAt = at("strap")
   const socialsAt = at("socials")
   const paused = stage.talkMode === "session" && stage.talkPausedMs !== null
   const ending = stage.talkMode === "session" && talk.over
   return (
     <div aria-hidden data-testid="visuals-layer" data-screen={screen} className={`visuals-layer pointer-events-none ${className}`} style={{ "--vl-px0": "var(--px)" } as CSSProperties}>
+      {only ? null : (<>
       <div data-testid="vl-ticker" data-on={parts.ticker ? "1" : "0"} data-text-size={ts.ticker} className={`vl-ticker ${parts.ticker ? "vl-on" : "vl-off"}`} style={textScaleVars(ts.ticker)}>
         <div className="vl-ticker-track">
           {/* two copies back to back: the marquee moves by one copy (-50%) and loops seamlessly */}
@@ -142,6 +148,7 @@ export function VisualsLayer({ stage, event, screen, now, eventEndMs, className 
       </Pill>
       <Pill show={parts.sponsor} kind="sponsor" testId="vl-sponsor" place={at("sponsor")} scale={ts.sponsor}>{stage.sponsorText}</Pill>
       <Pill show={parts.qa} kind="qa" testId="vl-qa" place={at("qa")} scale={ts.qa}>{stage.qaText}</Pill>
+      </>)}
       {preset ? (
         <div className="vl-anchor" data-part="strap" style={strapAt.style} data-corner={strapAt.corner}>
           <NameStrap key={preset.id} preset={preset} visible={strapOn} look={{ style: stage.strapStyle || preset.style, motion: stage.strapMotion, accent: stage.strapAccent, text: stage.strapText, design: (stage.strapDesigns ?? DEFAULT_STRAP_DESIGNS)[stage.strapStyle || preset.style] }} />

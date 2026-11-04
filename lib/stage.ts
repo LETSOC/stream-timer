@@ -66,6 +66,8 @@ export type StageOptions = {
   socialsCorner: Corner
   /** Visuals layer on /stream (captured: reaches YouTube and Vertical). Off = OBS /overlay/* pages only. */
   streamVisuals: boolean
+  /** Straps to OBS only: the name strap is hidden on /stream (so not in the ffmpeg capture) but still shows on the OBS pages. Live (deck). */
+  strapsObsOnly: boolean
   /** Talk-ends pill (top-left): Session = manual timer from the deck, Festival = to the event end. */
   talkVisible: boolean
   talkMode: TalkMode
@@ -238,6 +240,7 @@ export const DEFAULT_STAGE: StageOptions = {
   overlayInset: 0,
   visualsLayout: DEFAULT_LAYOUT,
   streamVisuals: true,
+  strapsObsOnly: false,
   talkVisible: false,
   talkMode: "session",
   talkEndsAt: null,
@@ -389,6 +392,7 @@ export function parseStage(raw: unknown, base: StageOptions = DEFAULT_STAGE): St
     overlayInset: pick("overlayInset", (v, f) => clampInset(v, f)),
     visualsLayout: pick("visualsLayout", (v) => parseVisualsLayout(v)),
     streamVisuals: pick("streamVisuals", (v) => v !== false),
+    strapsObsOnly: pick("strapsObsOnly", (v) => v === true),
     talkVisible: pick("talkVisible", (v) => v === true),
     talkMode: pick("talkMode", (v) => parseTalkMode(v)),
     ...(() => {
@@ -529,4 +533,4 @@ export function socialLook(stage: StageOptions) {
 }
 
 /** Stage fields the deck owns live (Visuals). A desk saving its whole stage must not write stale copies back. */
-export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "logosOn", "qrOn", "qrLogoOn"] as const satisfies readonly (keyof StageOptions)[]
+export const LIVE_VISUAL_KEYS = ["strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "streamTimecode", "streamTimecodeFps", "streamVisuals", "strapsObsOnly", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "logosOn", "qrOn", "qrLogoOn"] as const satisfies readonly (keyof StageOptions)[]

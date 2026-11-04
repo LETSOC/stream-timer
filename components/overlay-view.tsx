@@ -6,7 +6,7 @@ import { NameStrap } from "@/components/name-strap"
 import { SocialCircles } from "@/components/social-circles"
 import { FacebookIcon, InstagramIcon, LinkedInIcon, XIcon, YouTubeIcon } from "@/components/countdown-stage"
 import { asEventConfig, DEFAULT_EVENT, type EventConfig } from "@/lib/event"
-import { parseStage, socialLook, type StageOptions } from "@/lib/stage"
+import { parseStage, socialLook, stageScreen, type StageOptions } from "@/lib/stage"
 import { StageGuides } from "@/components/stage-guides"
 import { clampInset, cornerOffsets, parseCorner, strapVisible, type Corner } from "@/lib/visuals"
 import { useNow } from "@/lib/use-now"
@@ -141,4 +141,20 @@ function VisualsInner({ initial }: { initial: OverlayInitial }) {
 }
 export function VisualsOverlay({ initial }: { initial: OverlayInitial }) {
   return <Suspense fallback={null}><VisualsInner initial={initial} /></Suspense>
+}
+
+/** OBS /overlay/visuals/straps: only the name strap, placed and animated exactly as on /stream (program layout). */
+function StrapsOnlyInner({ initial }: { initial: OverlayInitial }) {
+  const { event, stage, blocked, checker, guides } = useOverlayState(initial)
+  const now = useNow()
+  // Same corner/layout as /stream: the countdown screen has its own layout; everything else uses program.
+  const layoutAs = stageScreen(stage, false) === "countdown" ? "countdown" : "program"
+  return (
+    <Frame checker={checker} guides={guides} blocked={blocked}>
+      <VisualsLayer stage={stage} event={event} screen="overlay" only="strap" layoutAs={layoutAs} now={now ? now.getTime() : null} eventEndMs={null} />
+    </Frame>
+  )
+}
+export function StrapsOnlyOverlay({ initial }: { initial: OverlayInitial }) {
+  return <Suspense fallback={null}><StrapsOnlyInner initial={initial} /></Suspense>
 }
