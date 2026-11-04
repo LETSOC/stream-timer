@@ -53,7 +53,7 @@ export type TransportAction =
   /** Visuals layer: talk-ends pill (timer start/add/pause/resume/stop, Session/Festival), ticker, Q&A, Sponsored, and the /stream master switch. Applied at once. */
   | { type: "visual"; target: VisualTarget; show?: boolean; op?: TalkOp; sec?: number; mode?: TalkMode; tickerType?: TickerType; items?: string[]; text?: string; prefix?: string; talkPrefix?: string; festivalPrefix?: string; logo?: LogoId; /** ticker: which list `items` replaces (default: the type now showing) */ list?: TickerType }
 
-export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream", "clear", "logo", "qr", "qrLogo"] as const
+export const VISUAL_TARGETS = ["talk", "ticker", "qa", "sponsor", "stream", "clear", "logo", "qr", "qrLogo", "strapsObs"] as const
 export type VisualTarget = (typeof VISUAL_TARGETS)[number]
 export const TALK_OPS = ["start", "add", "pause", "resume", "stop"] as const
 export type TalkOp = (typeof TALK_OPS)[number]
@@ -412,6 +412,7 @@ export type DeckState = {
     socialsOverlay: boolean
     socialsCorner: Corner
     streamVisuals?: boolean
+    strapsObsOnly?: boolean
     talkVisible?: boolean
     talkMode?: TalkMode
     talkEndsAt?: number | null
@@ -475,6 +476,7 @@ export function deckState(
       socialsOverlay: state.stage.socialsOverlay === true,
       socialsCorner: state.stage.socialsCorner ?? "bottom-left",
       streamVisuals: state.stage.streamVisuals !== false,
+      strapsObsOnly: state.stage.strapsObsOnly === true,
       talkVisible: state.stage.talkVisible === true,
       talkMode: state.stage.talkMode ?? "session",
       talkEndsAt: state.stage.talkEndsAt ?? null,
@@ -514,6 +516,9 @@ export function visualPatch(stage: StageOptions, action: Extract<TransportAction
   switch (action.target) {
     case "stream":
       return show === undefined ? {} : { streamVisuals: show }
+    case "strapsObs":
+      // Straps to OBS only: routing, not an overlay, so "clear" leaves it alone.
+      return show === undefined ? {} : { strapsObsOnly: show }
     case "clear":
       // Clear all overlays: everything off the picture (strap OUT, pills, ticker, socials). Timer keeps running; texts kept.
       return { strapMode: "out", talkVisible: false, tickerVisible: false, qaVisible: false, sponsorVisible: false, socialsOverlay: false, logosOn: [], qrOn: false, qrLogoOn: false }
