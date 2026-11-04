@@ -1294,7 +1294,7 @@ export function OperatorConsole() {
 
           <Panel id="visuals" title="Visuals" pill={`${visuals.straps.length} strap${visuals.straps.length === 1 ? "" : "s"}`} defaultOpen={false} dirty={drafts.isDirty("visuals")}>
             {draftBar("visuals")}
-            <VisualsDeskSection straps={visuals.straps} accent={visuals.strapAccent} text={visuals.strapText} viewKey={operator.viewKey} onStraps={(v) => setVisual("straps", v)} onAccent={(v) => setVisual("strapAccent", v)} onText={(v) => setVisual("strapText", v)} />
+            <VisualsDeskSection straps={visuals.straps} accent={visuals.strapAccent} text={visuals.strapText} viewKey={operator.viewKey} strapsObsOnly={visuals.strapsObsOnly} onStraps={(v) => setVisual("straps", v)} onAccent={(v) => setVisual("strapAccent", v)} onText={(v) => setVisual("strapText", v)} />
           </Panel>
 
           <Panel id="av-diagnostics" title="A/V diagnostics" pill={visuals.streamTimecode ? "STREAM TC on" : "read-only"} defaultOpen={false}>
@@ -2771,7 +2771,7 @@ function AudioCardInner({ routing, onRouting }: { routing: { program: boolean; b
 /** The original desk cards (blue on the desk, Transport › Desk). */
 const DESK_CARDS = [["welcome", "Welcome"], ["break", "Break"], ["hold", "Hold"]] as const
 const SCENE_DESK_LABEL: Record<SceneId, string> = { hold05: "HOLD 05", hold06: "HOLD 06", hold07: "HOLD 07", hold08: "HOLD 08", hold09: "HOLD 09", standby: "Standby", showreel: "Showreel", talk01: "Talks 01", talk02: "Talks 02", talk03: "Talks 03", talk04: "Talks 04", talk05: "Talks 05", talk06: "Talks 06", talk07: "Talks 07", talk08: "Talks 08" }
-const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "strapDesigns", "textScale", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes", "slateLook", "countdownBg", "endBg", "breakBg", "holdBg", "standbyBg", "welcomeBg"] as const
+const VISUAL_KEYS = ["socialSpotlight", "socialDwellMs", "socialCooldownMs", "socialStrokePx", "socialShowHandle", "countdownStrokePx", "countdownStrokeColor", "straps", "strapAccent", "strapText", "strapId", "strapMode", "strapAt", "strapHoldSec", "strapMotion", "strapStyle", "strapCorner", "socialsOverlay", "socialsCorner", "overlayInset", "visualsLayout", "streamTimecode", "streamTimecodeFps", "streamVisuals", "strapsObsOnly", "talkVisible", "talkMode", "talkEndsAt", "talkPausedMs", "talkPrefix", "festivalPrefix", "tickerVisible", "tickerType", "tickerItems", "tickerPlannerItems", "tickerSocialItems", "qaVisible", "qaText", "sponsorVisible", "sponsorText", "strapAccentCircle", "strapArrow", "strapDesigns", "textScale", "logos", "logosOn", "qr", "qrOn", "qrLogoOn", "scenes", "slateLook", "countdownBg", "endBg", "breakBg", "holdBg", "standbyBg", "welcomeBg"] as const
 type Visuals = Pick<StageOptions, (typeof VISUAL_KEYS)[number]>
 function pickVisuals(stage: StageOptions): Visuals {
   return Object.fromEntries(VISUAL_KEYS.map((k) => [k, stage[k]])) as Visuals
