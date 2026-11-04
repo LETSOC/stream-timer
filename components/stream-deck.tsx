@@ -296,6 +296,10 @@ export function StreamDeck() {
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Outputs</h2>
       <div className="grid grid-cols-2 gap-2"><VerticalDeckTile /></div>
+      <label data-testid="deck-straps-obs-only" className={`mt-2 flex min-h-12 items-center gap-3 rounded-2xl border px-3 py-2 font-mono text-[13px] ${state?.visuals?.strapsObsOnly ? "border-[#D9FF43] bg-[#D9FF43]/10 text-[#D9FF43]" : "border-white/20 text-white/80"}`}>
+        <input type="checkbox" className="h-5 w-5 accent-[#D9FF43]" disabled={!state || busy !== null} checked={state?.visuals?.strapsObsOnly === true} onChange={(e) => void act("straps-obs", { type: "visual", target: "strapsObs", show: e.target.checked })} />
+        <span><b>Straps to OBS only</b><span className="block text-[11px] text-white/60">{state?.visuals?.strapsObsOnly ? "On: straps hidden on /stream (ffmpeg); OBS strap pages only." : "Off: straps show on /stream as usual."}</span></span>
+      </label>
 
       <h2 className="mt-4 mb-2 font-mono text-[12px] tracking-[0.12em] text-white/60 uppercase">Desk mode</h2>
       <div role="radiogroup" aria-label="Desk mode" className="grid grid-cols-2 gap-2">
