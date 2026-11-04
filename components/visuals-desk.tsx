@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 import { copyOrShow } from "@/components/copy-fallback"
+import { fetchT } from "@/lib/fetch-timeout"
 import { OverlayPreview } from "@/components/visuals-deck"
 import { newStrapId, PLATFORM_LABEL, PLATFORMS, STRAP_MAX, STRAP_STYLE_LABEL, STRAP_STYLES, type Platform, type StrapPreset, type StrapStyle } from "@/lib/visuals"
 
@@ -11,6 +12,8 @@ type Props = {
   accent: string
   text: string
   viewKey: string
+  /** Live: straps hidden on /stream (ffmpeg), OBS pages only. */
+  strapsObsOnly?: boolean
   onStraps: (next: StrapPreset[]) => void
   onAccent: (value: string) => void
   onText: (value: string) => void
@@ -19,8 +22,18 @@ type Props = {
 const input = "h-9 w-full rounded-xl border border-black/10 bg-[#F6F6F3] px-3 text-sm"
 
 /** Desk › Visuals: strap preset gallery (draft → Save), colours, and the OBS source URLs. */
-export function VisualsDeskSection({ straps, accent, text, viewKey, onStraps, onAccent, onText }: Props) {
+export function VisualsDeskSection({ straps, accent, text, viewKey, strapsObsOnly = false, onStraps, onAccent, onText }: Props) {
   const [copied, setCopied] = useState<string | null>(null)
+  // Optimistic until the next sync brings the saved value back (like the STREAM timecode toggle).
+  const [obsOnly, setObsOnly] = useState<{ want: boolean; was: boolean } | null>(null)
+  const [obsMsg, setObsMsg] = useState("")
+  const obsOn = obsOnly && obsOnly.was === strapsObsOnly ? obsOnly.want : strapsObsOnly
+  async function setStrapsObs(show: boolean) {
+    setObsMsg("")
+    setObsOnly({ want: show, was: strapsObsOnly })
+    const r = await fetchT("/api/deck/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: { type: "visual", target: "strapsObs", show }, from: "desk" }) }).catch(() => null)
+    if (!r?.ok) { setObsOnly(null); setObsMsg("Could not change Straps to OBS only.") }
+  }
   const patch = (i: number, p: Partial<StrapPreset>) => onStraps(straps.map((s, j) => (j === i ? { ...s, ...p } : s)))
   const move = (i: number, d: -1 | 1) => {
     const j = i + d
@@ -40,7 +53,7 @@ export function VisualsDeskSection({ straps, accent, text, viewKey, onStraps, on
       <div className="grid gap-2 rounded-xl border border-black/15 p-3" data-testid="visuals-obs-urls">
         <p className="font-mono text-[12px] tracking-[0.12em] text-black/60 uppercase">OBS browser sources</p>
         <p className="font-mono text-[12px] text-black/70">Add each as its own Browser Source: Width 1920, Height 1080, no custom CSS needed (the page is transparent). Tick “Shutdown source when not visible” off so motion timing stays right.</p>
-        {[{ id: "strap", label: "Name straps", path: "/overlay/strap" }, { id: "socials", label: "Social circles", path: "/overlay/socials" }].map((o) => (
+        {[{ id: "strap", label: "Name straps", path: "/overlay/strap" }, { id: "straps-stream", label: "Straps (as /stream)", path: "/overlay/visuals/straps" }, { id: "socials", label: "Social circles", path: "/overlay/socials" }].map((o) => (
           <div key={o.id} className="flex flex-wrap items-center gap-2 font-mono text-[12px]">
             <span className="w-28 shrink-0 font-bold">{o.label}</span>
             <code className="min-w-0 flex-1 truncate rounded-lg bg-[#F6F6F3] px-2 py-1" data-testid={`visuals-url-${o.id}`}>{o.path}{viewKey ? "?k=•••" : ""}</code>
@@ -50,6 +63,11 @@ export function VisualsDeskSection({ straps, accent, text, viewKey, onStraps, on
         ))}
         <p className="font-mono text-[12px] text-black/70">Go IN / OUT / LOOP and show or hide the socials from the phone <Link href="/visuals" data-testid="desk-visuals-link" className="underline">Visuals deck</Link>. Build speakers and layout in the <Link href="/visuals/builder" data-testid="desk-builder-link" className="underline">Visuals builder</Link>.</p>
       </div>
+
+      <label className="flex items-start gap-2 rounded-xl border border-black/15 p-3 font-mono text-[12px] text-black/80" data-testid="desk-straps-obs-only">
+        <input type="checkbox" className="mt-0.5 h-4 w-4" checked={obsOn} onChange={(e) => void setStrapsObs(e.target.checked)} />
+        <span><b className="uppercase">Straps to OBS only</b> · applies at once. On: name straps are hidden on /stream (not in the ffmpeg stream) and only show on the OBS strap pages. Off (default): straps show on /stream as usual.{obsMsg ? <span className="block text-[#b42318]">{obsMsg}</span> : null}</span>
+      </label>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="grid gap-1 font-mono text-[12px] text-black/70 uppercase">Accent colour<input type="color" data-testid="strap-accent" className="h-9 w-full" value={accent} onChange={(e) => onAccent(e.target.value)} /></label>
